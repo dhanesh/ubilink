@@ -1,0 +1,42 @@
+# ── Rust / Tauri core ──
+/src-tauri/target/
+**/target/
+*.rs.bk
+*.pdb
+
+# ── Node / web frontend ──
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ── Tauri build output ──
+/src-tauri/gen/
+/src-tauri/WixTools/
+
+# ── Editors / OS ──
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ── Logs / env ──
+*.log
+.env
+.env.*
+!.env.example
+
+# ── Local link-graph data (never commit a user's graph) ──
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/local-data/
+
+# ── Manifold working state is KEPT in git (it is the spec). ──
+# .manifold/ is intentionally NOT ignored.
+
+# ── Context cache (local only) ──
+/.context/
