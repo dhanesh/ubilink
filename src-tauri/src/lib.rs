@@ -38,6 +38,7 @@ pub mod graph;
 pub mod integrations;
 pub mod resource;
 pub mod sandbox;
+pub mod service;
 
 pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter};
 pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
@@ -47,3 +48,4 @@ pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Su
 pub use graph::LinkGraph;
 pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};
 pub use sandbox::{Session, EscapeAttempt};
+pub use service::{HookyService, ServiceError};

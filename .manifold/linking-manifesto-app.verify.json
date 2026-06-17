@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T10:30:00Z",
+    "timestamp": "2026-06-17T19:45:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -14,7 +14,7 @@
         "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "API half done+bounded (api.rs) + file capture (adapter.rs); UI panel + live-app capture are ENV-blocked (need GUI + live macOS apps/TCC)",
+        "gap": "API (api.rs) + file capture (adapter.rs) now COMPOSED end-to-end via service.rs (capture->validate->hook->backlinks), tested headless; UI panel + live-app capture remain ENV-blocked (need GUI + live macOS apps/TCC)",
         "residual": "residual ENV-blocked (GUI panel + live-app capture)"
       },
       {
@@ -149,7 +149,7 @@
         "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Backlinks data layer built+tested (both ends); UI surfacing deferred"
+        "gap": "Backlinks both-ends proven through the integrated HookyService flow (service.rs end_to_end_capture_hook_and_backlinks); UI surfacing ENV-blocked"
       },
       {
         "constraint": "S1",
@@ -372,8 +372,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 21,
-      "tests_passed": 21,
+      "tests_run": 43,
+      "tests_passed": 43,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -383,7 +383,7 @@
         "E8"
       ]
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI)"
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked)."
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
@@ -391,7 +391,7 @@
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
     "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
-    "src-tauri/src/lib.rs": "1988863779e127541d52d71c901fcdfb0cd9d8453602cabbe069550fd16f78af",
+    "src-tauri/src/lib.rs": "fb4f812910ac9caefe5a46c9c6f4e79e6b67ae921facfcfe43ec998a637f854d",
     "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
     "plugins/examples/malicious/plugin.mjs": "9f8eb526ffad1a717d5170ab298adb3400cb70dc85a9c7dc6f23cfa73e38220c",
@@ -404,7 +404,8 @@
     "README.md": "b8fc780b054a7497d83a52aa886de9d179fff0ace915087b2786b450ec9bfc3a",
     "LICENSE": "a27f7c7fdd2bc3cf1aa43fe37349be78bd9866ba5ee4dee07050ba1ec01a507d",
     "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
-    "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd"
+    "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd",
+    "src-tauri/src/service.rs": "5abfd5ade47f49c40c7e16933969c88a7641195072155d68ba92fb64554e62ee"
   },
-  "hashes_updated_at": "2026-06-17T10:02:00.030Z"
+  "hashes_updated_at": "2026-06-17T19:45:00.000Z"
 }

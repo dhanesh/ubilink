@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 5,
+  "round": 6,
   "max_rounds": 6,
   "stall_count": 0,
   "max_stalls": 2,
@@ -72,7 +72,16 @@
       "satisfied_after": 8,
       "tests": 39,
       "progress": true
+    },
+    {
+      "round": 6,
+      "cluster": "m6-integrate: HookyService facade (capture->validate->hook->backlinks)",
+      "constraints_closed": [],
+      "satisfied_after": 8,
+      "tests": 43,
+      "progress": "integration",
+      "note": "Wired all rounds into the core user flow + 4 e2e tests. No constraint flip: B1/U5/S4 residuals (GUI panel, live-app capture, TCC) remain ENV-blocked, not faked."
     }
   ],
-  "terminal": "HEADLESS_CONVERGED (halted: remaining gaps ENV-blocked)"
+  "terminal": "HEADLESS_CONVERGED + INTEGRATED (m6 facade wired; remaining gaps ENV-blocked)"
 }

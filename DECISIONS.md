@@ -75,3 +75,22 @@ unbounded line cannot exhaust memory. Proven by
 `tests/sandbox.rs::hung_plugin_is_killed` (a never-returning plugin is killed in
 <1s instead of blocking forever). NOTE: this is plugin-IPC DoS hardening; S5's
 *own* scope (the public local link API size/rate bounds) is a separate later task.
+
+## D5 — Integration facade: `HookyService` ties every round into the user flow (R6 / m6-integrate)
+
+**Date:** 2026-06-17 · **Constraints:** B1, RT-1/RT-3/RT-4, T2, U5, S4, S5, RT-7/U3
+
+`src-tauri/src/service.rs` is the single entry point a UI (or Tauri command layer)
+calls. It composes the pieces built across R1–R5 into the core flow:
+permission-gated capture (S4) → bounded-API re-validation of the adapter's URI,
+defense-in-depth (S5/SC-1) → bidirectional hook in the graph (RT-4) → backlinks
+from either endpoint (U5), with honest degradation for unsupported apps (RT-7/U3,
+non-empty `ServiceError::message`). Proven by 4 e2e tests in `service.rs`
+(end-to-end capture→hook→backlinks; content-hash survives validation; no-permission
+degrades not panics; unknown-app capability explains). Full suite: **43 green**.
+
+**No constraint flipped to SATISFIED.** B1, U5 and S4 keep their PARTIAL status:
+their residuals (GUI panel, live macOS app capture, TCC permission grant) are
+genuinely ENV-blocked in a headless environment and are escalated, not faked. This
+round adds *integration evidence* — the headless slices now compose — not
+satisfaction of the blocked work. `satisfied_count` stays 8.
