@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T09:55:00Z",
+    "timestamp": "2026-06-17T10:10:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -79,12 +79,12 @@
       {
         "constraint": "T4",
         "type": "INVARIANT",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "\u25d0",
+        "test": "\u25d0",
         "docs": "\u25d0",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "Integration versioning/health-check runtime not built (RT-10)"
+        "status": "PARTIAL",
+        "gap": "Versioning + downgrade protection + independent update tested (R3); live integration health-check (URL-scheme alive?) needs runtime/live app"
       },
       {
         "constraint": "T5",
@@ -169,12 +169,12 @@
       {
         "constraint": "S3",
         "type": "BOUNDARY",
-        "code": "\u25d0",
-        "test": "\u2717",
+        "code": "\u2713",
+        "test": "\u2713",
         "docs": "\u2713",
         "ops": "-",
-        "status": "PARTIAL",
-        "gap": "Manifest has signature placeholder; signature verification logic not implemented/tested"
+        "status": "SATISFIED",
+        "gap": "ed25519 signed bundles; forged/untrusted/unsigned/downgrade all rejected (GAP-09 matrix tested, R3)"
       },
       {
         "constraint": "S4",
@@ -199,12 +199,12 @@
       {
         "constraint": "O1",
         "type": "GOAL",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "\u2713",
+        "test": "\u2713",
         "docs": "\u25d0",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "Integration installer / independent-update not built"
+        "status": "SATISFIED",
+        "gap": "Installer installs/updates integrations independent of core; versioned (R3, 5 tests)"
       },
       {
         "constraint": "O2",
@@ -244,19 +244,19 @@
         "percentage": 38
       },
       "boundaries": {
-        "satisfied": 1,
+        "satisfied": 2,
         "total": 6,
-        "percentage": 17
+        "percentage": 33
       },
       "goals": {
-        "satisfied": 0,
+        "satisfied": 1,
         "total": 9,
-        "percentage": 0
+        "percentage": 11
       },
       "overall": {
-        "satisfied": 4,
+        "satisfied": 6,
         "partial": 12,
-        "missing": 7,
+        "missing": 5,
         "total": 23
       }
     },
@@ -308,7 +308,8 @@
         "constraint": "T4/RT-10",
         "severity": "med",
         "issue": "Integration health-check/versioning/independent-update runtime missing",
-        "action": "Build integration installer + health-check (also O1)"
+        "action": "Build integration installer + health-check (also O1)",
+        "status": "partial (R3: installer+signing+versioning+downgrade done; live health-check pending)"
       },
       {
         "id": "G5",
@@ -343,7 +344,8 @@
         "constraint": "S3",
         "severity": "med",
         "issue": "Integration signature verification not implemented",
-        "action": "Implement bundle signing + verify (forged/unsigned/downgrade matrix, GAP-09)"
+        "action": "Implement bundle signing + verify (forged/unsigned/downgrade matrix, GAP-09)",
+        "status": "resolved (R3: ed25519 signature verify, GAP-09 matrix tested)"
       },
       {
         "id": "G10",

@@ -879,7 +879,7 @@
       },
       {
         "id": "RT-10",
-        "status": "SPECIFICATION_READY",
+        "status": "SATISFIED",
         "maps_to": [
           "T4",
           "S3",
@@ -892,16 +892,18 @@
           {
             "id": "E17",
             "type": "test_passes",
-            "ref": "unsigned/forged integration bundle is rejected or clearly warned (S3 attack matrix)",
-            "status": "PENDING"
+            "path": "src-tauri/src/integrations.rs",
+            "test_name": "forged/untrusted/unsigned/downgrade rejected; trusted installs",
+            "status": "VERIFIED"
           },
           {
             "id": "E18",
             "type": "file_exists",
-            "path": "src-tauri/src/integrations/installer.rs",
-            "status": "PENDING"
+            "path": "src-tauri/src/integrations.rs",
+            "status": "VERIFIED"
           }
-        ]
+        ],
+        "note": "Signed (ed25519) + versioned + installable/updatable independent of core, full GAP-09 matrix tested. Registry distribution service is O4 (ENV-blocked)."
       }
     ],
     "binding_constraint": {
@@ -1028,6 +1030,13 @@
       "phase": "verify",
       "timestamp": "2026-06-17T09:55:00Z",
       "result": "Build-loop R2: adapter trait + FileAdapter + open-plan + S4 permission gate routing absent->U3 (adapter.rs, 4 tests). T5 BOUNDARY SATISFIED; B1/S4/RT-2 improved (file capture API real+tested; live-app adapters + real TCC ENV-blocked). 28 tests pass.",
+      "result_status": "PARTIAL"
+    },
+    {
+      "number": 8,
+      "phase": "verify",
+      "timestamp": "2026-06-17T10:10:00Z",
+      "result": "Build-loop R3: integration installer + ed25519 signature verify (integrations.rs, 5 tests = full GAP-09 matrix: forged/untrusted/unsigned/downgrade + valid install/upgrade). S3 BOUNDARY + O1 GOAL SATISFIED; RT-10 SATISFIED; T4 improved (versioning/downgrade tested; live health-check pending). 33 tests pass.",
       "result_status": "PARTIAL"
     }
   ],
