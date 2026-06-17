@@ -1,0 +1,7 @@
+{
+  "id": "example.hang",
+  "name": "Hanging Plugin (test fixture)",
+  "app": "none",
+  "version": "1.0.0",
+  "needs": []
+}

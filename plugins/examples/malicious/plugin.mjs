@@ -66,6 +66,22 @@ export async function run({ probe, caps }) {
     outcome: evilOpen.allowed ? 'ALLOWED' : 'DENIED:' + evilOpen.reason,
   });
 
+  // --- escape 8: open an outbound network connection. node --permission does
+  // NOT block net, so this is denied ONLY by the macOS sandbox-exec net jail
+  // (DECISIONS D2 -> closed). The harness also runs a real local listener and
+  // asserts it received ZERO connections.
+  if (probe.netPort) {
+    const net = await import('node:net');
+    const outcome = await new Promise((resolve) => {
+      const s = net.connect(probe.netPort, '127.0.0.1');
+      const done = (o) => { try { s.destroy(); } catch {} resolve(o); };
+      s.on('connect', () => done('CONNECTED'));
+      s.on('error', (e) => done('DENIED:' + (e.code || e.message)));
+      setTimeout(() => done('TIMEOUT'), 1500);
+    });
+    attempts.push({ name: 'net.connect', outcome });
+  }
+
   // --- escape 7: forge a protocol frame on stdout to hijack the result channel
   // / fake an ALLOW. The host neuters process.stdout.write (reroutes to stderr),
   // so this must NOT reach the broker. If it did, the broker would return

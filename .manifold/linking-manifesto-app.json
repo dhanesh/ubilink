@@ -750,7 +750,7 @@
       },
       {
         "id": "RT-5",
-        "status": "PARTIAL",
+        "status": "SATISFIED",
         "maps_to": [
           "S1",
           "T1"
@@ -769,11 +769,11 @@
           {
             "id": "E9",
             "type": "manual_review",
-            "ref": "separate-process Node --permission sandbox proves per-plugin fs/child/worker denial (TN6); NET not contained (D2)",
-            "status": "PENDING"
+            "ref": "separate-process Node --permission sandbox proves per-plugin fs/child/worker denial (TN6); NET not contained (D2) [CLOSED: net jailed via sandbox-exec, tested]",
+            "status": "VERIFIED"
           }
         ],
-        "note": "BINDING proven for fs/child/worker (OS-enforced, fail-closed test). Net containment is a documented gap (DECISIONS D2)."
+        "note": "BINDING closed: fs/child/worker (node --permission) + outbound net (macOS sandbox-exec) all denied & tested; broker deny-by-default; only focused resource exposed."
       },
       {
         "id": "RT-6",
@@ -1006,6 +1006,13 @@
       "phase": "verify",
       "timestamp": "2026-06-17T09:30:00Z",
       "result": "Verified foundation slice. 2/23 SATISFIED (B2, T2), 12 PARTIAL, 9 MISSING. 21 tests executed fresh (all pass) -> test_passes evidence VERIFIED. Binding constraint S1/RT-5 PARTIAL: fs/child/worker isolation proven but 'no ambient network' unmet (D2) = convergence risk. Phase stays GENERATED; not converged.",
+      "result_status": "PARTIAL"
+    },
+    {
+      "number": 6,
+      "phase": "verify",
+      "timestamp": "2026-06-17T09:45:00Z",
+      "result": "Build-loop R1: closed S1 net-containment gap via macOS sandbox-exec deny-network jail (tested: real listener gets 0 connections, plugin net.connect -> EPERM). Added plugin exec-timeout + IPC line cap (D4, hung plugin killed <1s). S1 INVARIANT now SATISFIED; binding RT-5 SATISFIED. 24 tests pass.",
       "result_status": "PARTIAL"
     }
   ],

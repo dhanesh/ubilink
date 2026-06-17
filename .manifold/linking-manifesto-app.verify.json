@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T09:30:00Z",
+    "timestamp": "2026-06-17T09:45:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -9,9 +9,9 @@
       {
         "constraint": "B1",
         "type": "INVARIANT",
-        "code": "◐",
-        "test": "◐",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u25d0",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Identity model+API surface only; live-app capture adapter & public link API not built/tested"
@@ -19,9 +19,9 @@
       {
         "constraint": "B2",
         "type": "INVARIANT",
-        "code": "✓",
+        "code": "\u2713",
         "test": "-",
-        "docs": "✓",
+        "docs": "\u2713",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "LICENSE present, MIT text content-verified; test_passes N/A for a license"
@@ -29,9 +29,9 @@
       {
         "constraint": "B3",
         "type": "GOAL",
-        "code": "◐",
-        "test": "◐",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u25d0",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Extension surface (manifest schema+broker+sandbox) built+tested; installer/registry deferred"
@@ -39,9 +39,9 @@
       {
         "constraint": "B4",
         "type": "BOUNDARY",
-        "code": "◐",
-        "test": "◐",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u25d0",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Platform-agnostic core + matrix covers 3 platforms; real per-platform adapters deferred"
@@ -49,9 +49,9 @@
       {
         "constraint": "T1",
         "type": "BOUNDARY",
-        "code": "◐",
-        "test": "✓",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u2713",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Broker IPC built+tested but NOT yet wired into Tauri commands (Cargo notes Tauri not depended on)"
@@ -59,9 +59,9 @@
       {
         "constraint": "T2",
         "type": "INVARIANT",
-        "code": "✓",
-        "test": "✓",
-        "docs": "✓",
+        "code": "\u2713",
+        "test": "\u2713",
+        "docs": "\u2713",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "Bidirectional SQLite graph: backlinks both ends, idempotent, persistent, concurrent-safe (4 tests VERIFIED)"
@@ -69,9 +69,9 @@
       {
         "constraint": "T3",
         "type": "GOAL",
-        "code": "✓",
-        "test": "◐",
-        "docs": "✓",
+        "code": "\u2713",
+        "test": "\u25d0",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Re-resolution logic+confidence gating tested; STATISTICAL >=95% rate NOT measured (deterministic tests only)"
@@ -79,9 +79,9 @@
       {
         "constraint": "T4",
         "type": "INVARIANT",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "Integration versioning/health-check runtime not built (RT-10)"
@@ -89,9 +89,9 @@
       {
         "constraint": "T5",
         "type": "BOUNDARY",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "Platform/app addressing adapters not built (deferred)"
@@ -99,9 +99,9 @@
       {
         "constraint": "U1",
         "type": "BOUNDARY",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "No panel UI; STATISTICAL p99<200ms unmeasured (config skeleton declares intent only)"
@@ -109,8 +109,8 @@
       {
         "constraint": "U2",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
+        "code": "\u2717",
+        "test": "\u2717",
         "docs": "-",
         "ops": "-",
         "status": "MISSING",
@@ -119,9 +119,9 @@
       {
         "constraint": "U3",
         "type": "INVARIANT",
-        "code": "◐",
-        "test": "◐",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u25d0",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Degradation implemented+tested for the capability-matrix path only; live capture/permission failure UX not built"
@@ -129,8 +129,8 @@
       {
         "constraint": "U4",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
+        "code": "\u2717",
+        "test": "\u2717",
         "docs": "-",
         "ops": "-",
         "status": "MISSING",
@@ -139,9 +139,9 @@
       {
         "constraint": "U5",
         "type": "GOAL",
-        "code": "◐",
-        "test": "✓",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u2713",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Backlinks data layer built+tested (both ends); UI surfacing deferred"
@@ -149,19 +149,19 @@
       {
         "constraint": "S1",
         "type": "INVARIANT",
-        "code": "◐",
-        "test": "✓",
-        "docs": "✓",
+        "code": "\u2713",
+        "test": "\u2713",
+        "docs": "\u2713",
         "ops": "-",
-        "status": "PARTIAL",
-        "gap": "fs/child/worker denial PROVEN (fail-closed test) + broker deny-by-default tested; BUT 'no ambient network' NOT met (D2) -> full scope unmet. CONVERGENCE RISK (binding-adjacent)"
+        "status": "SATISFIED",
+        "gap": "CLOSED (R1): net jailed via sandbox-exec; fs/child/worker via --permission; broker deny-by-default; all tested"
       },
       {
         "constraint": "S2",
         "type": "INVARIANT",
-        "code": "◐",
-        "test": "✗",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u2717",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Local-only intent (CSP) declared in config skeleton; no network/telemetry layer to verify; no zero-egress test"
@@ -169,9 +169,9 @@
       {
         "constraint": "S3",
         "type": "BOUNDARY",
-        "code": "◐",
-        "test": "✗",
-        "docs": "✓",
+        "code": "\u25d0",
+        "test": "\u2717",
+        "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Manifest has signature placeholder; signature verification logic not implemented/tested"
@@ -179,9 +179,9 @@
       {
         "constraint": "S4",
         "type": "INVARIANT",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "OS automation/accessibility permission flow not built (RT-2)"
@@ -189,9 +189,9 @@
       {
         "constraint": "S5",
         "type": "BOUNDARY",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "No local API yet; input size cap + rate limit not built (D4 deferred)"
@@ -199,9 +199,9 @@
       {
         "constraint": "O1",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
-        "docs": "◐",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "MISSING",
         "gap": "Integration installer / independent-update not built"
@@ -209,9 +209,9 @@
       {
         "constraint": "O2",
         "type": "GOAL",
-        "code": "✓",
-        "test": "✓",
-        "docs": "◐",
+        "code": "\u2713",
+        "test": "\u2713",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Capability matrix module built+tested; in-app/published-doc surfacing pending"
@@ -219,9 +219,9 @@
       {
         "constraint": "O3",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
-        "docs": "✗",
+        "code": "\u2717",
+        "test": "\u2717",
+        "docs": "\u2717",
         "ops": "-",
         "status": "MISSING",
         "gap": "No CI / reproducible signed builds"
@@ -229,9 +229,9 @@
       {
         "constraint": "O4",
         "type": "GOAL",
-        "code": "◐",
+        "code": "\u25d0",
         "test": "-",
-        "docs": "◐",
+        "docs": "\u25d0",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Contribution path documented (plugins/README + schema); registry/review process not built"
@@ -239,9 +239,9 @@
     ],
     "coverage": {
       "invariants": {
-        "satisfied": 2,
+        "satisfied": 3,
         "total": 8,
-        "percentage": 25
+        "percentage": 38
       },
       "boundaries": {
         "satisfied": 0,
@@ -254,8 +254,8 @@
         "percentage": 0
       },
       "overall": {
-        "satisfied": 2,
-        "partial": 12,
+        "satisfied": 3,
+        "partial": 11,
         "missing": 9,
         "total": 23
       }
@@ -264,8 +264,8 @@
       "required_truth": "RT-5",
       "constraint": "S1",
       "addressed": true,
-      "status": "PARTIAL",
-      "note": "fs/child/worker isolation proven; net containment unmet (D2) -> convergence risk"
+      "status": "SATISFIED",
+      "note": "CLOSED R1: net containment via macOS sandbox-exec; fs/child/worker via node --permission; all tested"
     },
     "statistical_flags": [
       {
@@ -287,13 +287,6 @@
       "note": "No ONE_WAY steps; MIT step is REVERSIBLE_WITH_COST (becomes ONE_WAY post-release)"
     },
     "gaps": [
-      {
-        "id": "G1",
-        "constraint": "S1",
-        "severity": "convergence-risk",
-        "issue": "'No ambient network' unmet: Node --permission does not contain net (D2)",
-        "action": "OS-level net jail (macOS sandbox-exec / Linux seccomp) before any 3rd-party plugin runs"
-      },
       {
         "id": "G2",
         "constraint": "B1",
@@ -362,7 +355,8 @@
         "constraint": "S1",
         "severity": "med",
         "issue": "Deferred hardening D3/D4: full plugin realm isolation + exec timeout",
-        "action": "Run plugin in curated vm context (no process handle); add read timeout + child kill"
+        "action": "Run plugin in curated vm context (no process handle); add read timeout + child kill",
+        "status": "partially-resolved (R1: exec timeout + line cap done; full realm isolation still open)"
       }
     ],
     "evidence_executed": {

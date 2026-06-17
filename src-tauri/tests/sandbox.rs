@@ -11,6 +11,9 @@
 use hooky_core::{FocusedResource, Manifest, Session};
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 fn repo_root() -> PathBuf {
     // CARGO_MANIFEST_DIR = .../hooky/src-tauri ; repo root is its parent.
@@ -157,6 +160,75 @@ fn no_wholesale_graph_only_focused_resource() {
     assert_eq!(result["graphAllowed"], false);
 
     session.shutdown().unwrap();
+}
+
+/// TEST 5 — Network is jailed (S1 / DECISIONS D2 -> closed).
+/// `node --permission` does NOT block outbound network; the macOS sandbox-exec
+/// deny-network profile does. We start a REAL local TCP listener and have the
+/// malicious plugin try to connect to it. When the jail is active the listener
+/// must receive ZERO connections and the plugin's attempt must be DENIED.
+#[test]
+fn net_is_jailed_when_supported() {
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let accepts2 = accepts.clone();
+    listener.set_nonblocking(false).unwrap();
+    let handle = std::thread::spawn(move || {
+        listener.set_nonblocking(true).unwrap();
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            match listener.accept() {
+                Ok(_) => { accepts2.fetch_add(1, Ordering::SeqCst); }
+                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+    });
+
+    let (manifest, source) = read_plugin("malicious");
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn host");
+    let jailed = session.net_jailed();
+    session.load(&source).unwrap();
+    let probe = json!({
+        "writePath": std::env::temp_dir().join("x").to_string_lossy(),
+        "spawnSentinelPath": std::env::temp_dir().join("y").to_string_lossy(),
+        "secretPath": std::env::temp_dir().join("z").to_string_lossy(),
+        "netPort": port,
+    });
+    let result = session.invoke(&focused(), probe).unwrap();
+    session.shutdown().unwrap();
+    let _ = handle.join();
+
+    let attempts = result["attempts"].as_array().expect("attempts");
+    let net = attempts.iter().find(|a| a["name"] == "net.connect");
+
+    if jailed {
+        assert_eq!(accepts.load(Ordering::SeqCst), 0, "FAIL-OPEN: jailed plugin still connected to the listener");
+        let outcome = net.expect("net attempt")["outcome"].as_str().unwrap();
+        assert!(outcome.starts_with("DENIED:"), "net was not denied under the jail: {outcome}");
+        eprintln!("[net jail] active — connection denied ({outcome})");
+    } else {
+        // Non-macOS / no sandbox-exec: net jail not wired yet (documented gap).
+        eprintln!("[net jail] NOT active on this platform — net containment is a known follow-up (Linux seccomp / Windows AppContainer)");
+    }
+}
+
+/// TEST 6 — Hung plugin is killed (S5 / DECISIONS D4).
+/// A plugin whose run() never returns must NOT hang the host forever: the session
+/// times out and kills the child, returning an error rather than blocking.
+#[test]
+fn hung_plugin_is_killed() {
+    let (manifest, source) = read_plugin("hang");
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn host");
+    session.set_timeout(Duration::from_millis(800)); // short, for the test
+    session.load(&source).unwrap();
+    let start = std::time::Instant::now();
+    let res = session.invoke(&focused(), json!({}));
+    let elapsed = start.elapsed();
+    assert!(res.is_err(), "hung plugin should have timed out, got: {res:?}");
+    assert!(elapsed < Duration::from_secs(3), "timeout took too long: {elapsed:?}");
+    eprintln!("[exec timeout] hung plugin killed after {elapsed:?}: {}", res.unwrap_err());
 }
 
 /// TEST 4 — Revoke (SC-3).

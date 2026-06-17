@@ -17,7 +17,18 @@ import (so the host needs zero fs grants). Proven by `src-tauri/tests/sandbox.rs
 - Broker denies every ungranted capability and the link graph wholesale. ✅
 - Grants are revocable mid-session (SC-3). ✅
 
-## D2 — ⚠️ Network is NOT contained by the Node Permission Model
+## D2 — Network containment: ✅ CLOSED via macOS sandbox-exec net jail
+
+> **Resolved 2026-06-17 (build loop R1).** The host is now spawned wrapped in
+> `sandbox-exec -p '(version 1)(allow default)(deny network*)'` on macOS, which
+> denies outbound network at the OS level. Proven by
+> `tests/sandbox.rs::net_is_jailed_when_supported`: a real local TCP listener
+> receives ZERO connections from the jailed plugin and the plugin's `net.connect`
+> returns `EPERM`. `Session::net_jailed()` reports the truth so non-macOS callers
+> (jail not yet wired — Linux seccomp / Windows AppContainer are the follow-ups)
+> never over-claim. The original finding is kept below for context.
+
+### Original finding (Node Permission Model does not restrict network)
 
 **Verified:** under `node --permission` with no allow flags,
 `fetch('http://example.com')` returns HTTP 200. The Node Permission Model does
@@ -53,14 +64,14 @@ handle (so it cannot touch stdin, `process.exit`, env, or fds), or one host
 process *per* plugin. The current spike proves the binding constraint; complete
 isolation is a runtime-design task, not a spike concern.
 
-## D4 — No plugin execution timeout / IPC line cap yet (DoS — deferred)
+## D4 — Plugin execution timeout + IPC line cap: ✅ DONE (build loop R1)
 
-**Date:** 2026-06-17 · **Constraints:** S5, GAP-10 (resource exhaustion) · **Source:** m4 code-quality review
+**Date:** 2026-06-17 · **Constraints:** S5, GAP-10 (resource exhaustion)
 
-`Session::read_msg` blocks on `read_line` with no timeout or size cap. A plugin
-that hangs in `run()` or emits an unbounded line can stall or OOM the host.
-
-**Deferred to the integration-runtime task:** wrap host reads in a reader thread
-with `recv_timeout` + child-process kill on timeout, and cap line length. Maps to
-S5/GAP-10. Acceptable in the spike (trusted local examples); **must** land before
-arbitrary third-party plugins run.
+`Session` now reads on a dedicated reader thread; the main thread reads with
+`recv_timeout` and **kills the child** on timeout (`Session::set_timeout`), and the
+reader caps each IPC line at `MAX_LINE_BYTES` (1 MiB) via `Read::take` so an
+unbounded line cannot exhaust memory. Proven by
+`tests/sandbox.rs::hung_plugin_is_killed` (a never-returning plugin is killed in
+<1s instead of blocking forever). NOTE: this is plugin-IPC DoS hardening; S5's
+*own* scope (the public local link API size/rate bounds) is a separate later task.

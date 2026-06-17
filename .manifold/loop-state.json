@@ -1,0 +1,34 @@
+{
+  "loop": "build-to-convergence",
+  "feature": "linking-manifesto-app",
+  "round": 1,
+  "max_rounds": 6,
+  "stall_count": 0,
+  "max_stalls": 2,
+  "gap_attempts": {},
+  "max_attempts_per_gap": 2,
+  "last_satisfied_count": 3,
+  "env_blocked": [
+    "U1",
+    "U2",
+    "U4",
+    "O3",
+    "O4"
+  ],
+  "env_blocked_reason": "Require a real desktop GUI (panel perf/interaction/a11y), live macOS apps for full B1 capture, or CI/registry services \u2014 cannot be verified in this headless environment. Escalated, not faked.",
+  "done_when": "every non-ENV_BLOCKED invariant+boundary SATISFIED and convergence CONVERGED",
+  "history": [
+    {
+      "round": 1,
+      "cluster": "S1 net-jail + D4 exec-timeout/line-cap",
+      "constraints_closed": [
+        "S1",
+        "RT-5"
+      ],
+      "satisfied_before": 2,
+      "satisfied_after": 3,
+      "tests": 24,
+      "progress": true
+    }
+  ]
+}
