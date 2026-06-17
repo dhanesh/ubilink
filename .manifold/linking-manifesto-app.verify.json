@@ -1,0 +1,403 @@
+{
+  "verification": {
+    "timestamp": "2026-06-17T09:30:00Z",
+    "result": "PARTIAL",
+    "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
+    "phase_after": "GENERATED",
+    "convergence": "IN_PROGRESS",
+    "matrix": [
+      {
+        "constraint": "B1",
+        "type": "INVARIANT",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Identity model+API surface only; live-app capture adapter & public link API not built/tested"
+      },
+      {
+        "constraint": "B2",
+        "type": "INVARIANT",
+        "code": "✓",
+        "test": "-",
+        "docs": "✓",
+        "ops": "-",
+        "status": "SATISFIED",
+        "gap": "LICENSE present, MIT text content-verified; test_passes N/A for a license"
+      },
+      {
+        "constraint": "B3",
+        "type": "GOAL",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Extension surface (manifest schema+broker+sandbox) built+tested; installer/registry deferred"
+      },
+      {
+        "constraint": "B4",
+        "type": "BOUNDARY",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Platform-agnostic core + matrix covers 3 platforms; real per-platform adapters deferred"
+      },
+      {
+        "constraint": "T1",
+        "type": "BOUNDARY",
+        "code": "◐",
+        "test": "✓",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Broker IPC built+tested but NOT yet wired into Tauri commands (Cargo notes Tauri not depended on)"
+      },
+      {
+        "constraint": "T2",
+        "type": "INVARIANT",
+        "code": "✓",
+        "test": "✓",
+        "docs": "✓",
+        "ops": "-",
+        "status": "SATISFIED",
+        "gap": "Bidirectional SQLite graph: backlinks both ends, idempotent, persistent, concurrent-safe (4 tests VERIFIED)"
+      },
+      {
+        "constraint": "T3",
+        "type": "GOAL",
+        "code": "✓",
+        "test": "◐",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Re-resolution logic+confidence gating tested; STATISTICAL >=95% rate NOT measured (deterministic tests only)"
+      },
+      {
+        "constraint": "T4",
+        "type": "INVARIANT",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "Integration versioning/health-check runtime not built (RT-10)"
+      },
+      {
+        "constraint": "T5",
+        "type": "BOUNDARY",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "Platform/app addressing adapters not built (deferred)"
+      },
+      {
+        "constraint": "U1",
+        "type": "BOUNDARY",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "No panel UI; STATISTICAL p99<200ms unmeasured (config skeleton declares intent only)"
+      },
+      {
+        "constraint": "U2",
+        "type": "GOAL",
+        "code": "✗",
+        "test": "✗",
+        "docs": "-",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "No UI; <=2-action copy flow not built"
+      },
+      {
+        "constraint": "U3",
+        "type": "INVARIANT",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Degradation implemented+tested for the capability-matrix path only; live capture/permission failure UX not built"
+      },
+      {
+        "constraint": "U4",
+        "type": "GOAL",
+        "code": "✗",
+        "test": "✗",
+        "docs": "-",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "No UI; keyboard/a11y not addressed"
+      },
+      {
+        "constraint": "U5",
+        "type": "GOAL",
+        "code": "◐",
+        "test": "✓",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Backlinks data layer built+tested (both ends); UI surfacing deferred"
+      },
+      {
+        "constraint": "S1",
+        "type": "INVARIANT",
+        "code": "◐",
+        "test": "✓",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "fs/child/worker denial PROVEN (fail-closed test) + broker deny-by-default tested; BUT 'no ambient network' NOT met (D2) -> full scope unmet. CONVERGENCE RISK (binding-adjacent)"
+      },
+      {
+        "constraint": "S2",
+        "type": "INVARIANT",
+        "code": "◐",
+        "test": "✗",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Local-only intent (CSP) declared in config skeleton; no network/telemetry layer to verify; no zero-egress test"
+      },
+      {
+        "constraint": "S3",
+        "type": "BOUNDARY",
+        "code": "◐",
+        "test": "✗",
+        "docs": "✓",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Manifest has signature placeholder; signature verification logic not implemented/tested"
+      },
+      {
+        "constraint": "S4",
+        "type": "INVARIANT",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "OS automation/accessibility permission flow not built (RT-2)"
+      },
+      {
+        "constraint": "S5",
+        "type": "BOUNDARY",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "No local API yet; input size cap + rate limit not built (D4 deferred)"
+      },
+      {
+        "constraint": "O1",
+        "type": "GOAL",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "Integration installer / independent-update not built"
+      },
+      {
+        "constraint": "O2",
+        "type": "GOAL",
+        "code": "✓",
+        "test": "✓",
+        "docs": "◐",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Capability matrix module built+tested; in-app/published-doc surfacing pending"
+      },
+      {
+        "constraint": "O3",
+        "type": "GOAL",
+        "code": "✗",
+        "test": "✗",
+        "docs": "✗",
+        "ops": "-",
+        "status": "MISSING",
+        "gap": "No CI / reproducible signed builds"
+      },
+      {
+        "constraint": "O4",
+        "type": "GOAL",
+        "code": "◐",
+        "test": "-",
+        "docs": "◐",
+        "ops": "-",
+        "status": "PARTIAL",
+        "gap": "Contribution path documented (plugins/README + schema); registry/review process not built"
+      }
+    ],
+    "coverage": {
+      "invariants": {
+        "satisfied": 2,
+        "total": 8,
+        "percentage": 25
+      },
+      "boundaries": {
+        "satisfied": 0,
+        "total": 6,
+        "percentage": 0
+      },
+      "goals": {
+        "satisfied": 0,
+        "total": 9,
+        "percentage": 0
+      },
+      "overall": {
+        "satisfied": 2,
+        "partial": 12,
+        "missing": 9,
+        "total": 23
+      }
+    },
+    "binding_constraint": {
+      "required_truth": "RT-5",
+      "constraint": "S1",
+      "addressed": true,
+      "status": "PARTIAL",
+      "note": "fs/child/worker isolation proven; net containment unmet (D2) -> convergence risk"
+    },
+    "statistical_flags": [
+      {
+        "constraint": "T3",
+        "issue": "statistical >=95% verified with deterministic tests only"
+      },
+      {
+        "constraint": "U1",
+        "issue": "statistical p99<200ms not measured (no UI)"
+      }
+    ],
+    "genealogy": {
+      "invariant_assumption_challengers": [],
+      "regulation_traded_off": [],
+      "note": "No challenger:assumption invariants; S4(regulation) never traded off"
+    },
+    "reversibility": {
+      "one_way_steps": 0,
+      "note": "No ONE_WAY steps; MIT step is REVERSIBLE_WITH_COST (becomes ONE_WAY post-release)"
+    },
+    "gaps": [
+      {
+        "id": "G1",
+        "constraint": "S1",
+        "severity": "convergence-risk",
+        "issue": "'No ambient network' unmet: Node --permission does not contain net (D2)",
+        "action": "OS-level net jail (macOS sandbox-exec / Linux seccomp) before any 3rd-party plugin runs"
+      },
+      {
+        "id": "G2",
+        "constraint": "B1",
+        "severity": "high",
+        "issue": "Live-app link capture adapter + public link API not built (invariant unmet)",
+        "action": "Build macOS capture adapter (T5) + Tauri command API; m4 UI/adapter pass"
+      },
+      {
+        "id": "G3",
+        "constraint": "S4/RT-2",
+        "severity": "high",
+        "issue": "OS automation permission request/detection missing",
+        "action": "Implement permission flow + runtime detection; route absence to U3"
+      },
+      {
+        "id": "G4",
+        "constraint": "T4/RT-10",
+        "severity": "med",
+        "issue": "Integration health-check/versioning/independent-update runtime missing",
+        "action": "Build integration installer + health-check (also O1)"
+      },
+      {
+        "id": "G5",
+        "constraint": "U1/U2/U4",
+        "severity": "high",
+        "issue": "No panel UI: instant-show, <=2-action copy, keyboard/a11y unbuilt",
+        "action": "Build Tauri hotkey panel; add perf test for U1 statistical p99"
+      },
+      {
+        "id": "G6",
+        "constraint": "S5",
+        "severity": "med",
+        "issue": "Local API input cap + rate limit not built (D4 line-cap deferred)",
+        "action": "Add bounded/rate-limited API + plugin IPC line cap + exec timeout"
+      },
+      {
+        "id": "G7",
+        "constraint": "T3",
+        "severity": "low",
+        "issue": "Statistical >=95% re-resolution rate verified with deterministic tests only",
+        "action": "Add a distribution/corpus test measuring re-resolution rate across real moves"
+      },
+      {
+        "id": "G8",
+        "constraint": "S2",
+        "severity": "med",
+        "issue": "Zero-egress not enforced/tested (CSP declared in skeleton only)",
+        "action": "Add network-egress test asserting zero background connections"
+      },
+      {
+        "id": "G9",
+        "constraint": "S3",
+        "severity": "med",
+        "issue": "Integration signature verification not implemented",
+        "action": "Implement bundle signing + verify (forged/unsigned/downgrade matrix, GAP-09)"
+      },
+      {
+        "id": "G10",
+        "constraint": "O3/O4",
+        "severity": "low",
+        "issue": "No CI signed builds; no integration registry/review process",
+        "action": "Add CI (notarized builds) + registry client"
+      },
+      {
+        "id": "G11",
+        "constraint": "S1",
+        "severity": "med",
+        "issue": "Deferred hardening D3/D4: full plugin realm isolation + exec timeout",
+        "action": "Run plugin in curated vm context (no process handle); add read timeout + child kill"
+      }
+    ],
+    "evidence_executed": {
+      "tests_run": 21,
+      "tests_passed": 21,
+      "test_passes_now_VERIFIED": [
+        "E1",
+        "E11",
+        "E13",
+        "E4",
+        "E6",
+        "E8"
+      ]
+    }
+  },
+  "file_hashes": {
+    "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
+    "src-tauri/src/sandbox.rs": "0b3f22b0147f02ab2ecbfb0f07bd3c3510e50cc8bf0edcf43c4cd3dc3f7a5c24",
+    "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
+    "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
+    "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
+    "src-tauri/src/lib.rs": "9e470c2363467a28cc90460b8518f0ee5a97978b2358dabe03d5501d71d017b4",
+    "src-tauri/tests/sandbox.rs": "da6924a4111b35552083c6866e373340fda1dbd57786b32f1b0d4e5dda900c55",
+    "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
+    "plugins/examples/malicious/plugin.mjs": "6b911ce63b8a90355ae254ca4aa384593566380382434009332fc63686d66788",
+    "plugins/examples/benign/plugin.mjs": "7a337f52c2691ac6ab6a750caa81cefcbe6c01cc08cac5f0d75bdd4fd2a838d6",
+    "plugins/examples/benign/manifest.json": "6b19c0af09a91f77b28411fb38ffb9024f108afe9ea12a0307a79c7be1054fac",
+    "plugins/examples/malicious/manifest.json": "a3d8574e496c50b17d6195d565d2b97656e9d9cd5ebac14ebb7263edb1caccb7",
+    "schema/integration.manifest.schema.json": "7ee608e6c59f5955766735d4c06b4b821641e446defc16fdd2e23012935385a1",
+    "plugins/README.md": "999cd8eeb0cf65c48c18639afc493992acb4bc21a3ddf2cd3632bcc2afa9ae3b",
+    "DECISIONS.md": "2291f56791826029f73daace3138c3441b7581eddc5a2a9aa5571127906c46b4",
+    "README.md": "b8fc780b054a7497d83a52aa886de9d179fff0ace915087b2786b450ec9bfc3a",
+    "LICENSE": "a27f7c7fdd2bc3cf1aa43fe37349be78bd9866ba5ee4dee07050ba1ec01a507d",
+    "src-tauri/Cargo.toml": "54ad4c79e7a6593a62b821d7dc6765327b03bb1ae9fbb333dd8c78dcf0eda203",
+    "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd"
+  },
+  "hashes_updated_at": "2026-06-17T09:32:51.575Z"
+}

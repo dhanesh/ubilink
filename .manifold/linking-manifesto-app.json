@@ -667,7 +667,7 @@
             "id": "E1",
             "type": "test_passes",
             "ref": "resource identity carries address+name; re-resolution tests",
-            "status": "PENDING"
+            "status": "VERIFIED"
           },
           {
             "id": "E2",
@@ -711,7 +711,7 @@
             "type": "test_passes",
             "path": "src-tauri/src/resource.rs",
             "test_name": "content_hash_matches_after_move_and_rename",
-            "status": "PENDING"
+            "status": "VERIFIED"
           },
           {
             "id": "E5",
@@ -724,7 +724,7 @@
       },
       {
         "id": "RT-4",
-        "status": "PARTIAL",
+        "status": "SATISFIED",
         "maps_to": [
           "T2"
         ],
@@ -737,7 +737,7 @@
             "type": "test_passes",
             "path": "src-tauri/src/graph.rs",
             "test_name": "backlink_visible_from_both_ends",
-            "status": "PENDING"
+            "status": "VERIFIED"
           },
           {
             "id": "E7",
@@ -764,7 +764,7 @@
             "type": "test_passes",
             "path": "src-tauri/tests/sandbox.rs",
             "test_name": "fail_closed_no_fs_no_child_escape",
-            "status": "PENDING"
+            "status": "VERIFIED"
           },
           {
             "id": "E9",
@@ -796,13 +796,13 @@
             "type": "test_passes",
             "path": "src-tauri/tests/sandbox.rs",
             "test_name": "broker_allows_granted_denies_ungranted",
-            "status": "PENDING"
+            "status": "VERIFIED"
           }
         ]
       },
       {
         "id": "RT-7",
-        "status": "PARTIAL",
+        "status": "SATISFIED",
         "maps_to": [
           "O2",
           "U3"
@@ -822,7 +822,7 @@
             "type": "test_passes",
             "path": "src-tauri/src/capabilities.rs",
             "test_name": "unsupported_app_degrades_with_explanation_not_silence",
-            "status": "PENDING"
+            "status": "VERIFIED"
           }
         ]
       },
@@ -1000,6 +1000,13 @@
       "result": "Generated foundation slice (binding-first): plugin sandbox+broker (RT-5 proven, 8 tests), resource identity+re-resolution (RT-1/RT-3), bidirectional SQLite graph (RT-4), capability matrix (RT-7), scaffold+docs+MIT. 22 tests pass, 0 warnings. UI/adapters/integration-runtime deferred. Honest gap: Node permission model does not contain net (D2).",
       "artifacts_generated": 19,
       "tests_passing": 22
+    },
+    {
+      "number": 5,
+      "phase": "verify",
+      "timestamp": "2026-06-17T09:30:00Z",
+      "result": "Verified foundation slice. 2/23 SATISFIED (B2, T2), 12 PARTIAL, 9 MISSING. 21 tests executed fresh (all pass) -> test_passes evidence VERIFIED. Binding constraint S1/RT-5 PARTIAL: fs/child/worker isolation proven but 'no ambient network' unmet (D2) = convergence risk. Phase stays GENERATED; not converged.",
+      "result_status": "PARTIAL"
     }
   ],
   "convergence": {
