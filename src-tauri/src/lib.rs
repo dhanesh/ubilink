@@ -31,6 +31,7 @@
 // provably denied, and the broker denies every ungranted capability.
 
 pub mod adapter;
+pub mod api;
 pub mod broker;
 pub mod capabilities;
 pub mod graph;
@@ -39,6 +40,7 @@ pub mod resource;
 pub mod sandbox;
 
 pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter};
+pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
 pub use integrations::{Installer, InstallError, SignedBundle, sign_bundle};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};

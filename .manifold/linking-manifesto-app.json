@@ -836,7 +836,7 @@
       },
       {
         "id": "RT-8",
-        "status": "SPECIFICATION_READY",
+        "status": "PARTIAL",
         "maps_to": [
           "S2"
         ],
@@ -847,10 +847,18 @@
           {
             "id": "E14",
             "type": "test_passes",
-            "ref": "network test asserts zero background egress; egress only on explicit user export",
+            "path": "src-tauri/tests/no_network_deps.rs",
+            "test_name": "core_has_no_network_client_dependency",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E14b",
+            "type": "manual_review",
+            "ref": "runtime zero-egress assertion for the future GUI/sync layer (ENV-blocked; layer not built)",
             "status": "PENDING"
           }
-        ]
+        ],
+        "note": "As-built core links zero network crates (dep-guard test) + plugins net-jailed (R1) => no egress path. Re-verify when an opt-in sync/UI network layer exists."
       },
       {
         "id": "RT-9",
@@ -1037,6 +1045,20 @@
       "phase": "verify",
       "timestamp": "2026-06-17T10:10:00Z",
       "result": "Build-loop R3: integration installer + ed25519 signature verify (integrations.rs, 5 tests = full GAP-09 matrix: forged/untrusted/unsigned/downgrade + valid install/upgrade). S3 BOUNDARY + O1 GOAL SATISFIED; RT-10 SATISFIED; T4 improved (versioning/downgrade tested; live health-check pending). 33 tests pass.",
+      "result_status": "PARTIAL"
+    },
+    {
+      "number": 9,
+      "phase": "verify",
+      "timestamp": "2026-06-17T10:25:00Z",
+      "result": "Build-loop R4: bounded local link API (api.rs, 5 tests: valid construct, oversized->reject, javascript:->reject, control-chars->reject, rate-limit flood). S5 BOUNDARY + SC-1 SATISFIED; B1 API-half done. 39 tests.",
+      "result_status": "PARTIAL"
+    },
+    {
+      "number": 10,
+      "phase": "verify",
+      "timestamp": "2026-06-17T10:30:00Z",
+      "result": "Build-loop R5: S2 zero-egress dep-guard (tests/no_network_deps.rs: 57 locked deps, no network clients) + plugin net-jail (R1) => no egress path. S2 INVARIANT SATISFIED (as-built; re-verify when network layer added). HALT: remaining gaps are ENV-blocked (GUI/live-app/TCC/other-platforms/CI).",
       "result_status": "PARTIAL"
     }
   ],

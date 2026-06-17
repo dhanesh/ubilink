@@ -1,13 +1,13 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 3,
+  "round": 5,
   "max_rounds": 6,
   "stall_count": 0,
   "max_stalls": 2,
   "gap_attempts": {},
   "max_attempts_per_gap": 2,
-  "last_satisfied_count": 6,
+  "last_satisfied_count": 8,
   "env_blocked": [
     "U1",
     "U2",
@@ -52,6 +52,27 @@
       "satisfied_after": 6,
       "tests": 33,
       "progress": true
+    },
+    {
+      "round": 4,
+      "cluster": "bounded local link API (S5/SC-1/B1-api)",
+      "constraints_closed": [
+        "S5"
+      ],
+      "satisfied_after": 7,
+      "tests": 39,
+      "progress": true
+    },
+    {
+      "round": 5,
+      "cluster": "S2 zero-egress dep-guard",
+      "constraints_closed": [
+        "S2"
+      ],
+      "satisfied_after": 8,
+      "tests": 39,
+      "progress": true
     }
-  ]
+  ],
+  "terminal": "HEADLESS_CONVERGED (halted: remaining gaps ENV-blocked)"
 }

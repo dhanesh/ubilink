@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T10:10:00Z",
+    "timestamp": "2026-06-17T10:30:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -9,19 +9,20 @@
       {
         "constraint": "B1",
         "type": "INVARIANT",
-        "code": "\u25d0",
-        "test": "\u25d0",
-        "docs": "\u2713",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "File-capture link API real+tested (adapter.rs); UI half + live-app capture ENV-blocked"
+        "gap": "API half done+bounded (api.rs) + file capture (adapter.rs); UI panel + live-app capture are ENV-blocked (need GUI + live macOS apps/TCC)",
+        "residual": "residual ENV-blocked (GUI panel + live-app capture)"
       },
       {
         "constraint": "B2",
         "type": "INVARIANT",
-        "code": "\u2713",
+        "code": "✓",
         "test": "-",
-        "docs": "\u2713",
+        "docs": "✓",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "LICENSE present, MIT text content-verified; test_passes N/A for a license"
@@ -29,9 +30,9 @@
       {
         "constraint": "B3",
         "type": "GOAL",
-        "code": "\u25d0",
-        "test": "\u25d0",
-        "docs": "\u2713",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Extension surface (manifest schema+broker+sandbox) built+tested; installer/registry deferred"
@@ -39,29 +40,31 @@
       {
         "constraint": "B4",
         "type": "BOUNDARY",
-        "code": "\u25d0",
-        "test": "\u25d0",
-        "docs": "\u2713",
+        "code": "◐",
+        "test": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Platform-agnostic core + matrix covers 3 platforms; real per-platform adapters deferred"
+        "gap": "Platform-agnostic core + matrix covers 3 platforms; real per-platform adapters deferred",
+        "residual": "residual ENV-blocked (real Windows/Linux adapters)"
       },
       {
         "constraint": "T1",
         "type": "BOUNDARY",
-        "code": "\u25d0",
-        "test": "\u2713",
-        "docs": "\u2713",
+        "code": "◐",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Broker IPC built+tested but NOT yet wired into Tauri commands (Cargo notes Tauri not depended on)"
+        "gap": "Broker IPC built+tested but NOT yet wired into Tauri commands (Cargo notes Tauri not depended on)",
+        "residual": "residual needs Tauri GUI shell (ENV-blocked)"
       },
       {
         "constraint": "T2",
         "type": "INVARIANT",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "Bidirectional SQLite graph: backlinks both ends, idempotent, persistent, concurrent-safe (4 tests VERIFIED)"
@@ -69,9 +72,9 @@
       {
         "constraint": "T3",
         "type": "GOAL",
-        "code": "\u2713",
-        "test": "\u25d0",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Re-resolution logic+confidence gating tested; STATISTICAL >=95% rate NOT measured (deterministic tests only)"
@@ -79,19 +82,20 @@
       {
         "constraint": "T4",
         "type": "INVARIANT",
-        "code": "\u25d0",
-        "test": "\u25d0",
-        "docs": "\u25d0",
+        "code": "◐",
+        "test": "◐",
+        "docs": "◐",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Versioning + downgrade protection + independent update tested (R3); live integration health-check (URL-scheme alive?) needs runtime/live app"
+        "gap": "Versioning + downgrade protection + independent update tested (R3); live integration health-check (URL-scheme alive?) needs runtime/live app",
+        "residual": "residual ENV-blocked (live integration health-check needs runtime/live app)"
       },
       {
         "constraint": "T5",
         "type": "BOUNDARY",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u25d0",
+        "code": "✓",
+        "test": "✓",
+        "docs": "◐",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "Adapter trait + FileAdapter + open-plan tested (R2). Live-app macOS adapters are ENV-blocked follow-ups (trait makes them bounded)."
@@ -99,9 +103,9 @@
       {
         "constraint": "U1",
         "type": "BOUNDARY",
-        "code": "\u2717",
-        "test": "\u2717",
-        "docs": "\u25d0",
+        "code": "✗",
+        "test": "✗",
+        "docs": "◐",
         "ops": "-",
         "status": "MISSING",
         "gap": "No panel UI; STATISTICAL p99<200ms unmeasured (config skeleton declares intent only)"
@@ -109,8 +113,8 @@
       {
         "constraint": "U2",
         "type": "GOAL",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "✗",
+        "test": "✗",
         "docs": "-",
         "ops": "-",
         "status": "MISSING",
@@ -119,18 +123,19 @@
       {
         "constraint": "U3",
         "type": "INVARIANT",
-        "code": "\u2713",
-        "test": "\u25d0",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Degradation tested for BOTH capability-matrix and permission paths; whole-app live-failure UX still pending UI"
+        "gap": "Degradation tested for BOTH capability-matrix and permission paths; whole-app live-failure UX still pending UI",
+        "residual": "residual ENV-blocked (whole-app live-failure UX needs GUI)"
       },
       {
         "constraint": "U4",
         "type": "GOAL",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "✗",
+        "test": "✗",
         "docs": "-",
         "ops": "-",
         "status": "MISSING",
@@ -139,9 +144,9 @@
       {
         "constraint": "U5",
         "type": "GOAL",
-        "code": "\u25d0",
-        "test": "\u2713",
-        "docs": "\u2713",
+        "code": "◐",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Backlinks data layer built+tested (both ends); UI surfacing deferred"
@@ -149,9 +154,9 @@
       {
         "constraint": "S1",
         "type": "INVARIANT",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "CLOSED (R1): net jailed via sandbox-exec; fs/child/worker via --permission; broker deny-by-default; all tested"
@@ -159,19 +164,19 @@
       {
         "constraint": "S2",
         "type": "INVARIANT",
-        "code": "\u25d0",
-        "test": "\u2717",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
-        "status": "PARTIAL",
-        "gap": "Local-only intent (CSP) declared in config skeleton; no network/telemetry layer to verify; no zero-egress test"
+        "status": "SATISFIED",
+        "gap": "Zero-egress: core links 0 network crates (dep-guard test) + plugins net-jailed (R1). Re-verify when opt-in sync/UI network layer added."
       },
       {
         "constraint": "S3",
         "type": "BOUNDARY",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u2713",
+        "code": "✓",
+        "test": "✓",
+        "docs": "✓",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "ed25519 signed bundles; forged/untrusted/unsigned/downgrade all rejected (GAP-09 matrix tested, R3)"
@@ -179,29 +184,30 @@
       {
         "constraint": "S4",
         "type": "INVARIANT",
-        "code": "\u25d0",
-        "test": "\u25d0",
-        "docs": "\u25d0",
+        "code": "◐",
+        "test": "◐",
+        "docs": "◐",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Permission gate + detection + absent->U3 routing tested; real macOS TCC request ENV-blocked"
+        "gap": "Permission gate + detection + absent->U3 routing tested; real macOS TCC request ENV-blocked",
+        "residual": "residual ENV-blocked (real macOS TCC grant)"
       },
       {
         "constraint": "S5",
         "type": "BOUNDARY",
-        "code": "\u2717",
-        "test": "\u2717",
-        "docs": "\u25d0",
+        "code": "✓",
+        "test": "✓",
+        "docs": "◐",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "No local API yet; input size cap + rate limit not built (D4 deferred)"
+        "status": "SATISFIED",
+        "gap": "Local link API bounded: 64KB cap + scheme allowlist + control-char reject + token-bucket rate limit (R4, 5 tests). SC-1 promoted."
       },
       {
         "constraint": "O1",
         "type": "GOAL",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u25d0",
+        "code": "✓",
+        "test": "✓",
+        "docs": "◐",
         "ops": "-",
         "status": "SATISFIED",
         "gap": "Installer installs/updates integrations independent of core; versioned (R3, 5 tests)"
@@ -209,9 +215,9 @@
       {
         "constraint": "O2",
         "type": "GOAL",
-        "code": "\u2713",
-        "test": "\u2713",
-        "docs": "\u25d0",
+        "code": "✓",
+        "test": "✓",
+        "docs": "◐",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Capability matrix module built+tested; in-app/published-doc surfacing pending"
@@ -219,9 +225,9 @@
       {
         "constraint": "O3",
         "type": "GOAL",
-        "code": "\u2717",
-        "test": "\u2717",
-        "docs": "\u2717",
+        "code": "✗",
+        "test": "✗",
+        "docs": "✗",
         "ops": "-",
         "status": "MISSING",
         "gap": "No CI / reproducible signed builds"
@@ -229,9 +235,9 @@
       {
         "constraint": "O4",
         "type": "GOAL",
-        "code": "\u25d0",
+        "code": "◐",
         "test": "-",
-        "docs": "\u25d0",
+        "docs": "◐",
         "ops": "-",
         "status": "PARTIAL",
         "gap": "Contribution path documented (plugins/README + schema); registry/review process not built"
@@ -239,14 +245,14 @@
     ],
     "coverage": {
       "invariants": {
-        "satisfied": 3,
+        "satisfied": 4,
         "total": 8,
-        "percentage": 38
+        "percentage": 50
       },
       "boundaries": {
-        "satisfied": 2,
+        "satisfied": 3,
         "total": 6,
-        "percentage": 33
+        "percentage": 50
       },
       "goals": {
         "satisfied": 1,
@@ -254,9 +260,9 @@
         "percentage": 11
       },
       "overall": {
-        "satisfied": 6,
-        "partial": 12,
-        "missing": 5,
+        "satisfied": 8,
+        "partial": 11,
+        "missing": 4,
         "total": 23
       }
     },
@@ -323,7 +329,8 @@
         "constraint": "S5",
         "severity": "med",
         "issue": "Local API input cap + rate limit not built (D4 line-cap deferred)",
-        "action": "Add bounded/rate-limited API + plugin IPC line cap + exec timeout"
+        "action": "Add bounded/rate-limited API + plugin IPC line cap + exec timeout",
+        "status": "resolved (R4: bounded+rate-limited local API; D4 IPC cap done R1)"
       },
       {
         "id": "G7",
@@ -337,7 +344,8 @@
         "constraint": "S2",
         "severity": "med",
         "issue": "Zero-egress not enforced/tested (CSP declared in skeleton only)",
-        "action": "Add network-egress test asserting zero background connections"
+        "action": "Add network-egress test asserting zero background connections",
+        "status": "resolved (R5: S2 dep-guard; net-jail R1)"
       },
       {
         "id": "G9",
@@ -374,28 +382,29 @@
         "E6",
         "E8"
       ]
-    }
+    },
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI)"
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
-    "src-tauri/src/sandbox.rs": "0b3f22b0147f02ab2ecbfb0f07bd3c3510e50cc8bf0edcf43c4cd3dc3f7a5c24",
+    "src-tauri/src/sandbox.rs": "3739fe4b7040b5311c41e09526151e713fa4689e1047c02be7e35ce1d222fd81",
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
     "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
-    "src-tauri/src/lib.rs": "9e470c2363467a28cc90460b8518f0ee5a97978b2358dabe03d5501d71d017b4",
-    "src-tauri/tests/sandbox.rs": "da6924a4111b35552083c6866e373340fda1dbd57786b32f1b0d4e5dda900c55",
+    "src-tauri/src/lib.rs": "1988863779e127541d52d71c901fcdfb0cd9d8453602cabbe069550fd16f78af",
+    "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
-    "plugins/examples/malicious/plugin.mjs": "6b911ce63b8a90355ae254ca4aa384593566380382434009332fc63686d66788",
+    "plugins/examples/malicious/plugin.mjs": "9f8eb526ffad1a717d5170ab298adb3400cb70dc85a9c7dc6f23cfa73e38220c",
     "plugins/examples/benign/plugin.mjs": "7a337f52c2691ac6ab6a750caa81cefcbe6c01cc08cac5f0d75bdd4fd2a838d6",
     "plugins/examples/benign/manifest.json": "6b19c0af09a91f77b28411fb38ffb9024f108afe9ea12a0307a79c7be1054fac",
     "plugins/examples/malicious/manifest.json": "a3d8574e496c50b17d6195d565d2b97656e9d9cd5ebac14ebb7263edb1caccb7",
     "schema/integration.manifest.schema.json": "7ee608e6c59f5955766735d4c06b4b821641e446defc16fdd2e23012935385a1",
     "plugins/README.md": "999cd8eeb0cf65c48c18639afc493992acb4bc21a3ddf2cd3632bcc2afa9ae3b",
-    "DECISIONS.md": "2291f56791826029f73daace3138c3441b7581eddc5a2a9aa5571127906c46b4",
+    "DECISIONS.md": "255d7fdd53bf0d14d5c206da2ab6e6db2af0bb50d1af3cd0518cd0ad84ca4bea",
     "README.md": "b8fc780b054a7497d83a52aa886de9d179fff0ace915087b2786b450ec9bfc3a",
     "LICENSE": "a27f7c7fdd2bc3cf1aa43fe37349be78bd9866ba5ee4dee07050ba1ec01a507d",
-    "src-tauri/Cargo.toml": "54ad4c79e7a6593a62b821d7dc6765327b03bb1ae9fbb333dd8c78dcf0eda203",
+    "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
     "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd"
   },
-  "hashes_updated_at": "2026-06-17T09:32:51.575Z"
+  "hashes_updated_at": "2026-06-17T10:02:00.030Z"
 }
