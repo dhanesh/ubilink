@@ -680,7 +680,7 @@
       },
       {
         "id": "RT-2",
-        "status": "NOT_SATISFIED",
+        "status": "PARTIAL",
         "maps_to": [
           "S4"
         ],
@@ -690,11 +690,19 @@
         "evidence": [
           {
             "id": "E3",
+            "type": "test_passes",
+            "path": "src-tauri/src/adapter.rs",
+            "test_name": "permission_gate_blocks_capture_with_explanation_not_silence",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E3b",
             "type": "manual_review",
-            "ref": "macOS Accessibility/Automation permission requested, granted, and runtime-detected; absence routes to U3",
+            "ref": "real macOS TCC/AXIsProcessTrusted check ENV-blocked (needs desktop+entitlement)",
             "status": "PENDING"
           }
-        ]
+        ],
+        "note": "Permission abstraction, detection hook, and absent->U3 routing implemented+tested; real macOS TCC grant is ENV-blocked."
       },
       {
         "id": "RT-3",
@@ -1013,6 +1021,13 @@
       "phase": "verify",
       "timestamp": "2026-06-17T09:45:00Z",
       "result": "Build-loop R1: closed S1 net-containment gap via macOS sandbox-exec deny-network jail (tested: real listener gets 0 connections, plugin net.connect -> EPERM). Added plugin exec-timeout + IPC line cap (D4, hung plugin killed <1s). S1 INVARIANT now SATISFIED; binding RT-5 SATISFIED. 24 tests pass.",
+      "result_status": "PARTIAL"
+    },
+    {
+      "number": 7,
+      "phase": "verify",
+      "timestamp": "2026-06-17T09:55:00Z",
+      "result": "Build-loop R2: adapter trait + FileAdapter + open-plan + S4 permission gate routing absent->U3 (adapter.rs, 4 tests). T5 BOUNDARY SATISFIED; B1/S4/RT-2 improved (file capture API real+tested; live-app adapters + real TCC ENV-blocked). 28 tests pass.",
       "result_status": "PARTIAL"
     }
   ],

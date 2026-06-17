@@ -1,13 +1,13 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 1,
+  "round": 2,
   "max_rounds": 6,
   "stall_count": 0,
   "max_stalls": 2,
   "gap_attempts": {},
   "max_attempts_per_gap": 2,
-  "last_satisfied_count": 3,
+  "last_satisfied_count": 4,
   "env_blocked": [
     "U1",
     "U2",
@@ -28,6 +28,17 @@
       "satisfied_before": 2,
       "satisfied_after": 3,
       "tests": 24,
+      "progress": true
+    },
+    {
+      "round": 2,
+      "cluster": "adapter trait + FileAdapter + S4 permission gate (T5/B1/S4/RT-2)",
+      "constraints_closed": [
+        "T5"
+      ],
+      "satisfied_before": 3,
+      "satisfied_after": 4,
+      "tests": 28,
       "progress": true
     }
   ]

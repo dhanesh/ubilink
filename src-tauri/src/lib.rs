@@ -30,12 +30,14 @@
 // path. We do not claim net is contained. fs + child_process + worker ARE
 // provably denied, and the broker denies every ungranted capability.
 
+pub mod adapter;
 pub mod broker;
 pub mod capabilities;
 pub mod graph;
 pub mod resource;
 pub mod sandbox;
 
+pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
 pub use graph::LinkGraph;

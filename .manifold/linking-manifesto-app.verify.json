@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T09:45:00Z",
+    "timestamp": "2026-06-17T09:55:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -14,7 +14,7 @@
         "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Identity model+API surface only; live-app capture adapter & public link API not built/tested"
+        "gap": "File-capture link API real+tested (adapter.rs); UI half + live-app capture ENV-blocked"
       },
       {
         "constraint": "B2",
@@ -89,12 +89,12 @@
       {
         "constraint": "T5",
         "type": "BOUNDARY",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "\u2713",
+        "test": "\u2713",
         "docs": "\u25d0",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "Platform/app addressing adapters not built (deferred)"
+        "status": "SATISFIED",
+        "gap": "Adapter trait + FileAdapter + open-plan tested (R2). Live-app macOS adapters are ENV-blocked follow-ups (trait makes them bounded)."
       },
       {
         "constraint": "U1",
@@ -119,12 +119,12 @@
       {
         "constraint": "U3",
         "type": "INVARIANT",
-        "code": "\u25d0",
+        "code": "\u2713",
         "test": "\u25d0",
         "docs": "\u2713",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Degradation implemented+tested for the capability-matrix path only; live capture/permission failure UX not built"
+        "gap": "Degradation tested for BOTH capability-matrix and permission paths; whole-app live-failure UX still pending UI"
       },
       {
         "constraint": "U4",
@@ -179,12 +179,12 @@
       {
         "constraint": "S4",
         "type": "INVARIANT",
-        "code": "\u2717",
-        "test": "\u2717",
+        "code": "\u25d0",
+        "test": "\u25d0",
         "docs": "\u25d0",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "OS automation/accessibility permission flow not built (RT-2)"
+        "status": "PARTIAL",
+        "gap": "Permission gate + detection + absent->U3 routing tested; real macOS TCC request ENV-blocked"
       },
       {
         "constraint": "S5",
@@ -244,9 +244,9 @@
         "percentage": 38
       },
       "boundaries": {
-        "satisfied": 0,
+        "satisfied": 1,
         "total": 6,
-        "percentage": 0
+        "percentage": 17
       },
       "goals": {
         "satisfied": 0,
@@ -254,9 +254,9 @@
         "percentage": 0
       },
       "overall": {
-        "satisfied": 3,
-        "partial": 11,
-        "missing": 9,
+        "satisfied": 4,
+        "partial": 12,
+        "missing": 7,
         "total": 23
       }
     },
@@ -292,14 +292,16 @@
         "constraint": "B1",
         "severity": "high",
         "issue": "Live-app link capture adapter + public link API not built (invariant unmet)",
-        "action": "Build macOS capture adapter (T5) + Tauri command API; m4 UI/adapter pass"
+        "action": "Build macOS capture adapter (T5) + Tauri command API; m4 UI/adapter pass",
+        "status": "partial (R2: file-capture API + adapter trait done; live-app capture + UI ENV-blocked)"
       },
       {
         "id": "G3",
         "constraint": "S4/RT-2",
         "severity": "high",
         "issue": "OS automation permission request/detection missing",
-        "action": "Implement permission flow + runtime detection; route absence to U3"
+        "action": "Implement permission flow + runtime detection; route absence to U3",
+        "status": "partial (R2: permission gate + routing done+tested; real macOS TCC ENV-blocked)"
       },
       {
         "id": "G4",
