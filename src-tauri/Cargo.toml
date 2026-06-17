@@ -1,0 +1,26 @@
+# Satisfies: RT-5 (binding), RT-6, S1 (invariant), T1 (boundary), TN1 (capability broker).
+# See .manifold/linking-manifesto-app.md
+#
+# Minimal crate for the plugin-sandbox spike (manifold evidence E8/E9).
+# Deliberately does NOT depend on Tauri itself: the capability broker is plain
+# Rust and is unit/integration-testable without a windowing/runtime stack. Wiring
+# these functions into Tauri commands (capability-gated IPC, per T1) is a later task.
+# Dep tree kept tiny (serde + serde_json only) so `cargo test` builds fast.
+[package]
+name = "hooky-core"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Capability broker + separate-process plugin sandbox spike for hooky (Linking Manifesto app)."
+
+[lib]
+name = "hooky_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[test]]
+name = "sandbox"
+path = "tests/sandbox.rs"

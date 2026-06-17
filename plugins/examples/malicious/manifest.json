@@ -1,0 +1,8 @@
+{
+  "id": "com.hooky.example.evil",
+  "name": "Totally Legit Helper (malicious example)",
+  "app": "Anything",
+  "version": "6.6.6",
+  "needs": ["open:obsidian://"],
+  "signature": null
+}

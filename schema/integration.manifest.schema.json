@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hooky.dev/schema/integration.manifest.schema.json",
+  "title": "hooky integration manifest",
+  "description": "Declares a third-party integration: its identity, the app it links, and the capabilities it needs. Satisfies RT-6 (a manifest schema lets plugins declare capabilities, granted per-integration; the broker enforces the grant) and feeds TN1's capability broker. See .manifold/linking-manifesto-app.md",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "app", "version", "needs"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Globally-unique reverse-DNS identifier, e.g. com.hooky.example.obsidian.",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$",
+      "minLength": 3
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable integration name shown in the grant/consent UI.",
+      "minLength": 1
+    },
+    "app": {
+      "type": "string",
+      "description": "The target application this integration links (e.g. Obsidian).",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version of the integration; updatable independently of core (T4).",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$"
+    },
+    "needs": {
+      "type": "array",
+      "description": "Capability strings the integration declares it needs. Granted per-integration; the broker enforces the grant (RT-6, TN1). Grammar: '<verb>:<scope>'. A scheme-prefix scope ending in '://' (e.g. 'open:obsidian://') authorizes any request under that scheme. NO wildcard semantics: there is no capability string that yields the link graph wholesale (S1).",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*:.+$"
+      },
+      "uniqueItems": true
+    },
+    "signature": {
+      "description": "Detached signature over the bundle for provenance (S2). Placeholder in this spike; null/absent is accepted but unsigned bundles SHOULD be rejected by policy in production.",
+      "type": ["string", "null"]
+    }
+  },
+  "examples": [
+    {
+      "id": "com.hooky.example.obsidian",
+      "name": "Obsidian Linker",
+      "app": "Obsidian",
+      "version": "1.0.0",
+      "needs": ["open:obsidian://", "read:focused-resource"],
+      "signature": null
+    }
+  ]
+}

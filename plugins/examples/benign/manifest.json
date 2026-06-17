@@ -1,0 +1,8 @@
+{
+  "id": "com.hooky.example.obsidian",
+  "name": "Obsidian Linker (benign example)",
+  "app": "Obsidian",
+  "version": "1.0.0",
+  "needs": ["open:obsidian://", "read:focused-resource"],
+  "signature": null
+}
