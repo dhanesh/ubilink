@@ -94,3 +94,27 @@ their residuals (GUI panel, live macOS app capture, TCC permission grant) are
 genuinely ENV-blocked in a headless environment and are escalated, not faked. This
 round adds *integration evidence* — the headless slices now compose — not
 satisfaction of the blocked work. `satisfied_count` stays 8.
+
+## D6 — Live macOS capture: shrink the ENV-blocked surface with a CommandRunner seam (R7)
+
+**Date:** 2026-06-17 · **Constraints:** B1 (live half), S4/RT-2, TN7, U3, T5
+
+The live-app residual of B1 (capture a link to whatever is active in Safari /
+Chrome / Finder) and the S4 automation-permission detection were wholly
+ENV-blocked. `src-tauri/src/live_capture.rs` makes them real by applying a
+functional-core / imperative-shell split: a `CommandRunner` trait is the single
+I/O seam. The real `OsaScriptRunner` shells out to `osascript`; a fake runner lets
+**10 unit tests** prove — headlessly — the AppleScript selection per app, the
+`url\tTITLE` / Finder-path parsing into `ResourceIdentity`, U3 degradation
+(empty / title-only / TCC-denied replies → explained `AdapterError`, never a
+panic), the S4 gate firing *before* the runner is consulted, and the permission
+probe mapping (`success → Granted`, `-1743 → Denied`, else `NotDetermined`).
+
+TDD caught a real bug pre-commit: trimming the whole reply ate the leading tab and
+masked an empty-URL field — fixed to trim line-ends only.
+
+**ENV-blocked surface reduced, not eliminated.** What remains needs a real desktop:
+one `osascript` seam against a live app under a TCC grant. It is covered by an
+`#[ignore]`d live test (`live_capture_against_real_safari`) and
+`docs/RUNBOOK-live-capture.md`. **No status flip** — B1/S4 stay PARTIAL until that
+runbook is observed green on a Mac. `satisfied_count` stays 8. 53 tests green.

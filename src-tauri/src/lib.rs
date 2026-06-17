@@ -36,6 +36,7 @@ pub mod broker;
 pub mod capabilities;
 pub mod graph;
 pub mod integrations;
+pub mod live_capture;
 pub mod resource;
 pub mod sandbox;
 pub mod service;
@@ -44,6 +45,7 @@ pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, Permiss
 pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
 pub use integrations::{Installer, InstallError, SignedBundle, sign_bundle};
+pub use live_capture::{AppKind, CommandRunner, MacAppAdapter, OsaScriptRunner, probe_automation_permission};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
 pub use graph::LinkGraph;
 pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};

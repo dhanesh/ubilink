@@ -1,8 +1,8 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 6,
-  "max_rounds": 6,
+  "round": 7,
+  "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
   "gap_attempts": {},
@@ -81,7 +81,16 @@
       "tests": 43,
       "progress": "integration",
       "note": "Wired all rounds into the core user flow + 4 e2e tests. No constraint flip: B1/U5/S4 residuals (GUI panel, live-app capture, TCC) remain ENV-blocked, not faked."
+    },
+    {
+      "round": 7,
+      "cluster": "live macOS app capture adapter (B1/S4 ENV-blocked-surface reduction)",
+      "constraints_closed": [],
+      "satisfied_after": 8,
+      "tests": 53,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed beyond the autonomous backstop. Built MacAppAdapter (Safari/Chrome/Finder) + automation probe behind a CommandRunner seam; 10 headless tests. ENV-blocked residual for B1 shrunk from 'no impl' to one osascript seam, covered by an #[ignore] live test + docs/RUNBOOK-live-capture.md. No status flip: live TCC grant still requires a real desktop (escalated, not faked)."
     }
   ],
-  "terminal": "HEADLESS_CONVERGED + INTEGRATED (m6 facade wired; remaining gaps ENV-blocked)"
+  "terminal": "HEADLESS_CONVERGED + INTEGRATED + ENV-SEAM-REDUCED (live grant verification pending real desktop)"
 }
