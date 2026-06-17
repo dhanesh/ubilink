@@ -31,7 +31,13 @@
 // provably denied, and the broker denies every ungranted capability.
 
 pub mod broker;
+pub mod capabilities;
+pub mod graph;
+pub mod resource;
 pub mod sandbox;
 
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
+pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
+pub use graph::LinkGraph;
+pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};
 pub use sandbox::{Session, EscapeAttempt};

@@ -2,74 +2,449 @@
   "$schema": "https://raw.githubusercontent.com/dhanesh/manifold/main/install/manifold-structure.schema.json",
   "schema_version": 3,
   "feature": "linking-manifesto-app",
-  "phase": "ANCHORED",
+  "phase": "GENERATED",
   "domain": "software",
   "created": "2026-06-17T07:14:39Z",
   "constraints": {
     "business": [
-      { "id": "B1", "type": "invariant", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "B2", "type": "invariant", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "B3", "type": "goal", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 2, "testability": 2 } },
-      { "id": "B4", "type": "boundary", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } }
+      {
+        "id": "B1",
+        "type": "invariant",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "B2",
+        "type": "invariant",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "B3",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "B4",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      }
     ],
     "technical": [
-      { "id": "T1", "type": "boundary", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 3, "testability": 2 } },
-      { "id": "T2", "type": "invariant", "source": "interview", "challenger": "technical-reality", "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "T3", "type": "goal", "source": "interview", "challenger": "technical-reality", "threshold": { "kind": "statistical", "resolve_rate": ">= 95%", "scope": "intra-volume move/rename" }, "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "T4", "type": "invariant", "source": "pre-mortem", "challenger": "technical-reality", "quality": { "specificity": 3, "measurability": 2, "testability": 2 } },
-      { "id": "T5", "type": "boundary", "source": "interview", "challenger": "technical-reality", "quality": { "specificity": 3, "measurability": 2, "testability": 2 } }
+      {
+        "id": "T1",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 2
+        }
+      },
+      {
+        "id": "T2",
+        "type": "invariant",
+        "source": "interview",
+        "challenger": "technical-reality",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "T3",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "technical-reality",
+        "threshold": {
+          "kind": "statistical",
+          "resolve_rate": ">= 95%",
+          "scope": "intra-volume move/rename"
+        },
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "T4",
+        "type": "invariant",
+        "source": "pre-mortem",
+        "challenger": "technical-reality",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "T5",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "technical-reality",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 2
+        }
+      }
     ],
     "user_experience": [
-      { "id": "U1", "type": "boundary", "source": "interview", "challenger": "stakeholder", "threshold": { "kind": "statistical", "p99": "200ms", "p50": "80ms", "metric": "hotkey-to-panel-visible" }, "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "U2", "type": "goal", "source": "interview", "challenger": "stakeholder", "threshold": { "kind": "deterministic", "ceiling": "2 user actions" }, "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "U3", "type": "invariant", "source": "pre-mortem", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } },
-      { "id": "U4", "type": "goal", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } },
-      { "id": "U5", "type": "goal", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 3, "testability": 3 } }
+      {
+        "id": "U1",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "threshold": {
+          "kind": "statistical",
+          "p99": "200ms",
+          "p50": "80ms",
+          "metric": "hotkey-to-panel-visible"
+        },
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "U2",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "threshold": {
+          "kind": "deterministic",
+          "ceiling": "2 user actions"
+        },
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "U3",
+        "type": "invariant",
+        "source": "pre-mortem",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "U4",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "U5",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      }
     ],
     "security": [
-      { "id": "S1", "type": "invariant", "source": "pre-mortem", "challenger": "technical-reality", "quality": { "specificity": 3, "measurability": 2, "testability": 3 } },
-      { "id": "S2", "type": "invariant", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 3, "testability": 3 } },
-      { "id": "S3", "type": "boundary", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } },
-      { "id": "S4", "type": "invariant", "source": "interview", "challenger": "regulation", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } },
-      { "id": "S5", "type": "boundary", "source": "interview", "challenger": "technical-reality", "threshold": { "kind": "deterministic", "ceiling": "input <= 64KB, rate-limited local API" }, "quality": { "specificity": 3, "measurability": 3, "testability": 3 } }
+      {
+        "id": "S1",
+        "type": "invariant",
+        "source": "pre-mortem",
+        "challenger": "technical-reality",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 3
+        }
+      },
+      {
+        "id": "S2",
+        "type": "invariant",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      },
+      {
+        "id": "S3",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "S4",
+        "type": "invariant",
+        "source": "interview",
+        "challenger": "regulation",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "S5",
+        "type": "boundary",
+        "source": "interview",
+        "challenger": "technical-reality",
+        "threshold": {
+          "kind": "deterministic",
+          "ceiling": "input <= 64KB, rate-limited local API"
+        },
+        "quality": {
+          "specificity": 3,
+          "measurability": 3,
+          "testability": 3
+        }
+      }
     ],
     "operational": [
-      { "id": "O1", "type": "goal", "source": "pre-mortem", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 2, "testability": 2 } },
-      { "id": "O2", "type": "goal", "source": "pre-mortem", "challenger": "stakeholder", "quality": { "specificity": 3, "measurability": 2, "testability": 2 } },
-      { "id": "O3", "type": "goal", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 2, "testability": 2 } },
-      { "id": "O4", "type": "goal", "source": "interview", "challenger": "stakeholder", "quality": { "specificity": 2, "measurability": 1, "testability": 1 } }
+      {
+        "id": "O1",
+        "type": "goal",
+        "source": "pre-mortem",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "O2",
+        "type": "goal",
+        "source": "pre-mortem",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 3,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "O3",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 2,
+          "testability": 2
+        }
+      },
+      {
+        "id": "O4",
+        "type": "goal",
+        "source": "interview",
+        "challenger": "stakeholder",
+        "quality": {
+          "specificity": 2,
+          "measurability": 1,
+          "testability": 1
+        }
+      }
     ]
   },
   "suggested_constraints": [
-    { "id": "SC-1", "category": "security", "type": "boundary", "auto_generated": true, "source_constraint": "B1", "from_gap": "GAP-14", "note": "Boundary input validation for the local link API and link-import: URI-scheme allowlist, payload size cap, encoding normalization, schema-validate resource identifiers." },
-    { "id": "SC-2", "category": "user_experience", "type": "goal", "auto_generated": true, "source_constraint": "T3", "from_tension": "TN5", "note": "Re-resolution confirm UX: when a moved/renamed resource is matched only by fuzzy (name/path) heuristics, show 'now points to X (moved from Y) — confirm?' before retargeting. Auto-resolve silently only on exact content-hash/bookmark match." },
-    { "id": "SC-3", "category": "security", "type": "boundary", "auto_generated": true, "source_constraint": "S1", "from_tension": "TN1", "from_gap": "GAP-16", "note": "Capability grants are revocable and force-invalidatable: user can revoke a per-integration grant at any time; revocation takes effect immediately for in-flight and future broker calls." },
-    { "id": "SC-4", "category": "technical", "type": "boundary", "auto_generated": true, "source_constraint": "U1", "from_tension": "TN3", "from_gap": "GAP-16", "note": "Prefetched-link cache invalidation: a prefetched active-resource link is invalidated on focus change or resource mutation, so the panel never presents a stale link." }
+    {
+      "id": "SC-1",
+      "category": "security",
+      "type": "boundary",
+      "auto_generated": true,
+      "source_constraint": "B1",
+      "from_gap": "GAP-14",
+      "note": "Boundary input validation for the local link API and link-import: URI-scheme allowlist, payload size cap, encoding normalization, schema-validate resource identifiers."
+    },
+    {
+      "id": "SC-2",
+      "category": "user_experience",
+      "type": "goal",
+      "auto_generated": true,
+      "source_constraint": "T3",
+      "from_tension": "TN5",
+      "note": "Re-resolution confirm UX: when a moved/renamed resource is matched only by fuzzy (name/path) heuristics, show 'now points to X (moved from Y) \u2014 confirm?' before retargeting. Auto-resolve silently only on exact content-hash/bookmark match."
+    },
+    {
+      "id": "SC-3",
+      "category": "security",
+      "type": "boundary",
+      "auto_generated": true,
+      "source_constraint": "S1",
+      "from_tension": "TN1",
+      "from_gap": "GAP-16",
+      "note": "Capability grants are revocable and force-invalidatable: user can revoke a per-integration grant at any time; revocation takes effect immediately for in-flight and future broker calls."
+    },
+    {
+      "id": "SC-4",
+      "category": "technical",
+      "type": "boundary",
+      "auto_generated": true,
+      "source_constraint": "U1",
+      "from_tension": "TN3",
+      "from_gap": "GAP-16",
+      "note": "Prefetched-link cache invalidation: a prefetched active-resource link is invalidated on focus change or resource mutation, so the panel never presents a stale link."
+    }
   ],
   "blocking_dependencies": [
-    { "blocker": "T1", "blocked": "S1", "tension_id": "TN6" },
-    { "blocker": "S4", "blocked": "B1", "tension_id": "TN7" }
+    {
+      "blocker": "T1",
+      "blocked": "S1",
+      "tension_id": "TN6"
+    },
+    {
+      "blocker": "S4",
+      "blocked": "B1",
+      "tension_id": "TN7"
+    }
   ],
   "gap_checklist_compliance": [
-    { "gap": "GAP-03", "status": "COMPLETED" },
-    { "gap": "GAP-09", "status": "COMPLETED", "note": "Scoped to integration signature verification (S3): attack matrix = forged signature, downgrade/unsigned acceptance. No account/E2E crypto in v1." },
-    { "gap": "GAP-10", "status": "COMPLETED", "note": "Local link API is the unauthenticated surface -> S5 bounds input size + rate." },
-    { "gap": "GAP-11", "status": "COMPLETED", "note": "Integrations depend on external app URL schemes/automation APIs -> T4 adds health-check, timeout, fault isolation, independent update." },
-    { "gap": "GAP-14", "status": "COMPLETED", "note": "Staged as SC-1 (suggested_constraints) pending promotion." },
-    { "gap": "GAP-17", "status": "COMPLETED", "note": "Shared SQLite link graph + concurrent captures -> T2 requires transactional, thread-safe writes; concurrency tests to be generated in m4." }
+    {
+      "gap": "GAP-03",
+      "status": "COMPLETED"
+    },
+    {
+      "gap": "GAP-09",
+      "status": "COMPLETED",
+      "note": "Scoped to integration signature verification (S3): attack matrix = forged signature, downgrade/unsigned acceptance. No account/E2E crypto in v1."
+    },
+    {
+      "gap": "GAP-10",
+      "status": "COMPLETED",
+      "note": "Local link API is the unauthenticated surface -> S5 bounds input size + rate."
+    },
+    {
+      "gap": "GAP-11",
+      "status": "COMPLETED",
+      "note": "Integrations depend on external app URL schemes/automation APIs -> T4 adds health-check, timeout, fault isolation, independent update."
+    },
+    {
+      "gap": "GAP-14",
+      "status": "COMPLETED",
+      "note": "Staged as SC-1 (suggested_constraints) pending promotion."
+    },
+    {
+      "gap": "GAP-17",
+      "status": "COMPLETED",
+      "note": "Shared SQLite link graph + concurrent captures -> T2 requires transactional, thread-safe writes; concurrency tests to be generated in m4."
+    }
   ],
   "draft_required_truths": [
-    { "id": "DRT-1", "seed_from": ["B1", "T5"], "draft_statement": "A reliable mechanism to obtain a stable, resolvable link to the active or selected resource exists for each supported application/platform.", "confidence": "high" },
-    { "id": "DRT-2", "seed_from": ["T2"], "draft_statement": "A persistent local store that guarantees bidirectional link integrity (A<->B stays consistent) exists.", "confidence": "high" },
-    { "id": "DRT-3", "seed_from": ["S1", "T1"], "draft_statement": "A runtime sandbox capable of enforcing deny-by-default capabilities (no ambient net/fs, scoped resource access) on third-party JS exists.", "confidence": "medium" },
-    { "id": "DRT-4", "seed_from": ["U3", "O2"], "draft_statement": "A per-app, per-platform capability descriptor exists to drive honest capability disclosure and graceful degradation.", "confidence": "high" },
-    { "id": "DRT-5", "seed_from": ["T3"], "draft_statement": "Resource identity is representable by multiple independently-resolvable identifiers (path + OS bookmark + content hash + name).", "confidence": "high" },
-    { "id": "DRT-6", "seed_from": ["S4", "B1"], "draft_statement": "OS-level automation/accessibility permission can be requested, granted, and detected at runtime on each target platform.", "confidence": "medium" }
+    {
+      "id": "DRT-1",
+      "seed_from": [
+        "B1",
+        "T5"
+      ],
+      "draft_statement": "A reliable mechanism to obtain a stable, resolvable link to the active or selected resource exists for each supported application/platform.",
+      "confidence": "high"
+    },
+    {
+      "id": "DRT-2",
+      "seed_from": [
+        "T2"
+      ],
+      "draft_statement": "A persistent local store that guarantees bidirectional link integrity (A<->B stays consistent) exists.",
+      "confidence": "high"
+    },
+    {
+      "id": "DRT-3",
+      "seed_from": [
+        "S1",
+        "T1"
+      ],
+      "draft_statement": "A runtime sandbox capable of enforcing deny-by-default capabilities (no ambient net/fs, scoped resource access) on third-party JS exists.",
+      "confidence": "medium"
+    },
+    {
+      "id": "DRT-4",
+      "seed_from": [
+        "U3",
+        "O2"
+      ],
+      "draft_statement": "A per-app, per-platform capability descriptor exists to drive honest capability disclosure and graceful degradation.",
+      "confidence": "high"
+    },
+    {
+      "id": "DRT-5",
+      "seed_from": [
+        "T3"
+      ],
+      "draft_statement": "Resource identity is representable by multiple independently-resolvable identifiers (path + OS bookmark + content hash + name).",
+      "confidence": "high"
+    },
+    {
+      "id": "DRT-6",
+      "seed_from": [
+        "S4",
+        "B1"
+      ],
+      "draft_statement": "OS-level automation/accessibility permission can be requested, granted, and detected at runtime on each target platform.",
+      "confidence": "medium"
+    }
   ],
   "tensions": [
     {
-      "id": "TN1", "type": "trade_off", "between": ["B3", "S1"], "status": "resolved",
-      "triz": { "contradiction": "physical", "parameters": "Extensibility vs Containment", "principles": ["P1", "P24", "P10", "P15"] },
+      "id": "TN1",
+      "type": "trade_off",
+      "between": [
+        "B3",
+        "S1"
+      ],
+      "status": "resolved",
+      "triz": {
+        "contradiction": "physical",
+        "parameters": "Extensibility vs Containment",
+        "principles": [
+          "P1",
+          "P24",
+          "P10",
+          "P15"
+        ]
+      },
       "resolution_strategy": "transform",
       "validation_criteria": [
         "A plugin with no declared capability cannot reach network, filesystem, or the link graph (sandbox-escape test fails closed).",
@@ -77,13 +452,35 @@
         "The full link graph is never returned to a plugin; only the resource it is invoked for is exposed."
       ],
       "propagation_effects": [
-        { "constraint_id": "T1", "effect": "TIGHTENED", "note": "Tauri IPC must route every plugin OS/graph access through a capability-checking broker (per-call), not direct access." },
-        { "constraint_id": "B3", "effect": "LOOSENED", "note": "Gives third parties a concrete, documented capability-declaration extension surface." }
+        {
+          "constraint_id": "T1",
+          "effect": "TIGHTENED",
+          "note": "Tauri IPC must route every plugin OS/graph access through a capability-checking broker (per-call), not direct access."
+        },
+        {
+          "constraint_id": "B3",
+          "effect": "LOOSENED",
+          "note": "Gives third parties a concrete, documented capability-declaration extension surface."
+        }
       ]
     },
     {
-      "id": "TN2", "type": "trade_off", "between": ["B1", "B4"], "status": "resolved",
-      "triz": { "contradiction": "technical", "parameters": "Global vs Local optimum", "principles": ["P3", "P1", "P17"] },
+      "id": "TN2",
+      "type": "trade_off",
+      "between": [
+        "B1",
+        "B4"
+      ],
+      "status": "resolved",
+      "triz": {
+        "contradiction": "technical",
+        "parameters": "Global vs Local optimum",
+        "principles": [
+          "P3",
+          "P1",
+          "P17"
+        ]
+      },
       "resolution_strategy": "partition",
       "validation_criteria": [
         "For each adapter listed in the O2 capability matrix, both UI-get-link and API-get-link pass integration tests.",
@@ -91,13 +488,35 @@
         "The O2 matrix is the single source of truth for what 'supported' means."
       ],
       "propagation_effects": [
-        { "constraint_id": "O2", "effect": "TIGHTENED", "note": "Capability matrix is now load-bearing: it defines the scope over which B1 is asserted." },
-        { "constraint_id": "B1", "effect": "LOOSENED", "note": "Scoped to the supported set per-adapter rather than all apps universally; remains an invariant within that set." }
+        {
+          "constraint_id": "O2",
+          "effect": "TIGHTENED",
+          "note": "Capability matrix is now load-bearing: it defines the scope over which B1 is asserted."
+        },
+        {
+          "constraint_id": "B1",
+          "effect": "LOOSENED",
+          "note": "Scoped to the supported set per-adapter rather than all apps universally; remains an invariant within that set."
+        }
       ]
     },
     {
-      "id": "TN3", "type": "trade_off", "between": ["U1", "T5"], "status": "resolved",
-      "triz": { "contradiction": "technical", "parameters": "Speed vs Correctness", "principles": ["P10", "P11", "P24"] },
+      "id": "TN3",
+      "type": "trade_off",
+      "between": [
+        "U1",
+        "T5"
+      ],
+      "status": "resolved",
+      "triz": {
+        "contradiction": "technical",
+        "parameters": "Speed vs Correctness",
+        "principles": [
+          "P10",
+          "P11",
+          "P24"
+        ]
+      },
       "resolution_strategy": "transform",
       "validation_criteria": [
         "hotkey-to-panel-visible p99 < 200ms even when link capture is still pending.",
@@ -106,13 +525,35 @@
         "If async capture fails after the panel is shown, U3 explained-degradation is presented (GAP-06 cascade endpoint)."
       ],
       "propagation_effects": [
-        { "constraint_id": "T5", "effect": "LOOSENED", "note": "Capture moves off the panel-display critical path; adapter latency no longer gates U1." },
-        { "constraint_id": "U1", "effect": "TIGHTENED", "note": "Requires a focus-change watcher + prefetch cache to keep felt-speed high without violating zero-telemetry (watcher is local-only)." }
+        {
+          "constraint_id": "T5",
+          "effect": "LOOSENED",
+          "note": "Capture moves off the panel-display critical path; adapter latency no longer gates U1."
+        },
+        {
+          "constraint_id": "U1",
+          "effect": "TIGHTENED",
+          "note": "Requires a focus-change watcher + prefetch cache to keep felt-speed high without violating zero-telemetry (watcher is local-only)."
+        }
       ]
     },
     {
-      "id": "TN4", "type": "trade_off", "between": ["S2", "O1"], "status": "resolved",
-      "triz": { "contradiction": "physical", "parameters": "Privacy vs Usability", "principles": ["P1", "P24", "P10"] },
+      "id": "TN4",
+      "type": "trade_off",
+      "between": [
+        "S2",
+        "O1"
+      ],
+      "status": "resolved",
+      "triz": {
+        "contradiction": "physical",
+        "parameters": "Privacy vs Usability",
+        "principles": [
+          "P1",
+          "P24",
+          "P10"
+        ]
+      },
       "resolution_strategy": "transform",
       "validation_criteria": [
         "No network egress occurs without an explicit user-initiated export action (automated test asserts zero background connections).",
@@ -120,13 +561,35 @@
         "A diagnostic bundle is produced only on user action and is user-reviewable before it leaves the device."
       ],
       "propagation_effects": [
-        { "constraint_id": "T4", "effect": "TIGHTENED", "note": "Health-check must emit structured local logs suitable for an opt-in diagnostic export." },
-        { "constraint_id": "S2", "effect": "LOOSENED", "note": "No change to the invariant; the resolution keeps all egress user-initiated, so S2 is preserved without compromise." }
+        {
+          "constraint_id": "T4",
+          "effect": "TIGHTENED",
+          "note": "Health-check must emit structured local logs suitable for an opt-in diagnostic export."
+        },
+        {
+          "constraint_id": "S2",
+          "effect": "LOOSENED",
+          "note": "No change to the invariant; the resolution keeps all egress user-initiated, so S2 is preserved without compromise."
+        }
       ]
     },
     {
-      "id": "TN5", "type": "trade_off", "between": ["T3", "U3"], "status": "resolved",
-      "triz": { "contradiction": "physical", "parameters": "Autonomy vs Control", "principles": ["P10", "P15", "P35"] },
+      "id": "TN5",
+      "type": "trade_off",
+      "between": [
+        "T3",
+        "U3"
+      ],
+      "status": "resolved",
+      "triz": {
+        "contradiction": "physical",
+        "parameters": "Autonomy vs Control",
+        "principles": [
+          "P10",
+          "P15",
+          "P35"
+        ]
+      },
       "resolution_strategy": "transform",
       "validation_criteria": [
         "Exact content-hash or OS-bookmark match auto-resolves without prompting.",
@@ -134,96 +597,357 @@
         "A re-resolution the user rejects leaves the link in a broken-but-recorded state (handled by T4), never silently wrong."
       ],
       "propagation_effects": [
-        { "constraint_id": "T3", "effect": "TIGHTENED", "note": "Re-resolution must carry a confidence score and gate silent auto-resolve on high confidence only." },
-        { "constraint_id": "U3", "effect": "LOOSENED", "note": "Confirm-on-uncertainty reinforces honest, explained behavior consistent with U3." }
+        {
+          "constraint_id": "T3",
+          "effect": "TIGHTENED",
+          "note": "Re-resolution must carry a confidence score and gate silent auto-resolve on high confidence only."
+        },
+        {
+          "constraint_id": "U3",
+          "effect": "LOOSENED",
+          "note": "Confirm-on-uncertainty reinforces honest, explained behavior consistent with U3."
+        }
       ]
     },
     {
-      "id": "TN6", "type": "hidden_dependency", "between": ["S1", "T1"], "status": "resolved",
+      "id": "TN6",
+      "type": "hidden_dependency",
+      "between": [
+        "S1",
+        "T1"
+      ],
+      "status": "resolved",
       "validation_criteria": [
         "The chosen Tauri capability/IPC mechanism is proven (spike or test) to enforce per-plugin JS isolation before S1 is claimed satisfied.",
-        "If Tauri cannot enforce isolation natively, an alternative sandbox runtime is selected — this dependency is verified first in m4/m5."
+        "If Tauri cannot enforce isolation natively, an alternative sandbox runtime is selected \u2014 this dependency is verified first in m4/m5."
       ],
       "propagation_effects": [
-        { "constraint_id": "S1", "effect": "TIGHTENED", "note": "S1 is only realizable if T1's runtime can enforce capability isolation; T1 is the blocker (seeds DRT-3)." }
+        {
+          "constraint_id": "S1",
+          "effect": "TIGHTENED",
+          "note": "S1 is only realizable if T1's runtime can enforce capability isolation; T1 is the blocker (seeds DRT-3)."
+        }
       ]
     },
     {
-      "id": "TN7", "type": "hidden_dependency", "between": ["B1", "S4"], "status": "resolved",
+      "id": "TN7",
+      "type": "hidden_dependency",
+      "between": [
+        "B1",
+        "S4"
+      ],
+      "status": "resolved",
       "validation_criteria": [
         "The B1 capture path checks S4 OS-automation permission state and routes to U3 degradation when the permission is absent.",
         "Permission state is detectable at runtime on each target platform (seeds DRT-6)."
       ],
       "propagation_effects": [
-        { "constraint_id": "B1", "effect": "TIGHTENED", "note": "Link capture cannot function without S4 automation permission; S4 is the blocker for B1." }
+        {
+          "constraint_id": "B1",
+          "effect": "TIGHTENED",
+          "note": "Link capture cannot function without S4 automation permission; S4 is the blocker for B1."
+        }
       ]
     }
   ],
   "anchors": {
     "required_truths": [
-      { "id": "RT-1", "status": "NOT_SATISFIED", "maps_to": ["B1", "T5"], "parent": "OUTCOME", "relevance": 1.0, "confidence": 1.0,
+      {
+        "id": "RT-1",
+        "status": "PARTIAL",
+        "maps_to": [
+          "B1",
+          "T5"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 1.0,
+        "confidence": 1.0,
         "evidence": [
-          { "id": "E1", "type": "test_passes", "ref": "adapter integration test: obtain link to active resource (macOS Finder + Safari)", "status": "PENDING" },
-          { "id": "E2", "type": "file_exists", "path": "src-tauri/src/adapter/mod.rs", "status": "PENDING" }
-        ] },
-      { "id": "RT-2", "status": "NOT_SATISFIED", "maps_to": ["S4"], "parent": "RT-1", "relevance": 0.85, "confidence": 0.85,
+          {
+            "id": "E1",
+            "type": "test_passes",
+            "ref": "resource identity carries address+name; re-resolution tests",
+            "status": "PENDING"
+          },
+          {
+            "id": "E2",
+            "type": "file_exists",
+            "path": "src-tauri/src/resource.rs",
+            "status": "VERIFIED"
+          }
+        ],
+        "note": "Identity model (addr+name) built+tested; live-app capture ADAPTER deferred to a later m4 pass."
+      },
+      {
+        "id": "RT-2",
+        "status": "NOT_SATISFIED",
+        "maps_to": [
+          "S4"
+        ],
+        "parent": "RT-1",
+        "relevance": 0.85,
+        "confidence": 0.85,
         "evidence": [
-          { "id": "E3", "type": "manual_review", "ref": "macOS Accessibility/Automation permission requested, granted, and runtime-detected; absence routes to U3", "status": "PENDING" }
-        ] },
-      { "id": "RT-3", "status": "NOT_SATISFIED", "maps_to": ["T3"], "parent": "RT-1", "relevance": 0.85, "confidence": 0.7,
+          {
+            "id": "E3",
+            "type": "manual_review",
+            "ref": "macOS Accessibility/Automation permission requested, granted, and runtime-detected; absence routes to U3",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "id": "RT-3",
+        "status": "PARTIAL",
+        "maps_to": [
+          "T3"
+        ],
+        "parent": "RT-1",
+        "relevance": 0.85,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E4", "type": "test_passes", "ref": "link re-resolves after intra-volume move/rename in >= 95% of cases", "status": "PENDING" },
-          { "id": "E5", "type": "file_exists", "path": "src-tauri/src/identity/mod.rs", "status": "PENDING" }
-        ] },
-      { "id": "RT-4", "status": "NOT_SATISFIED", "maps_to": ["T2"], "parent": "OUTCOME", "relevance": 1.0, "confidence": 0.85,
+          {
+            "id": "E4",
+            "type": "test_passes",
+            "path": "src-tauri/src/resource.rs",
+            "test_name": "content_hash_matches_after_move_and_rename",
+            "status": "PENDING"
+          },
+          {
+            "id": "E5",
+            "type": "file_exists",
+            "path": "src-tauri/src/resource.rs",
+            "status": "VERIFIED"
+          }
+        ],
+        "note": ">=95% empirical re-resolution rate to be measured in m5; confidence-gated logic (TN5/SC-2) implemented+tested."
+      },
+      {
+        "id": "RT-4",
+        "status": "PARTIAL",
+        "maps_to": [
+          "T2"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 1.0,
+        "confidence": 0.85,
         "evidence": [
-          { "id": "E6", "type": "test_passes", "ref": "hook A<->B then backlink queryable from BOTH endpoints; consistent under concurrent writes", "status": "PENDING" },
-          { "id": "E7", "type": "file_exists", "path": "src-tauri/src/graph/store.rs", "status": "PENDING" }
-        ] },
-      { "id": "RT-5", "status": "NOT_SATISFIED", "maps_to": ["S1", "T1"], "parent": "OUTCOME", "relevance": 1.0, "confidence": 0.7,
+          {
+            "id": "E6",
+            "type": "test_passes",
+            "path": "src-tauri/src/graph.rs",
+            "test_name": "backlink_visible_from_both_ends",
+            "status": "PENDING"
+          },
+          {
+            "id": "E7",
+            "type": "file_exists",
+            "path": "src-tauri/src/graph.rs",
+            "status": "VERIFIED"
+          }
+        ],
+        "note": "Bidirectional SQLite store: backlinks both ends, idempotent, persistent, concurrent-safe \u2014 4 tests."
+      },
+      {
+        "id": "RT-5",
+        "status": "PARTIAL",
+        "maps_to": [
+          "S1",
+          "T1"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 1.0,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E8", "type": "test_passes", "ref": "sandbox-escape test fails closed: plugin with no grant cannot reach net/fs/graph", "status": "PENDING" },
-          { "id": "E9", "type": "manual_review", "ref": "spike proves separate-process sandbox enforces per-plugin OS-level isolation (TN6)", "status": "PENDING" }
-        ] },
-      { "id": "RT-6", "status": "SPECIFICATION_READY", "maps_to": ["B3"], "parent": "RT-5", "relevance": 0.85, "confidence": 0.7,
+          {
+            "id": "E8",
+            "type": "test_passes",
+            "path": "src-tauri/tests/sandbox.rs",
+            "test_name": "fail_closed_no_fs_no_child_escape",
+            "status": "PENDING"
+          },
+          {
+            "id": "E9",
+            "type": "manual_review",
+            "ref": "separate-process Node --permission sandbox proves per-plugin fs/child/worker denial (TN6); NET not contained (D2)",
+            "status": "PENDING"
+          }
+        ],
+        "note": "BINDING proven for fs/child/worker (OS-enforced, fail-closed test). Net containment is a documented gap (DECISIONS D2)."
+      },
+      {
+        "id": "RT-6",
+        "status": "PARTIAL",
+        "maps_to": [
+          "B3"
+        ],
+        "parent": "RT-5",
+        "relevance": 0.85,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E10", "type": "file_exists", "path": "schema/integration.manifest.schema.json", "status": "PENDING" },
-          { "id": "E11", "type": "test_passes", "ref": "broker denies any capability call absent from the plugin manifest grant", "status": "PENDING" }
-        ] },
-      { "id": "RT-7", "status": "SPECIFICATION_READY", "maps_to": ["O2", "U3"], "parent": "OUTCOME", "relevance": 0.7, "confidence": 0.7,
+          {
+            "id": "E10",
+            "type": "file_exists",
+            "path": "schema/integration.manifest.schema.json",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E11",
+            "type": "test_passes",
+            "path": "src-tauri/tests/sandbox.rs",
+            "test_name": "broker_allows_granted_denies_ungranted",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "id": "RT-7",
+        "status": "PARTIAL",
+        "maps_to": [
+          "O2",
+          "U3"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 0.7,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E12", "type": "file_exists", "path": "src-tauri/src/capabilities/matrix.rs", "status": "PENDING" },
-          { "id": "E13", "type": "test_passes", "ref": "unsupported app/platform yields U3 explained-degradation, never silent failure", "status": "PENDING" }
-        ] },
-      { "id": "RT-8", "status": "SPECIFICATION_READY", "maps_to": ["S2"], "parent": "OUTCOME", "relevance": 0.7, "confidence": 0.85,
+          {
+            "id": "E12",
+            "type": "file_exists",
+            "path": "src-tauri/src/capabilities.rs",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E13",
+            "type": "test_passes",
+            "path": "src-tauri/src/capabilities.rs",
+            "test_name": "unsupported_app_degrades_with_explanation_not_silence",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "id": "RT-8",
+        "status": "SPECIFICATION_READY",
+        "maps_to": [
+          "S2"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 0.7,
+        "confidence": 0.85,
         "evidence": [
-          { "id": "E14", "type": "test_passes", "ref": "network test asserts zero background egress; egress only on explicit user export", "status": "PENDING" }
-        ] },
-      { "id": "RT-9", "status": "NOT_SATISFIED", "maps_to": ["U1", "U2"], "parent": "OUTCOME", "relevance": 0.7, "confidence": 0.7,
+          {
+            "id": "E14",
+            "type": "test_passes",
+            "ref": "network test asserts zero background egress; egress only on explicit user export",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "id": "RT-9",
+        "status": "NOT_SATISFIED",
+        "maps_to": [
+          "U1",
+          "U2"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 0.7,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E15", "type": "metric_value", "ref": "hotkey-to-panel-visible p99 < 200ms / p50 < 80ms", "status": "PENDING" },
-          { "id": "E16", "type": "test_passes", "ref": "copy link to current resource achievable in <= 2 user actions", "status": "PENDING" }
-        ] },
-      { "id": "RT-10", "status": "SPECIFICATION_READY", "maps_to": ["T4", "S3", "O1"], "parent": "OUTCOME", "relevance": 0.7, "confidence": 0.7,
+          {
+            "id": "E15",
+            "type": "metric_value",
+            "ref": "hotkey-to-panel-visible p99 < 200ms / p50 < 80ms",
+            "status": "PENDING"
+          },
+          {
+            "id": "E16",
+            "type": "test_passes",
+            "ref": "copy link to current resource achievable in <= 2 user actions",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "id": "RT-10",
+        "status": "SPECIFICATION_READY",
+        "maps_to": [
+          "T4",
+          "S3",
+          "O1"
+        ],
+        "parent": "OUTCOME",
+        "relevance": 0.7,
+        "confidence": 0.7,
         "evidence": [
-          { "id": "E17", "type": "test_passes", "ref": "unsigned/forged integration bundle is rejected or clearly warned (S3 attack matrix)", "status": "PENDING" },
-          { "id": "E18", "type": "file_exists", "path": "src-tauri/src/integrations/installer.rs", "status": "PENDING" }
-        ] }
+          {
+            "id": "E17",
+            "type": "test_passes",
+            "ref": "unsigned/forged integration bundle is rejected or clearly warned (S3 attack matrix)",
+            "status": "PENDING"
+          },
+          {
+            "id": "E18",
+            "type": "file_exists",
+            "path": "src-tauri/src/integrations/installer.rs",
+            "status": "PENDING"
+          }
+        ]
+      }
     ],
     "binding_constraint": {
       "required_truth_id": "RT-5",
       "reason": "Per-plugin capability isolation rests on an unproven runtime assumption (TN6). Until proven, the S1 invariant cannot be satisfied and the entire extensibility story (B3) cannot ship safely. It is the hardest RT to close and unlocks RT-6 and RT-10.",
-      "dependency_chain": ["RT-6", "RT-10"]
+      "dependency_chain": [
+        "RT-6",
+        "RT-10"
+      ]
     },
     "recommended_option": "B",
     "tension_validation": [
-      { "tension_id": "TN1", "status": "CONFIRMED", "by_option": "B", "reason": "Separate-process + broker-over-IPC IS the capability broker resolution." },
-      { "tension_id": "TN2", "status": "CONFIRMED", "by_option": "B", "reason": "Sandbox choice is orthogonal to the supported-set scoping." },
-      { "tension_id": "TN3", "status": "CONFIRMED", "by_option": "B", "reason": "Prefetch/async panel split unaffected by plugin runtime." },
-      { "tension_id": "TN4", "status": "CONFIRMED", "by_option": "B", "reason": "Local-log + opt-in export unaffected; processes can write local logs." },
-      { "tension_id": "TN5", "status": "CONFIRMED", "by_option": "B", "reason": "Confidence-gated re-resolution unaffected by plugin runtime." },
-      { "tension_id": "TN6", "status": "CONFIRMED", "by_option": "B", "reason": "Option B resolves the blocker by deriving isolation from the OS process boundary, not a shared JS context." },
-      { "tension_id": "TN7", "status": "CONFIRMED", "by_option": "B", "reason": "Capture-depends-on-permission unaffected by plugin runtime." }
+      {
+        "tension_id": "TN1",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Separate-process + broker-over-IPC IS the capability broker resolution."
+      },
+      {
+        "tension_id": "TN2",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Sandbox choice is orthogonal to the supported-set scoping."
+      },
+      {
+        "tension_id": "TN3",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Prefetch/async panel split unaffected by plugin runtime."
+      },
+      {
+        "tension_id": "TN4",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Local-log + opt-in export unaffected; processes can write local logs."
+      },
+      {
+        "tension_id": "TN5",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Confidence-gated re-resolution unaffected by plugin runtime."
+      },
+      {
+        "tension_id": "TN6",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Option B resolves the blocker by deriving isolation from the OS process boundary, not a shared JS context."
+      },
+      {
+        "tension_id": "TN7",
+        "status": "CONFIRMED",
+        "by_option": "B",
+        "reason": "Capture-depends-on-permission unaffected by plugin runtime."
+      }
     ]
   },
   "iterations": [
@@ -233,7 +957,13 @@
       "timestamp": "2026-06-17T07:23:08Z",
       "result": "Discovered 23 constraints across 5 categories after reading the Linking Manifesto, confirming the app is an open-source cross-platform Hook.app-style ubiquitous-linking tool, and running a pre-mortem (3 confirmed failure stories).",
       "constraints_added": 23,
-      "by_category": { "business": 4, "technical": 5, "user_experience": 5, "security": 5, "operational": 4 }
+      "by_category": {
+        "business": 4,
+        "technical": 5,
+        "user_experience": 5,
+        "security": 5,
+        "operational": 4
+      }
     },
     {
       "number": 2,
@@ -242,7 +972,11 @@
       "result": "Found 7 tensions (5 trade-offs, 2 hidden dependencies); resolved 7/7. Capability-broker resolves the central extensibility-vs-sandbox conflict; B1 scoped to the supported-adapter set; prefetch/async split keeps the panel instant; opt-in diagnostics preserve zero-telemetry; confidence-gated re-resolution prevents silently-wrong links. 2 blocking dependencies (T1->S1, S4->B1) exported to m3.",
       "tensions_found": 7,
       "tensions_resolved": 7,
-      "by_type": { "trade_offs": 5, "resource_tensions": 0, "hidden_dependencies": 2 }
+      "by_type": {
+        "trade_offs": 5,
+        "resource_tensions": 0,
+        "hidden_dependencies": 2
+      }
     },
     {
       "number": 3,
@@ -250,9 +984,22 @@
       "timestamp": "2026-06-17T07:23:08Z",
       "result": "Derived 10 required truths via backward reasoning (blocker-first: RT-2/S4 and RT-5/T1 from m2 blocking deps). Binding constraint = RT-5 (per-plugin sandbox isolation, unproven). User selected solution Option B (separate-process JS sandbox) which closes RT-5 via OS process isolation; all 7 tensions re-validated CONFIRMED.",
       "required_truths": 10,
-      "by_status": { "SATISFIED": 0, "PARTIAL": 0, "NOT_SATISFIED": 6, "SPECIFICATION_READY": 4 },
+      "by_status": {
+        "SATISFIED": 0,
+        "PARTIAL": 0,
+        "NOT_SATISFIED": 6,
+        "SPECIFICATION_READY": 4
+      },
       "solution_options": 3,
       "selected_option": "Option B (separate-process JS sandbox)"
+    },
+    {
+      "number": 4,
+      "phase": "generate",
+      "timestamp": "2026-06-17T09:20:00Z",
+      "result": "Generated foundation slice (binding-first): plugin sandbox+broker (RT-5 proven, 8 tests), resource identity+re-resolution (RT-1/RT-3), bidirectional SQLite graph (RT-4), capability matrix (RT-7), scaffold+docs+MIT. 22 tests pass, 0 warnings. UI/adapters/integration-runtime deferred. Honest gap: Node permission model does not contain net (D2).",
+      "artifacts_generated": 19,
+      "tests_passing": 22
     }
   ],
   "convergence": {
@@ -266,5 +1013,278 @@
       "conflicts": [],
       "satisfies": []
     }
-  }
+  },
+  "generation": {
+    "option": "B",
+    "scope": "foundation-slice (binding-first); UI, macOS adapters, integration runtime deferred to later m4 passes",
+    "timestamp": "2026-06-17T09:20:00Z",
+    "artifacts": [
+      {
+        "path": "src-tauri/src/broker.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-5",
+          "RT-6",
+          "S1",
+          "TN1",
+          "SC-3"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "src-tauri/src/sandbox.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-5",
+          "S1",
+          "T1",
+          "TN6"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "src-tauri/src/resource.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-1",
+          "RT-3",
+          "T3",
+          "TN5",
+          "SC-2"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "src-tauri/src/graph.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-4",
+          "T2",
+          "U5",
+          "GAP-17"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "src-tauri/src/capabilities.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-7",
+          "O2",
+          "U3",
+          "TN2"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "src-tauri/src/lib.rs",
+        "type": "code",
+        "satisfies": [
+          "RT-5"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      },
+      {
+        "path": "src-tauri/tests/sandbox.rs",
+        "type": "test",
+        "satisfies": [
+          "RT-5",
+          "RT-6",
+          "S1"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "plugins/runtime/plugin-host.mjs",
+        "type": "code",
+        "satisfies": [
+          "RT-5",
+          "S1",
+          "TN1"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "plugins/examples/malicious/plugin.mjs",
+        "type": "test",
+        "satisfies": [
+          "RT-5",
+          "S1"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "plugins/examples/benign/plugin.mjs",
+        "type": "test",
+        "satisfies": [
+          "RT-6"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "plugins/examples/benign/manifest.json",
+        "type": "config",
+        "satisfies": [
+          "RT-6"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      },
+      {
+        "path": "plugins/examples/malicious/manifest.json",
+        "type": "config",
+        "satisfies": [
+          "RT-6"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      },
+      {
+        "path": "schema/integration.manifest.schema.json",
+        "type": "schema",
+        "satisfies": [
+          "RT-6",
+          "B3"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "plugins/README.md",
+        "type": "docs",
+        "satisfies": [
+          "B3",
+          "S1"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "DECISIONS.md",
+        "type": "docs",
+        "satisfies": [
+          "RT-5",
+          "S1",
+          "S2"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "README.md",
+        "type": "docs",
+        "satisfies": [
+          "B2",
+          "B3"
+        ],
+        "status": "generated",
+        "artifact_class": "substantive"
+      },
+      {
+        "path": "LICENSE",
+        "type": "docs",
+        "satisfies": [
+          "B2"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      },
+      {
+        "path": "src-tauri/Cargo.toml",
+        "type": "config",
+        "satisfies": [
+          "T1"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      },
+      {
+        "path": "src-tauri/tauri.conf.json",
+        "type": "config",
+        "satisfies": [
+          "U1",
+          "S2"
+        ],
+        "status": "generated",
+        "artifact_class": "structural"
+      }
+    ],
+    "coverage": {
+      "addressed_this_pass": [
+        "B2",
+        "B3",
+        "S1",
+        "T1",
+        "T2",
+        "U3",
+        "U5",
+        "O2",
+        "T3",
+        "S2",
+        "RT-1",
+        "RT-3",
+        "RT-4",
+        "RT-5",
+        "RT-6",
+        "RT-7",
+        "TN1",
+        "TN2",
+        "TN5",
+        "TN6",
+        "SC-2",
+        "SC-3",
+        "GAP-17"
+      ],
+      "deferred_to_later_passes": [
+        "B1(full capture)",
+        "B4",
+        "T4",
+        "T5(adapters)",
+        "U1",
+        "U2",
+        "U4",
+        "S3",
+        "S4",
+        "S5",
+        "O1",
+        "O3",
+        "O4",
+        "RT-2",
+        "RT-8",
+        "RT-9",
+        "RT-10"
+      ],
+      "note": "Partial by design \u2014 'foundation slice (binding-first)' scope chosen at m4 STEP 0-B. m4 is re-runnable for the deferred set."
+    }
+  },
+  "reversibility_log": [
+    {
+      "action_step": 1,
+      "description": "Plugin sandbox = separate-process Node host (Solution Option B)",
+      "reversibility": "TWO_WAY",
+      "note": "broker-over-IPC boundary is runtime-agnostic; swappable"
+    },
+    {
+      "action_step": 2,
+      "description": "Local link graph on SQLite (rusqlite bundled)",
+      "reversibility": "REVERSIBLE_WITH_COST",
+      "note": "changing the store later needs a data migration"
+    },
+    {
+      "action_step": 3,
+      "description": "MIT license",
+      "reversibility": "REVERSIBLE_WITH_COST",
+      "one_way_consequence": "becomes ONE_WAY after first public release \u2014 relicensing then needs all contributors' consent"
+    }
+  ]
 }
