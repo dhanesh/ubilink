@@ -229,7 +229,7 @@
         "test": "✓",
         "docs": "✗",
         "ops": "◐",
-        "status": "MISSING",
+        "status": "PARTIAL",
         "gap": "Release-signing pipeline BUILT: hooky_core::release (JSON wire format + hex-keyed sign/verify reusing R3 ed25519 core) + bin/hooky-sign CLI + .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke (trusted=0, untrusted/tampered=1). Residual ENV-blocked: GitHub Actions executing with the org HOOKY_SIGNING_KEY secret (docs/RUNBOOK-ci-signing.md).",
         "residual": "residual ENV-blocked: live GitHub Actions run with the signing secret"
       },
