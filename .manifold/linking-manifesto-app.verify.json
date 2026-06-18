@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-18T09:30:00Z",
+    "timestamp": "2026-06-18T10:15:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -103,22 +103,22 @@
       {
         "constraint": "U1",
         "type": "BOUNDARY",
-        "code": "✗",
-        "test": "✗",
+        "code": "◐",
+        "test": "◐",
         "docs": "◐",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "No panel UI; STATISTICAL p99<200ms unmeasured (config skeleton declares intent only)"
+        "status": "PARTIAL",
+        "gap": "Panel scaffolded (dist/, no-build vanilla, CSP=self). Render-first state machine proven: open() paints synchronously without capture data (8 node tests); aria-live status + CSS spinner. Residual ENV-blocked: actual p99<200ms/p50<80ms hotkey-to-visible measurement on a real display + Tauri global-shortcut wiring (docs/RUNBOOK-gui-panel.md)."
       },
       {
         "constraint": "U2",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
+        "code": "◐",
+        "test": "◐",
         "docs": "-",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "No UI; <=2-action copy flow not built"
+        "status": "PARTIAL",
+        "gap": "<=2-action flow proven in the reducer (open->confirm; node test) + single primary Copy control with Enter shortcut (markup contract test). Residual: end-to-end 2-action demo on a real device."
       },
       {
         "constraint": "U3",
@@ -128,18 +128,18 @@
         "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Degradation tested for BOTH capability-matrix and permission paths; whole-app live-failure UX still pending UI",
+        "gap": "Degradation now wired THROUGH the panel: PanelBackend.capture_current turns any failure into a non-empty explained message (Rust test) + role=alert region. Whole-app live-failure UX render pending GUI.",
         "residual": "residual ENV-blocked (whole-app live-failure UX needs GUI)"
       },
       {
         "constraint": "U4",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
+        "code": "◐",
+        "test": "◐",
         "docs": "-",
         "ops": "-",
-        "status": "MISSING",
-        "gap": "No UI; keyboard/a11y not addressed"
+        "status": "PARTIAL",
+        "gap": "Accessibility contract built + tested: role=dialog, aria-label, aria-live, role=alert, :focus-visible ring, prefers-reduced-motion (3 Rust markup/CSS tests). Residual ENV-blocked: keyboard-only + VoiceOver + AA-contrast pass on a real display."
       },
       {
         "constraint": "U5",
@@ -149,7 +149,7 @@
         "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Backlinks both-ends proven through the integrated HookyService flow (service.rs end_to_end_capture_hook_and_backlinks); UI surfacing ENV-blocked"
+        "gap": "Backlinks surfaced through the panel path: PanelBackend.capture_current returns a resource + its backlinks (Rust test); reducer renders them (node test). Actual webview render pending GUI."
       },
       {
         "constraint": "S1",
@@ -373,8 +373,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 60,
-      "tests_passed": 60,
+      "tests_run": 65,
+      "tests_passed": 65,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -382,9 +382,11 @@
         "E4",
         "E6",
         "E8"
-      ]
+      ],
+      "node_tests_run": 8,
+      "node_tests_passed": 8
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret."
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook)."
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
@@ -392,7 +394,7 @@
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
     "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
-    "src-tauri/src/lib.rs": "1a45205517f27e1adb94ab29e32cda012b445c4327d119af4fefb694f1d166fd",
+    "src-tauri/src/lib.rs": "a4e70d060c3c11f56f6b5de6a9b145a57e1f991abcff368777f3bc1de80f0049",
     "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
     "plugins/examples/malicious/plugin.mjs": "9f8eb526ffad1a717d5170ab298adb3400cb70dc85a9c7dc6f23cfa73e38220c",
@@ -409,7 +411,13 @@
     "src-tauri/src/service.rs": "5abfd5ade47f49c40c7e16933969c88a7641195072155d68ba92fb64554e62ee",
     "src-tauri/src/live_capture.rs": "97e4466aa978e86ae94c9817b76697648907385e9ae9666c7532b44215d0f240",
     "src-tauri/src/release.rs": "bfcedf9faa1a3ce6385627baa963791daf540d0bf0f55f13df09efcfec602742",
-    "src-tauri/src/bin/hooky-sign.rs": "6bb31897abc6a11fdfdcd9ae30020c844e039fc38e0a4917291b72692c0e5cdb"
+    "src-tauri/src/bin/hooky-sign.rs": "6bb31897abc6a11fdfdcd9ae30020c844e039fc38e0a4917291b72692c0e5cdb",
+    "src-tauri/src/panel.rs": "f32be64cf4aa11cb3e461da05d9e83db2131aab80084ca6ade3e0d4d62fd635e",
+    "dist/index.html": "7ab23ea9c4b4f4ebf047dc8e2878e2f863c880e55a2648a9fbdb90e277d1cb83",
+    "dist/panel.css": "64f5588b22fba165d6b961ae56167843d3aad7a486536e3d0cb706d2550e811b",
+    "dist/panel.js": "2a28e8e09cf0dbac01813f56bf26a8b9425084130afcd59b223f5436f93a421f",
+    "dist/panel-state.mjs": "a29d1d215b1878f6a73f86415440429fca59883bd43280bfe57b3a24149c8689",
+    "dist/panel-state.test.mjs": "29e5c807dcb148642571c4425abd93778c256016ef67e9bf8d7c3baacbf4ccd0"
   },
-  "hashes_updated_at": "2026-06-18T09:30:00.000Z"
+  "hashes_updated_at": "2026-06-18T10:15:00.000Z"
 }

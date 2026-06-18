@@ -6,10 +6,13 @@
 
 # ── Node / web frontend ──
 node_modules/
-dist/
 dist-ssr/
 .vite/
 *.local
+# NOTE: root /dist/ is NOT ignored — this is a no-build app, so dist/ holds
+# hand-authored frontend SOURCE (panel.html/css/js), not generated output.
+# The CI signing artifacts under src-tauri/dist/ ARE generated, so ignore those:
+/src-tauri/dist/
 
 # ── Tauri build output ──
 /src-tauri/gen/

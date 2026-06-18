@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 8,
+  "round": 9,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -99,7 +99,17 @@
       "tests": 60,
       "progress": "env-surface-reduction",
       "note": "Human-directed. Built hooky_core::release (JSON wire format + hex-keyed sign/verify reusing R3's proven ed25519 core), the hooky-sign CLI, and .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke. No status flip: O3 stays PARTIAL until a live GitHub Actions run with the org HOOKY_SIGNING_KEY secret (escalated, not faked). docs/RUNBOOK-ci-signing.md."
+    },
+    {
+      "round": 9,
+      "cluster": "GUI panel scaffold (U1/U2/U4 MISSING->PARTIAL) + U3/U5 surfaced via panel",
+      "constraints_closed": [],
+      "satisfied_after": 8,
+      "tests": 65,
+      "node_tests": 8,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed. No-build vanilla panel in dist/ (zero npm deps -> S2-safe) + Rust PanelBackend command contract over HookyService. Render-first U1 state machine, <=2-action U2 flow, U4 a11y markup/CSS, U5 backlinks, U3 explained errors -- all contract-tested (65 cargo + 8 node). U1/U2/U4 upgraded MISSING->PARTIAL. No SATISFIED flip: p99 timing, VoiceOver/contrast, hotkey + Tauri command wiring need a real display (docs/RUNBOOK-gui-panel.md). Escalated, not faked."
     }
   ],
-  "terminal": "HEADLESS_MAXED: every headless-buildable gap implemented + proven; remaining residuals need a real desktop / live CI / hosted infra"
+  "terminal": "HEADLESS_MAXED: all four ENV-blocked gap-areas (live capture, CI signing, GUI panel) built + contract-tested headlessly; residuals are real-display/live-CI observations behind runbooks"
 }

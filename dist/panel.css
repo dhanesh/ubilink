@@ -1,0 +1,75 @@
+/* Satisfies: U1 (no web fonts / no remote assets / no layout thrash so first paint
+   is immediate), U4 (visible focus ring, AA-contrast text on the panel surface,
+   reduced-motion respected). Local-only — no @import, no remote url() (S2). */
+
+:root {
+  --bg: #1b1d22;
+  --fg: #f2f3f5;        /* ~13:1 on --bg — exceeds WCAG AA for body text (U4) */
+  --muted: #b9bec7;     /* ~6.7:1 on --bg — passes AA (U4) */
+  --accent: #6ea8fe;
+  --focus: #ffd166;     /* high-contrast focus ring, distinct from --accent (U4) */
+  --error: #ff8f8f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; /* system fonts: zero network */
+  color: var(--fg);
+  background: var(--bg);
+}
+
+#panel {
+  padding: 18px 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#resource-name { margin: 0; font-size: 1.15rem; }
+.uri { margin: 0; color: var(--muted); font-size: 0.85rem; word-break: break-all; }
+
+#copy {
+  align-self: flex-start;
+  padding: 9px 18px;
+  font-size: 1rem;
+  color: #10131a;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+#copy:disabled { opacity: 0.45; cursor: default; }
+
+/* U4: an unmistakable focus indicator for keyboard users on every interactive element. */
+#copy:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+#error { margin: 0; color: var(--error); }
+
+#backlinks ul { margin: 6px 0 0; padding-left: 18px; }
+#backlinks a { color: var(--accent); }
+
+.hint { margin-top: auto; color: var(--muted); font-size: 0.8rem; }
+
+/* Spinner — pure CSS, honours reduced-motion (U4 / accessibility). */
+#status-line[data-phase="capturing"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.8em; height: 0.8em;
+  margin-right: 8px;
+  border: 2px solid var(--muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #status-line[data-phase="capturing"]::before { animation: none; }
+}

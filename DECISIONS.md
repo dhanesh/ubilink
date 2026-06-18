@@ -142,3 +142,32 @@ tampered → exit 1).
 is ◐ — the residual is GitHub Actions actually running the workflow with the org
 `HOOKY_SIGNING_KEY` secret (`docs/RUNBOOK-ci-signing.md`), which needs the real CI
 environment. Escalated, not faked. `satisfied_count` stays 8. 60 tests green.
+
+## D8 — GUI panel: no-build vanilla frontend + Rust command contract (R9 / U1·U2·U4·U3·U5)
+
+**Date:** 2026-06-18 · **Constraints:** U1, U2, U3, U4, U5
+
+**Stack choice, forced by the project's own constraints (not preference):** a
+no-build, **zero-npm-dependency** vanilla frontend (`dist/`). A React/bundler SPA
+would contradict S2 (third-party JS = potential egress) and add hydration latency
+that fights U1's p99<200ms. The Rust core already refuses to depend on Tauri; the
+panel keeps that line — its *logic* is plain Rust + plain JS, and the Tauri webview
+binding is the only ENV-blocked layer.
+
+The U1↔T5 tension (spec line 245) dictates the architecture: **render-first,
+fill-async.** `dist/panel-state.mjs` is a pure view-state reducer where `open()`
+transitions to `capturing` synchronously (no capture data in the first paint), and
+`captured`/`failed` arrive later — proven by 8 `node --test` cases (built-in runner,
+zero deps, S2-safe). `src-tauri/src/panel.rs` is the command contract
+(`capture_current` over the integrated `HookyService`): it surfaces backlinks (U5)
+and converts any failure to a non-empty explained message (U3) — 2 Rust tests. Three
+more Rust tests assert the static **markup/style contract**: `index.html` has
+`role="dialog"`, an accessible name, `aria-live`, `role="alert"`, a single primary
+Copy action + Enter shortcut; `panel.css` has a `:focus-visible` ring and respects
+`prefers-reduced-motion` (U4).
+
+**U1/U2/U4 upgraded MISSING → PARTIAL** (the UI exists and is contract-tested), but
+**no flip to SATISFIED.** The residuals genuinely need a real display: the p99/p50
+timing, the VoiceOver + AA-contrast + keyboard-only pass, the global hotkey, and the
+actual `#[tauri::command]` wiring — all in `docs/RUNBOOK-gui-panel.md`.
+`satisfied_count` stays 8. 65 cargo + 8 node tests green.

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!-- Satisfies: U1 (instant hidden-until-summoned panel; first paint shows a spinner
+     while capture runs off the critical path), U2 (the primary "Copy link" action is
+     a single focusable control — hotkey + this = 2 actions), U3 (an explained error
+     region, never a silent failure), U4 (keyboard-first + screen-reader labels +
+     visible focus + contrast), U5 (a backlinks region surfaced at the resource).
+     See .manifold/linking-manifesto-app.md -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hooky</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <!-- role=dialog + aria-label so assistive tech announces the panel (U4). -->
+    <main id="panel" role="dialog" aria-modal="true" aria-label="hooky linking panel">
+      <!-- Live status: spinner (U1) / resource name. aria-live so SR users hear it fill. -->
+      <section id="status" aria-live="polite">
+        <p id="status-line" data-phase="capturing">Capturing the active resource…</p>
+        <h1 id="resource-name" hidden></h1>
+        <p id="resource-uri" class="uri" hidden></p>
+      </section>
+
+      <!-- The primary action. ONE control = U2's second action (hotkey was the first).
+           Disabled until a resource is ready; Enter triggers it (keyboard-first, U4). -->
+      <button id="copy" type="button" aria-keyshortcuts="Enter" disabled>
+        Copy link
+      </button>
+
+      <!-- U3: explained degradation. Hidden unless there is something to explain;
+           role=alert so screen readers announce it immediately. -->
+      <p id="error" role="alert" hidden></p>
+
+      <!-- U5: backlinks at the resource. Labelled list, keyboard-navigable links. -->
+      <section id="backlinks" aria-labelledby="backlinks-heading" hidden>
+        <h2 id="backlinks-heading">Hooked to this</h2>
+        <ul id="backlinks-list"></ul>
+      </section>
+
+      <p class="hint" id="hint">Esc to dismiss · Enter to copy</p>
+    </main>
+
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>
