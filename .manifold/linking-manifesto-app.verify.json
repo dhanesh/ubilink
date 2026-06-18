@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-17T20:05:00Z",
+    "timestamp": "2026-06-18T09:30:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -225,12 +225,13 @@
       {
         "constraint": "O3",
         "type": "GOAL",
-        "code": "✗",
-        "test": "✗",
+        "code": "✓",
+        "test": "✓",
         "docs": "✗",
-        "ops": "-",
+        "ops": "◐",
         "status": "MISSING",
-        "gap": "No CI / reproducible signed builds"
+        "gap": "Release-signing pipeline BUILT: hooky_core::release (JSON wire format + hex-keyed sign/verify reusing R3 ed25519 core) + bin/hooky-sign CLI + .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke (trusted=0, untrusted/tampered=1). Residual ENV-blocked: GitHub Actions executing with the org HOOKY_SIGNING_KEY secret (docs/RUNBOOK-ci-signing.md).",
+        "residual": "residual ENV-blocked: live GitHub Actions run with the signing secret"
       },
       {
         "constraint": "O4",
@@ -372,8 +373,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 53,
-      "tests_passed": 53,
+      "tests_run": 60,
+      "tests_passed": 60,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -383,7 +384,7 @@
         "E8"
       ]
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip."
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret."
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
@@ -391,7 +392,7 @@
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
     "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
-    "src-tauri/src/lib.rs": "32900002429c8045fb5e8ef012e655dca33ff545beb1a99d3efd38e8109e61ec",
+    "src-tauri/src/lib.rs": "1a45205517f27e1adb94ab29e32cda012b445c4327d119af4fefb694f1d166fd",
     "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
     "plugins/examples/malicious/plugin.mjs": "9f8eb526ffad1a717d5170ab298adb3400cb70dc85a9c7dc6f23cfa73e38220c",
@@ -406,7 +407,9 @@
     "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
     "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd",
     "src-tauri/src/service.rs": "5abfd5ade47f49c40c7e16933969c88a7641195072155d68ba92fb64554e62ee",
-    "src-tauri/src/live_capture.rs": "97e4466aa978e86ae94c9817b76697648907385e9ae9666c7532b44215d0f240"
+    "src-tauri/src/live_capture.rs": "97e4466aa978e86ae94c9817b76697648907385e9ae9666c7532b44215d0f240",
+    "src-tauri/src/release.rs": "bfcedf9faa1a3ce6385627baa963791daf540d0bf0f55f13df09efcfec602742",
+    "src-tauri/src/bin/hooky-sign.rs": "6bb31897abc6a11fdfdcd9ae30020c844e039fc38e0a4917291b72692c0e5cdb"
   },
-  "hashes_updated_at": "2026-06-17T20:05:00.000Z"
+  "hashes_updated_at": "2026-06-18T09:30:00.000Z"
 }

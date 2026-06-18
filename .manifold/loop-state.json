@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 7,
+  "round": 8,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -90,7 +90,16 @@
       "tests": 53,
       "progress": "env-surface-reduction",
       "note": "Human-directed beyond the autonomous backstop. Built MacAppAdapter (Safari/Chrome/Finder) + automation probe behind a CommandRunner seam; 10 headless tests. ENV-blocked residual for B1 shrunk from 'no impl' to one osascript seam, covered by an #[ignore] live test + docs/RUNBOOK-live-capture.md. No status flip: live TCC grant still requires a real desktop (escalated, not faked)."
+    },
+    {
+      "round": 8,
+      "cluster": "O3 CI signed builds: release-signing CLI + GitHub Actions workflow",
+      "constraints_closed": [],
+      "satisfied_after": 8,
+      "tests": 60,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed. Built hooky_core::release (JSON wire format + hex-keyed sign/verify reusing R3's proven ed25519 core), the hooky-sign CLI, and .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke. No status flip: O3 stays PARTIAL until a live GitHub Actions run with the org HOOKY_SIGNING_KEY secret (escalated, not faked). docs/RUNBOOK-ci-signing.md."
     }
   ],
-  "terminal": "HEADLESS_CONVERGED + INTEGRATED + ENV-SEAM-REDUCED (live grant verification pending real desktop)"
+  "terminal": "HEADLESS_MAXED: every headless-buildable gap implemented + proven; remaining residuals need a real desktop / live CI / hosted infra"
 }

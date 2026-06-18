@@ -118,3 +118,27 @@ one `osascript` seam against a live app under a TCC grant. It is covered by an
 `#[ignore]`d live test (`live_capture_against_real_safari`) and
 `docs/RUNBOOK-live-capture.md`. **No status flip** — B1/S4 stay PARTIAL until that
 runbook is observed green on a Mac. `satisfied_count` stays 8. 53 tests green.
+
+## D7 — CI signed builds: a release-signing pipeline reusing the R3 crypto (R8 / O3)
+
+**Date:** 2026-06-18 · **Constraints:** O3, S3/RT-10, O1/T4
+
+O3 (release artifacts signed by a pipeline, not a dev laptop) was ENV-blocked. The
+crypto is *not* new — `hooky_core::release` reuses R3's `sign_bundle` +
+`Installer::verify`, which already passed the GAP-09 attack matrix. O3 adds only the
+operational seam: a JSON `WireBundle` wire format (hex-encoded sig/pubkey, dep-free
+hex codec so S2 holds — no new crates), pure `sign_to_json` / `verify_json` entry
+points keyed by hex (so the key comes from a CI secret), a thin `bin/hooky-sign` CLI
+(`sign` / `verify` / `pubkey`), and `.github/workflows/release.yml`
+(test → sign → **self-verify** → upload; the build fails if the artifact doesn't
+validate).
+
+Proven headlessly: 7 unit tests (roundtrip, tamper→`BadSignature`,
+untrusted→`UntrustedSigner`, malformed inputs) **plus** an end-to-end CLI smoke
+against the real `plugins/examples/benign` bundle (trusted → exit 0, untrusted &
+tampered → exit 1).
+
+**No status flip.** O3 stays PARTIAL: its code/test cells are now ✓ but the ops cell
+is ◐ — the residual is GitHub Actions actually running the workflow with the org
+`HOOKY_SIGNING_KEY` secret (`docs/RUNBOOK-ci-signing.md`), which needs the real CI
+environment. Escalated, not faked. `satisfied_count` stays 8. 60 tests green.
