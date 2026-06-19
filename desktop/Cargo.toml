@@ -1,0 +1,21 @@
+# Satisfies: T1 (wire the broker/core into the Tauri command layer), U1 (global
+# hotkey -> panel), U2/U3/U5 (the panel commands). See docs/RUNBOOK-gui-panel.md.
+#
+# SEPARATE crate from hooky-core on purpose (same rule as registry/): Tauri pulls a
+# large dependency tree, and the core is deliberately Tauri-free (D1/D8) so its S2
+# `no_network_deps` guard stays physically true. This crate is the imperative GUI
+# shell; all logic lives in hooky-core and is unit-tested without a display.
+[package]
+name = "hooky-desktop"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Tauri desktop shell for hooky — wires the panel UI to hooky-core's command contract."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hooky-core = { path = "../src-tauri" }
+tauri = { version = "2", features = [] }
+tauri-plugin-global-shortcut = "2"

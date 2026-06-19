@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the hooky panel window: core APIs + the app's own commands. The global shortcut is registered from Rust, not invoked from JS.",
+  "windows": ["panel"],
+  "permissions": ["core:default"]
+}

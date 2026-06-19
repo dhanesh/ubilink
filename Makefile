@@ -18,12 +18,13 @@ NODE     ?= node
 PYTHON   ?= python3
 CORE     := src-tauri/Cargo.toml
 REGISTRY := registry/Cargo.toml
+DESKTOP  := desktop/Cargo.toml
 UI_DIR   := dist
 UI_PORT  ?= 1420
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-release test test-rust test-js validate check \
-        run run-ui run-registry fmt clean
+.PHONY: help build build-release build-desktop test test-rust test-js validate check \
+        run run-desktop run-ui run-registry fmt clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -36,6 +37,9 @@ build: ## Build all crates (debug): core lib, hooky-sign, hooky-registry
 build-release: ## Build all crates optimized (release)
 	$(CARGO) build --release --manifest-path $(CORE)
 	$(CARGO) build --release --manifest-path $(REGISTRY)
+
+build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
+	$(CARGO) build --manifest-path $(DESKTOP)
 
 test: test-rust test-js ## Run every test suite (Rust core + registry, then JS panel)
 
@@ -51,13 +55,17 @@ validate: ## Validate the Manifold spec (needs the `manifold` CLI)
 
 check: build test validate ## Full local verification: build + all tests + spec validate
 
-run: run-ui ## Run the local app (serve the panel UI — see the desktop-shell note above)
+run: run-desktop ## Run the local OS app (the Tauri desktop panel; needs a desktop session)
 
-run-ui: ## Serve the no-build panel UI at http://localhost:$(UI_PORT)
+run-desktop: ## Build + launch the hooky desktop app (global hotkey: Cmd/Ctrl+Shift+K)
+	@echo "Launching hooky. Summon the panel with Cmd/Ctrl+Shift+K."
+	@echo "(Grant Automation access on first capture — see docs/RUNBOOK-gui-panel.md.)"
+	$(CARGO) run --manifest-path $(DESKTOP)
+
+run-ui: ## Browser-only preview of the panel UI at http://localhost:$(UI_PORT)
 	@echo "Serving $(UI_DIR)/ at http://localhost:$(UI_PORT)  (Ctrl-C to stop)"
-	@echo "NOTE: this is the UI preview. The capture flow needs the Tauri bridge, which"
-	@echo "      is absent in a plain browser (it degrades to an explained error, U3)."
-	@echo "      Full desktop app: docs/RUNBOOK-gui-panel.md."
+	@echo "NOTE: preview only — no Tauri bridge in a plain browser, so capture degrades"
+	@echo "      to an explained error (U3). For the real app use 'make run'."
 	@$(PYTHON) -c "import http.server, functools as f; \
 h = http.server.SimpleHTTPRequestHandler; \
 h.extensions_map['.mjs'] = 'text/javascript'; \

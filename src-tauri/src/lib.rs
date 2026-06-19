@@ -47,7 +47,7 @@ pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, Permiss
 pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
 pub use integrations::{Installer, InstallError, SignedBundle, sign_bundle};
-pub use live_capture::{AppKind, CommandRunner, MacAppAdapter, OsaScriptRunner, probe_automation_permission};
+pub use live_capture::{app_kind_for, AppKind, CommandRunner, MacAppAdapter, OsaScriptRunner, probe_automation_permission, FRONTMOST_APP_SCRIPT};
 pub use release::{public_hex, sign_to_json, signing_key_from_hex, verify_json, SignError, WireBundle};
 pub use panel::{LinkView, PanelBackend, PanelView};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};

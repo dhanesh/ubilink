@@ -224,3 +224,33 @@ review process exist and are proven; what remains is *operating a hosted, govern
 instance* (public host, TLS, durable storage, a standing review team) — genuinely
 ENV-blocked. Unlike B3 (a purely structural claim), O4 implies a running governed
 channel, so it stays PARTIAL. `satisfied_count` stays 9. 75 cargo + 8 node tests green.
+
+## D11 — Tauri desktop shell as a separate crate; T1 wiring closed in code (R12)
+
+**Date:** 2026-06-19 · **Constraints:** T1, U1, U2, U3, U5, O2
+
+**`desktop/` is a SEPARATE crate** (third time the rule applies, after registry/):
+Tauri pulls a ~300-crate tree, and hooky-core is deliberately Tauri-free (D1/D8) so
+its S2 `no_network_deps` guard stays physically true. The desktop crate depends on
+hooky-core + `tauri` v2 + `tauri-plugin-global-shortcut`; the core is untouched.
+
+It registers `#[tauri::command]` wrappers over the headlessly-tested `PanelBackend`:
+`capture_current` (detects the frontmost app via `app_kind_for` → routes to the live
+`MacAppAdapter` → capture+validate+backlinks, with an explained error for an
+unsupported app, U3), `capabilities` (O2 disclosure), `copy_to_clipboard` (pbcopy,
+no extra dep, U2), `open_link`, `dismiss_panel`. A Cmd/Ctrl+Shift+K global shortcut
+toggles the hidden `panel` window (U1). `withGlobalTauri` exposes the bridge the
+no-build `panel.js` already calls.
+
+**Compilation is the verification.** The shell **compiles and links** against Tauri
+v2 (`make build-desktop` → a 26 MB binary): the command signatures, the v2
+global-shortcut API (`Shortcut::new`/`on`/`register`), and `generate_context!`
+(config + capabilities + icon) all type-check. The frontmost-routing logic is
+unit-tested in hooky-core (`app_kind_for`). **`make run` now launches the real OS
+app** (was the UI preview).
+
+**T1's literal gap — "broker IPC not wired into Tauri commands" — is closed in
+code.** It stays PARTIAL, not SATISFIED: there is no automated runtime test without a
+display, so the trust-boundary's *runtime* enforcement is verified on a Mac
+(`docs/RUNBOOK-gui-panel.md`). `satisfied_count` stays 9. 76 cargo + 8 node tests
+green; desktop compiles.

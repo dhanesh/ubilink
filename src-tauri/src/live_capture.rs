@@ -167,6 +167,23 @@ pub fn probe_automation_permission<R: CommandRunner>(runner: &R) -> PermissionSt
     }
 }
 
+/// The AppleScript that returns the name of the frontmost application — used by the
+/// desktop shell to pick which adapter captures the active resource.
+pub const FRONTMOST_APP_SCRIPT: &str =
+    "tell application \"System Events\" to return name of first application process whose frontmost is true";
+
+/// Map a frontmost-app name (as `osascript` reports it) to a capturable `AppKind`.
+/// `None` means we have no live adapter for that app — the caller degrades with an
+/// explanation (U3) rather than capturing the wrong thing.
+pub fn app_kind_for(frontmost: &str) -> Option<AppKind> {
+    match frontmost.trim() {
+        "Safari" => Some(AppKind::Safari),
+        "Google Chrome" => Some(AppKind::Chrome),
+        "Finder" => Some(AppKind::Finder),
+        _ => None,
+    }
+}
+
 /// The real runner: shells out to `osascript`. macOS-only; elsewhere it reports the
 /// platform limitation as an Err so callers degrade (U3) instead of pretending.
 pub struct OsaScriptRunner;
@@ -320,6 +337,16 @@ mod tests {
         assert!(AppKind::Safari.script().contains("Safari"));
         assert!(AppKind::Chrome.script().contains("Google Chrome"));
         assert!(AppKind::Finder.script().contains("Finder"));
+    }
+
+    #[test]
+    fn frontmost_app_maps_to_the_right_adapter_or_degrades() {
+        // Desktop routing: the frontmost app picks the adapter; an unknown app maps
+        // to None so the shell can explain (U3) instead of capturing the wrong thing.
+        assert_eq!(app_kind_for("Safari"), Some(AppKind::Safari));
+        assert_eq!(app_kind_for("Google Chrome"), Some(AppKind::Chrome));
+        assert_eq!(app_kind_for(" Finder\n"), Some(AppKind::Finder));
+        assert_eq!(app_kind_for("Slack"), None);
     }
 
     #[test]

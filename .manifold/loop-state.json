@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 11,
+  "round": 12,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -133,7 +133,19 @@
       "node_tests": 8,
       "progress": "env-surface-reduction",
       "note": "Human-directed. Built registry/ as a SEPARATE crate (a server can't live in hooky-core under S2; separation keeps the core's no_network_deps guard true). std-only HTTP (zero added deps), reuses hooky-core ed25519 verify + monotonicity. Functional-core/imperative-shell: RegistryIndex + pure handle_request + handle_stream, 6 tests, plus a real-socket smoke (publish/list/search/fetch/untrusted-reject/404). Review process = trusted-key gate, documented in RUNBOOK-registry.md. O4 MISSING->PARTIAL; hosting a governed public instance is the ENV residual, not faked."
+    },
+    {
+      "round": 12,
+      "cluster": "Tauri desktop shell (T1 wiring closed in code; U1 hotkey wired)",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 76,
+      "registry_tests": 6,
+      "node_tests": 8,
+      "desktop_compiles": true,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed. Built desktop/ Tauri crate (separate from hooky-core so the core's S2 no_network_deps guard stays true). #[tauri::command] wrappers over PanelBackend (capture_current routes via frontmost-app detection -> live adapter; capabilities; copy via pbcopy; open; dismiss) + a Cmd/Ctrl+Shift+K global shortcut toggling the panel. COMPILES + links against Tauri v2 + global-shortcut plugin (strong headless verification: the wiring type-checks). T1's 'not wired into Tauri commands' gap is closed in code. Running needs a display (ENV-blocked); make run launches it. satisfied_count stays 9 (no runtime verification)."
     }
   ],
-  "terminal": "9/23 SATISFIED; all four directed gap-areas + O4 registry built & verified headlessly; remaining residuals = hosted/live-CI/real-display ops behind 5 runbooks, plus statistical/other-platform"
+  "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"
 }

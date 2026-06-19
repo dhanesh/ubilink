@@ -17,6 +17,8 @@ dist-ssr/
 # ── Tauri build output ──
 /src-tauri/gen/
 /src-tauri/WixTools/
+/desktop/gen/
+/desktop/WixTools/
 
 # ── Editors / OS ──
 .DS_Store
@@ -43,3 +45,6 @@ dist-ssr/
 
 # ── Context cache (local only) ──
 /.context/
+
+# context-hygiene runtime cache
+.context/

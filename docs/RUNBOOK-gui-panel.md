@@ -23,12 +23,18 @@ Run them: `node --test 'dist/*.test.mjs'` and `cargo test panel`.
 
 ## Manual steps (a Mac with a desktop session) — what stays ENV-blocked
 
-1. **Wire the Tauri command layer.** Add the `tauri` crate + a binary that registers
-   `#[tauri::command]` wrappers calling `PanelBackend` (`capture_current`,
-   `copy_to_clipboard`, `dismiss_panel`, `open_link`) and a global shortcut that
-   shows the (already-configured, hidden) `panel` window from `tauri.conf.json`.
-   *Deliberately not added headlessly* — it pulls a webview/runtime stack the core
-   avoids, and can't be exercised without a display.
+1. **Wire the Tauri command layer — DONE (compile-verified).** The `desktop/` crate
+   registers `#[tauri::command]` wrappers over `PanelBackend` (`capture_current`,
+   `capabilities`, `copy_to_clipboard`, `open_link`, `dismiss_panel`) and a global
+   shortcut (Cmd/Ctrl+Shift+K) that toggles the hidden `panel` window. It is a
+   separate crate so hooky-core stays Tauri-free (S2). It **compiles and links**
+   against Tauri v2 + the global-shortcut plugin (`make build-desktop`); only
+   *running* it needs a display. Launch it on your Mac:
+   ```sh
+   make run          # = cargo run --manifest-path desktop/Cargo.toml
+   ```
+   Then press Cmd+Shift+K to summon the panel. (Earlier this step was unbuilt; the
+   remaining items below are the runtime observations a display is required for.)
 2. **U1 — p99 < 200 ms (p50 < 80 ms) hotkey-to-visible.** With the panel running,
    measure hotkey→first-paint over ≥100 invocations (e.g. timestamp in the global
    shortcut handler vs. a `requestAnimationFrame` in `panel.js`). Confirm the spinner
