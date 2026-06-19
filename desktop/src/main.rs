@@ -90,26 +90,38 @@ fn main() {
     tauri::Builder::default()
         .manage(backend)
         .setup(|app| {
+            // Show the panel on launch so there is ALWAYS visible UI. The global
+            // hotkey below needs macOS Accessibility permission and may not fire
+            // until it's granted — relying on it alone would leave a blank dock icon.
+            if let Some(w) = app.get_webview_window("panel") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+
             // U1: a global hotkey (Cmd/Ctrl+Shift+K) toggles the panel's visibility.
+            // Registration failure (e.g. missing Accessibility permission) is
+            // non-fatal — the window is already up, so the app stays usable.
             let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
             let toggle_for_handler = toggle;
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(move |app, shortcut, event| {
-                        if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
-                            if let Some(w) = app.get_webview_window("panel") {
-                                if w.is_visible().unwrap_or(false) {
-                                    let _ = w.hide();
-                                } else {
-                                    let _ = w.show();
-                                    let _ = w.set_focus();
-                                }
+            let plugin = tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
+                        if let Some(w) = app.get_webview_window("panel") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
                             }
                         }
-                    })
-                    .build(),
-            )?;
-            app.global_shortcut().register(toggle)?;
+                    }
+                })
+                .build();
+            if let Err(e) = app.handle().plugin(plugin) {
+                eprintln!("[hooky] global-shortcut plugin failed to load: {e}");
+            } else if let Err(e) = app.global_shortcut().register(toggle) {
+                eprintln!("[hooky] couldn't register Cmd+Shift+K (grant Accessibility permission in System Settings): {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
