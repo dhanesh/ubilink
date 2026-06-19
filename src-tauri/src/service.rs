@@ -64,6 +64,16 @@ impl HookyService {
         self
     }
 
+    /// Trust the URI schemes that registered adapters declare (B3 + S5): an adapter
+    /// producing `bear://…` links means `bear:` is an expected, safe scheme. Keeps
+    /// the bounded API an allowlist while letting config-added apps work.
+    pub fn allow_schemes(mut self, schemes: impl IntoIterator<Item = String>) -> HookyService {
+        for s in schemes {
+            self.api.allow(&s);
+        }
+        self
+    }
+
     /// Capture a link to the resource an adapter is bound to: permission gate
     /// (S4/TN7) -> bounded API validation (S5). The single "get a link" path.
     pub fn capture(&mut self, adapter: &dyn ResourceAdapter) -> Result<ResourceIdentity, ServiceError> {

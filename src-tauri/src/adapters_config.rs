@@ -206,6 +206,35 @@ impl AdapterRegistry {
     pub fn apps(&self) -> Vec<&str> {
         self.specs.iter().map(|s| s.app.as_str()).collect()
     }
+
+    /// The literal URI schemes the adapters declare (e.g. `bear`, `things`, `file`).
+    /// Only templates that BEGIN with a literal scheme count — a `{url}` template
+    /// has a dynamic scheme (http/https), which the bounded API already trusts. The
+    /// service feeds these to `LinkApi::allow` so config-added apps pass S5.
+    pub fn declared_schemes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for spec in &self.specs {
+            if let Some(scheme) = literal_scheme(&spec.uri) {
+                if !out.contains(&scheme) {
+                    out.push(scheme);
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Extract a literal scheme from a URI template that starts with one (not a `{field}`).
+fn literal_scheme(uri_template: &str) -> Option<String> {
+    let before = uri_template.split(':').next()?;
+    if before.is_empty() || before.contains('{') || before.contains('/') {
+        return None; // dynamic scheme (e.g. "{url}") or not a scheme prefix
+    }
+    if before.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) {
+        Some(before.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -334,6 +363,18 @@ mod tests {
                 render(p, &dummy).unwrap_or_else(|e| panic!("{} path template: {e}", spec.app));
             }
         }
+    }
+
+    #[test]
+    fn declared_schemes_extracts_literals_not_dynamic_ones() {
+        let reg = AdapterRegistry::defaults();
+        let schemes = reg.declared_schemes();
+        // Literal-scheme templates contribute their scheme…
+        for s in ["bear", "things", "file"] {
+            assert!(schemes.contains(&s.to_string()), "expected scheme {s}; got {schemes:?}");
+        }
+        // …but a "{url}" template (browsers) has no literal scheme to extract.
+        assert!(!schemes.iter().any(|s| s == "{url}" || s.contains('{')));
     }
 
     #[test]

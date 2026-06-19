@@ -375,8 +375,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 77,
-      "tests_passed": 77,
+      "tests_run": 79,
+      "tests_passed": 79,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -390,7 +390,7 @@
       "registry_tests": 6,
       "desktop_compiles": true
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook). | R10 (human-directed): B3 -> SATISFIED (documented extension surface + validate/sign/install/sandbox, zero core change; first satisfied-count increase since R5: 8->9). O2 published (generated+drift-guarded doc) + in-app data command; render pending GUI. 69 cargo + 8 node tests. | R11 (human-directed): O4 registry service built as a separate std-only crate (zero added deps, S2-safe), reusing hooky-core trust; 6 tests + real-socket smoke; review process documented. O4 MISSING->PARTIAL; hosted governed operation is the residual. | R12 (human-directed): Tauri desktop shell built (desktop/ crate, separate from core); commands wrap PanelBackend, global hotkey wired; COMPILES against Tauri v2 (T1 wiring gap closed in code). Run needs a display. make run -> desktop app. 76 cargo + 8 node tests; desktop compiles. | R13 (human-directed): inverted capture flow (captures the app you were in, via Rust hotkey->emit->show; re-captures each press) + S4 permission onboarding screen (Accessibility AXIsProcessTrusted + automation probe, guided granting). Compiles; 77 cargo + 9 node tests. | R14 (human-directed): adapters are now declarative config (adapters_config.rs + adapters.default.json) — replaced hardcoded MacAppAdapter/AppKind; seeds 10 apps (7 browsers, Finder, Bear, Things), user-extensible via adapters.json, no recompile (B3). 77 cargo + 9 node tests; desktop compiles."
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook). | R10 (human-directed): B3 -> SATISFIED (documented extension surface + validate/sign/install/sandbox, zero core change; first satisfied-count increase since R5: 8->9). O2 published (generated+drift-guarded doc) + in-app data command; render pending GUI. 69 cargo + 8 node tests. | R11 (human-directed): O4 registry service built as a separate std-only crate (zero added deps, S2-safe), reusing hooky-core trust; 6 tests + real-socket smoke; review process documented. O4 MISSING->PARTIAL; hosted governed operation is the residual. | R12 (human-directed): Tauri desktop shell built (desktop/ crate, separate from core); commands wrap PanelBackend, global hotkey wired; COMPILES against Tauri v2 (T1 wiring gap closed in code). Run needs a display. make run -> desktop app. 76 cargo + 8 node tests; desktop compiles. | R13 (human-directed): inverted capture flow (captures the app you were in, via Rust hotkey->emit->show; re-captures each press) + S4 permission onboarding screen (Accessibility AXIsProcessTrusted + automation probe, guided granting). Compiles; 77 cargo + 9 node tests. | R14 (human-directed): adapters are now declarative config (adapters_config.rs + adapters.default.json) — replaced hardcoded MacAppAdapter/AppKind; seeds 10 apps (7 browsers, Finder, Bear, Things), user-extensible via adapters.json, no recompile (B3). 77 cargo + 9 node tests; desktop compiles. | R15: S5 bounded API now trusts adapter-declared schemes (LinkApi::allow + HookyService::allow_schemes + AdapterRegistry::declared_schemes) so config apps (bear:, things:) pass while javascript:/data: stay blocked. 79 cargo + 9 node tests."
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "56ab832ead9368022a51bc4ce0b0a133328debb28a02604b3fc84a8fc037ffa0",
@@ -412,7 +412,7 @@
     "LICENSE": "a27f7c7fdd2bc3cf1aa43fe37349be78bd9866ba5ee4dee07050ba1ec01a507d",
     "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
     "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd",
-    "src-tauri/src/service.rs": "910da10800dedc17fa2d5fbad8b6f5a80af23067aba04a523ad9024bb4f01dcd",
+    "src-tauri/src/service.rs": "a4145a8ef301294779b7b36a1797837a44c73e5036c8719b12a45fd3208af2c9",
     "src-tauri/src/live_capture.rs": "b8b2d64583f291777f004ccb389b86534f320c4fe0af7db83b95b63b9e060d9b",
     "src-tauri/src/release.rs": "bfcedf9faa1a3ce6385627baa963791daf540d0bf0f55f13df09efcfec602742",
     "src-tauri/src/bin/hooky-sign.rs": "88ebd23f940da171b1f182f44f957ced76e043fea60c9683e029d4caa8c88700",
@@ -432,12 +432,13 @@
     "desktop/build.rs": "6aeeab41bc35efde4e3c2b644a6248f7fc06d24ae30b75c0d33491cbb0c1fa31",
     "desktop/tauri.conf.json": "ed16bc3a54460fd1112c1b88a150cb1fd83380539d1bb100804cf8498dac53da",
     "desktop/capabilities/default.json": "30aa099a7ef45d9561f08fb633abd8d9e0ee64e0cc1252c17533b6a4579b0907",
-    "desktop/src/main.rs": "bdd66398043de9a39f779c0fe29f217a61d43a19f9226884b0f28da7f2c9b7e7",
+    "desktop/src/main.rs": "219ce719b92b3d847129fcc33785b5b1e5a0dca667efb5760c69f7576f8b4003",
     "Makefile": "2cb1fc5a0f20aaa2359736036bcd633977fbd3dcc9ac9b1c84c9bb4c3a40cc2a",
     "docs/RUNBOOK-gui-panel.md": "a7e35a578b5515f601d523acd40fc14b75c0bb1d2b73e02b07d2c96d3d633558",
-    "src-tauri/src/adapters_config.rs": "e8d9a862152129fcfc104b662a6c6d44ad7191004cf942b780f9f50795f04418",
+    "src-tauri/src/adapters_config.rs": "1cce3e9d72f4f65680cc32f2671771f0f261524673f56fe4d62baa2902d3ade4",
     "src-tauri/src/adapters.default.json": "542082318e7b6a5ddad1b2056d17265aa3e67a5e0ff2b53ac13cea7ab75393f1",
-    "docs/SUPPORTED-APPS.md": "3f605a6a4ae6f74e845d49339a13d57223bdbe669fd63a3282ef46a595cebf8e"
+    "docs/SUPPORTED-APPS.md": "3f605a6a4ae6f74e845d49339a13d57223bdbe669fd63a3282ef46a595cebf8e",
+    "src-tauri/src/api.rs": "0adb309d347229d5b5e724ad4148c021119131725bc5171d626a781f1decedfa"
   },
-  "hashes_updated_at": "2026-06-20T10:00:00.000Z"
+  "hashes_updated_at": "2026-06-20T10:40:00.000Z"
 }

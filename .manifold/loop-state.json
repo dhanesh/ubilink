@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 14,
+  "round": 15,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -167,6 +167,16 @@
       "desktop_compiles": true,
       "progress": "architecture",
       "note": "Human-directed, from running + the Linking Manifesto app list. Made live-capture adapters DECLARATIVE: AdapterSpec (app match + osascript + fields + uri/name/path templates with urlencode/basename transforms) + AdapterRegistry (embedded defaults + user adapters.json override). Replaced hardcoded MacAppAdapter/AppKind/app_kind_for. Seeds 10 apps (Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the ~80-app Hookmark list is now reachable as config, no recompile (B3 deepened to the addressing layer). Engine fully unit-tested incl. a guard that every shipped spec's templates render. Per-app live verification still needs a Mac."
+    },
+    {
+      "round": 15,
+      "cluster": "S5 API trusts adapter-declared schemes (bear:/things: pass, javascript: blocked)",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 79,
+      "node_tests": 9,
+      "progress": "bugfix",
+      "note": "From running: a captured bear:// link was rejected by the S5 scheme allowlist. Fix: AdapterRegistry::declared_schemes() extracts literal scheme prefixes from uri templates; HookyService::allow_schemes feeds them to LinkApi::allow. Adapter schemes are template literals (safe by construction); browser {url} templates still ride the base http/https set, so a javascript: tab is still blocked. S5 stays an allowlist."
     }
   ],
   "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"

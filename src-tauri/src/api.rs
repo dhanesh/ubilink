@@ -85,6 +85,17 @@ impl LinkApi {
         }
     }
 
+    /// Trust an additional URI scheme (SC-1 allowlist stays an allowlist). Used to
+    /// admit schemes that registered adapters declare as template literals (e.g.
+    /// `bear`, `things`) — safe by construction, since the scheme comes from the
+    /// adapter config, never from captured input. No-op if already present.
+    pub fn allow(&mut self, scheme: &str) {
+        let s = scheme.trim().to_ascii_lowercase();
+        if !s.is_empty() && !self.schemes.iter().any(|x| x == &s) {
+            self.schemes.push(s);
+        }
+    }
+
     /// Custom scheme allowlist + rate (tests use a tiny bucket).
     pub fn with_config(schemes: &[&str], capacity: u32, refill_per_sec: u32) -> LinkApi {
         LinkApi {
@@ -162,6 +173,24 @@ mod tests {
             api.construct_link("javascript:alert(1)", "x").unwrap_err(),
             ApiError::DisallowedScheme { scheme: "javascript".into() }
         );
+    }
+
+    #[test]
+    fn allow_admits_an_adapter_declared_scheme() {
+        // The config-driven fix: a captured bear:// link is rejected until the
+        // scheme (declared by the Bear adapter) is trusted, then it constructs.
+        let mut api = LinkApi::new();
+        assert_eq!(
+            api.construct_link("bear://x-callback-url/open-note?title=x", "x").unwrap_err(),
+            ApiError::DisallowedScheme { scheme: "bear".into() }
+        );
+        api.allow("bear");
+        assert!(api.construct_link("bear://x-callback-url/open-note?title=x", "x").is_ok());
+        // …but trusting bear: does NOT open the door to javascript: (S5 intact).
+        assert!(matches!(
+            api.construct_link("javascript:alert(1)", "x").unwrap_err(),
+            ApiError::DisallowedScheme { .. }
+        ));
     }
 
     #[test]

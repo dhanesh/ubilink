@@ -172,8 +172,13 @@ fn main() {
             }
             eprintln!("[hooky] {} app adapter(s) available", adapters.apps().len());
 
+            // The bounded API (S5) must trust the schemes the adapters declare
+            // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
+            let schemes = adapters.declared_schemes();
             app.manage(AppState {
-                backend: Mutex::new(PanelBackend::new(HookyService::new(graph).with_permission(permission))),
+                backend: Mutex::new(PanelBackend::new(
+                    HookyService::new(graph).with_permission(permission).allow_schemes(schemes),
+                )),
                 adapters,
             });
 
