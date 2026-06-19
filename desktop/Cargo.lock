@@ -1373,6 +1373,7 @@ name = "hooky-desktop"
 version = "0.0.1"
 dependencies = [
  "hooky-core",
+ "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-global-shortcut",

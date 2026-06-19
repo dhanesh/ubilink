@@ -33,8 +33,18 @@ Run them: `node --test 'dist/*.test.mjs'` and `cargo test panel`.
    ```sh
    make run          # = cargo run --manifest-path desktop/Cargo.toml
    ```
-   Then press Cmd+Shift+K to summon the panel. (Earlier this step was unbuilt; the
-   remaining items below are the runtime observations a display is required for.)
+   On launch the panel shows a **permission onboarding screen** (S4): it checks
+   Accessibility (`AXIsProcessTrusted`) and Automation (System Events probe), shows
+   ✓/✗ per item, and offers "Open Settings" (jumps to the right privacy pane) +
+   "Re-check". Grant both, Re-check → the capture view appears.
+
+   The capture flow is **hotkey-driven and inverted**: pressing Cmd+Shift+K captures
+   whatever app was frontmost *before* the panel appears (Rust captures, emits the
+   result to the webview, then shows the panel), and re-captures on every press —
+   so it links the app you were in, not the panel itself. Esc dismisses.
+
+   (Earlier this step was unbuilt; the remaining items below are the runtime
+   observations a display is required for.)
 2. **U1 — p99 < 200 ms (p50 < 80 ms) hotkey-to-visible.** With the panel running,
    measure hotkey→first-paint over ≥100 invocations (e.g. timestamp in the global
    shortcut handler vs. a `requestAnimationFrame` in `panel.js`). Confirm the spinner

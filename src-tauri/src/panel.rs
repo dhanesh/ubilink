@@ -156,12 +156,24 @@ mod tests {
     }
 
     #[test]
-    fn panel_html_has_exactly_one_primary_copy_action() {
-        // U2: link-in-<=2-actions hinges on a single obvious primary control.
+    fn panel_html_has_a_single_primary_copy_action() {
+        // U2: link-in-<=2-actions hinges on ONE obvious primary control. (Onboarding
+        // adds its own buttons, so we assert the Copy action is unique, not that the
+        // page has exactly one button.)
         let html = read_dist("index.html");
-        assert!(html.contains("id=\"copy\""), "U2: the Copy action must exist");
+        assert_eq!(html.matches("id=\"copy\"").count(), 1, "U2: exactly one primary Copy action");
         assert!(html.contains("aria-keyshortcuts=\"Enter\""), "U4/U2: Enter triggers copy");
-        assert_eq!(html.matches("<button").count(), 1, "U2: exactly one primary action button");
+    }
+
+    #[test]
+    fn panel_html_has_a_permission_onboarding_screen() {
+        // S4/U3: the user is guided to grant the macOS permissions, not left guessing.
+        let html = read_dist("index.html");
+        assert!(html.contains("id=\"onboarding\""), "S4: onboarding screen must exist");
+        assert!(html.contains("data-perm=\"accessibility\""), "must surface the Accessibility permission");
+        assert!(html.contains("data-perm=\"automation\""), "must surface the Automation permission");
+        assert!(html.contains("id=\"recheck\""), "must offer a re-check action");
+        assert!(html.contains("data-pane=\"accessibility\""), "must offer to open the Accessibility pane");
     }
 
     #[test]

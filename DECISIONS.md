@@ -254,3 +254,31 @@ code.** It stays PARTIAL, not SATISFIED: there is no automated runtime test with
 display, so the trust-boundary's *runtime* enforcement is verified on a Mac
 (`docs/RUNBOOK-gui-panel.md`). `satisfied_count` stays 9. 76 cargo + 8 node tests
 green; desktop compiles.
+
+## D12 — Inverted live-capture flow + S4 permission onboarding (R13)
+
+**Date:** 2026-06-19 · **Constraints:** U1, U2, U3, S4/RT-2 · **Source:** running the app
+
+Running the desktop app surfaced two real bugs that compilation could never catch:
+(1) the panel **captured itself** — once shown it takes focus, so the frontmost app
+is hooky, not the app you were in; (2) capture ran **only once at page load**, so
+re-summoning showed a stale result.
+
+**Fix — invert the trigger.** The Rust global-shortcut handler now `capture_now()`s
+the *currently* frontmost app (before the panel steals focus), `emit`s `capture-ok`
+/`capture-err` to the webview, then shows the panel. `panel.js` became
+event-driven: it listens for those events instead of capturing on load, so it links
+the app you were in and re-captures on every press. Esc dismisses.
+
+**S4 permission onboarding.** A launch screen guides the user through the two macOS
+grants: Accessibility (`AXIsProcessTrusted` via a dependency-free
+`#[link(name="ApplicationServices")]` FFI — the global hotkey needs it) and
+Automation (the existing System Events probe). `permission_status` reports both;
+`open_settings` jumps to the right privacy pane; a checklist shows ✓/✗ with a
+Re-check. `permissionsComplete()` is a pure helper (node-tested); the onboarding
+markup is Rust-tested; all of it compiles.
+
+These advance U1/S4's *code* but **flip nothing** — the actual grant and the
+on-screen behaviour are observed on a Mac. `satisfied_count` stays 9. 77 cargo + 9
+node tests green; desktop compiles. (The "captures itself" class of bug is exactly
+why U1–U5 were never flipped on compile alone — only a human running it finds them.)

@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 12,
+  "round": 13,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -145,6 +145,17 @@
       "desktop_compiles": true,
       "progress": "env-surface-reduction",
       "note": "Human-directed. Built desktop/ Tauri crate (separate from hooky-core so the core's S2 no_network_deps guard stays true). #[tauri::command] wrappers over PanelBackend (capture_current routes via frontmost-app detection -> live adapter; capabilities; copy via pbcopy; open; dismiss) + a Cmd/Ctrl+Shift+K global shortcut toggling the panel. COMPILES + links against Tauri v2 + global-shortcut plugin (strong headless verification: the wiring type-checks). T1's 'not wired into Tauri commands' gap is closed in code. Running needs a display (ENV-blocked); make run launches it. satisfied_count stays 9 (no runtime verification)."
+    },
+    {
+      "round": 13,
+      "cluster": "inverted live-capture flow + S4 permission onboarding screen",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 77,
+      "node_tests": 9,
+      "desktop_compiles": true,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed, from running the app. Fixed two real bugs running surfaced: panel captured ITSELF (frontmost=hooky once focused) and captured only once at load. Inverted the trigger: Rust hotkey handler captures the previously-frontmost app, emits capture-ok/err to the webview, then shows the panel; re-captures each press. Added S4 onboarding: AXIsProcessTrusted FFI + automation probe -> permission_status command, open_settings (jumps to the privacy pane), a checklist UI with \u2713/\u2717 + Re-check. permissionsComplete() node-tested; onboarding markup Rust-tested; all compiles. Running/granting still needs a Mac (ENV)."
     }
   ],
   "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"

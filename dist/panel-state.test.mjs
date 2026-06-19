@@ -2,7 +2,7 @@
 // node's built-in runner: `node --test dist/`. Keeps S2 honest (no third-party JS).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reduce, canConfirm, copyPayload, explanation } from './panel-state.mjs';
+import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
 
 test('U1: open() resolves to capturing synchronously, without capture data', () => {
   const s = reduce({ phase: 'idle' }, { type: 'open' });
@@ -56,4 +56,12 @@ test('confirm is unavailable in capturing/error/idle states', () => {
 test('unknown events leave state unchanged', () => {
   const s = { phase: 'ready', resource: { uri: 'u' }, backlinks: [] };
   assert.deepEqual(reduce(s, { type: 'nonsense' }), s);
+});
+
+test('S4: onboarding is complete only when BOTH permissions are in place', () => {
+  assert.equal(permissionsComplete({ accessibility: true, automation: 'granted' }), true);
+  assert.equal(permissionsComplete({ accessibility: false, automation: 'granted' }), false);
+  assert.equal(permissionsComplete({ accessibility: true, automation: 'denied' }), false);
+  assert.equal(permissionsComplete({ accessibility: true, automation: 'not_determined' }), false);
+  assert.equal(permissionsComplete(null), false);
 });

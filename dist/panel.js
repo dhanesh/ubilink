@@ -1,30 +1,36 @@
-// Satisfies: U1/U2/U3/U4/U5 — the thin view shell. It owns ONLY DOM + Tauri I/O;
-// all decision logic is in the headlessly-tested reduce()/canConfirm()/copyPayload()
-// from panel-state.mjs. This file is the ENV-blocked layer (needs a real Tauri
-// webview + the Rust command layer), verified via docs/RUNBOOK-gui-panel.md.
-import { reduce, initialCapturing, canConfirm, copyPayload, explanation } from './panel-state.mjs';
+// Satisfies: U1/U2/U3/U4/U5 + S4 onboarding — the thin view shell. All decision
+// logic is the headlessly-tested reduce()/canConfirm()/copyPayload()/
+// permissionsComplete() from panel-state.mjs. This file is the ENV-blocked layer
+// (needs a real Tauri webview + the Rust command/event layer); verified via
+// docs/RUNBOOK-gui-panel.md. Capture is driven by 'capture-ok'/'capture-err' events
+// the Rust hotkey handler emits — so it links the app you were IN, every time.
+import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
 
-// Tauri v2 exposes invoke under window.__TAURI__.core; degrade gracefully if absent
-// (e.g. opened in a plain browser for layout work).
 const invoke = (cmd, args) =>
   window.__TAURI__?.core?.invoke
     ? window.__TAURI__.core.invoke(cmd, args)
     : Promise.reject(new Error('Tauri bridge unavailable'));
+const onEvent = (name, cb) =>
+  window.__TAURI__?.event?.listen ? window.__TAURI__.event.listen(name, cb) : Promise.resolve(() => {});
 
 const $ = (id) => document.getElementById(id);
-let state = initialCapturing; // U1: we are already "capturing" at first paint.
+let state = { phase: 'idle' };
 
+// ── section switching ──
+function showCaptureView() { $('onboarding').hidden = true; $('capture').hidden = false; }
+function showOnboarding() { $('capture').hidden = true; $('onboarding').hidden = false; }
+
+// ── capture view rendering ──
 function render() {
-  const statusLine = $('status-line');
   const phase = state.phase;
+  const statusLine = $('status-line');
   statusLine.dataset.phase = phase;
-
-  // status text — only while actually capturing; ready shows the resource, error
-  // shows the explanation, so the "Capturing…" line must not linger under either.
-  statusLine.hidden = phase !== 'capturing';
+  // Status line only for the transient/idle phases; ready shows the resource,
+  // error shows the explanation (so "Capturing…" never lingers under either).
+  statusLine.hidden = !(phase === 'capturing' || phase === 'idle');
   if (phase === 'capturing') statusLine.textContent = 'Capturing the active resource…';
+  if (phase === 'idle') statusLine.textContent = 'Switch to Safari, Chrome or Finder, then press ⌘⇧K to capture its link.';
 
-  // resource (U5 context)
   const ready = phase === 'ready';
   $('resource-name').hidden = !ready;
   $('resource-uri').hidden = !ready;
@@ -33,15 +39,12 @@ function render() {
     $('resource-uri').textContent = state.resource.uri;
   }
 
-  // U2: the copy action is enabled exactly when a link is ready.
   $('copy').disabled = !canConfirm(state);
 
-  // U3: explained error, announced via role=alert.
   const err = explanation(state);
   $('error').hidden = !err;
   $('error').textContent = err ?? '';
 
-  // U5: backlinks list.
   const links = ready ? state.backlinks : [];
   $('backlinks').hidden = links.length === 0;
   const list = $('backlinks-list');
@@ -52,42 +55,74 @@ function render() {
     a.href = '#';
     a.textContent = b.name || b.uri;
     a.setAttribute('aria-label', `Open ${b.name || b.uri}`);
-    a.addEventListener('click', (e) => { e.preventDefault(); invoke('open_link', { uri: b.uri }).catch(reportError); });
+    a.addEventListener('click', (ev) => { ev.preventDefault(); invoke('open_link', { uri: b.uri }).catch(reportError); });
     li.appendChild(a);
     list.appendChild(li);
   }
 
-  // Keyboard-first focus management (U4): focus the action as soon as it's usable.
   if (canConfirm(state)) $('copy').focus();
 }
 
 function dispatch(event) { state = reduce(state, event); render(); }
-function reportError(e) { dispatch({ type: 'failed', message: e?.message ?? String(e) }); }
+function reportError(e) { showCaptureView(); dispatch({ type: 'failed', message: e?.message ?? String(e) }); }
 
 async function confirmCopy() {
   const payload = copyPayload(state);
   if (!payload) return;
   try {
     await invoke('copy_to_clipboard', { text: payload });
-    await invoke('dismiss_panel'); // U2: done in 2 actions; the panel gets out of the way.
+    await invoke('dismiss_panel'); // U2: done in 2 actions; get out of the way.
   } catch (e) { reportError(e); }
 }
 
-// The full open flow: render instantly (U1), then fill from the Rust command.
-async function summon() {
-  dispatch({ type: 'open' }); // synchronous first paint — does NOT await capture
+// ── onboarding (S4) ──
+function setPerm(name, ok, label) {
+  const el = document.querySelector(`.perm[data-perm="${name}"] .perm-status`);
+  if (!el) return;
+  el.dataset.state = ok ? 'ok' : 'missing';
+  el.textContent = ok ? '✓' : '✗';
+  el.setAttribute('aria-label', `${name}: ${label}`);
+}
+
+async function refreshPermissions() {
+  let report;
   try {
-    // capture_current returns { resource, backlinks } or throws a user-facing message.
-    const view = await invoke('capture_current');
-    dispatch({ type: 'captured', resource: view.resource, backlinks: view.backlinks ?? [] });
-  } catch (e) { reportError(e); }
+    report = await invoke('permission_status');
+  } catch {
+    // Browser preview (no Tauri bridge): just show the capture layout.
+    showCaptureView();
+    render();
+    return false;
+  }
+  setPerm('accessibility', report.accessibility === true, report.accessibility ? 'granted' : 'not granted');
+  const autoOk = report.automation === 'granted';
+  setPerm('automation', autoOk, report.automation.replace('_', ' '));
+  const done = permissionsComplete(report);
+  $('onboarding-hint').textContent = done ? 'All set!' : 'Grant the items above, then press Re-check.';
+  if (done) {
+    showCaptureView();
+    if (state.phase !== 'ready') dispatch({ type: 'reset' }); // idle prompt
+  } else {
+    showOnboarding();
+  }
+  return done;
 }
 
+// ── wiring ──
+for (const b of document.querySelectorAll('.open-settings')) {
+  b.addEventListener('click', () => invoke('open_settings', { pane: b.dataset.pane }).catch(() => {}));
+}
+$('recheck').addEventListener('click', refreshPermissions);
 $('copy').addEventListener('click', confirmCopy);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && canConfirm(state)) { e.preventDefault(); confirmCopy(); }
   if (e.key === 'Escape') invoke('dismiss_panel').catch(() => {});
 });
 
-render();   // paint the spinner immediately
-summon();   // kick off capture off the critical path
+// Capture results pushed by the Rust hotkey handler (captures the app you were IN).
+onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); });
+onEvent('capture-err', (e) => { showCaptureView(); dispatch({ type: 'failed', message: e.payload }); });
+
+// Boot: check permissions (shows onboarding or the capture view), then paint.
+refreshPermissions();
+render();

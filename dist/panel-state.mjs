@@ -65,3 +65,12 @@ export function copyPayload(state) {
 export function explanation(state) {
   return state.phase === 'error' ? state.message : null;
 }
+
+/**
+ * Onboarding gate (S4/RT-2): are BOTH macOS permissions in place so the capture
+ * flow can work? Accessibility must be trusted (the global hotkey needs it) and
+ * automation must be granted (reading the active app). Pure, so it's testable.
+ */
+export function permissionsComplete(report) {
+  return !!report && report.accessibility === true && report.automation === 'granted';
+}
