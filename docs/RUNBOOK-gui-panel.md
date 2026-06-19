@@ -21,6 +21,20 @@ webview is listed under "Manual steps".
 
 Run them: `node --test 'dist/*.test.mjs'` and `cargo test panel`.
 
+## Recommended: run the bundled app (so permission grants persist)
+
+`make run` (`cargo run`) launches a bare binary whose path changes per build, so macOS
+re-prompts for Accessibility/Automation each time. For a stable experience:
+
+```sh
+make bundle     # -> desktop/target/release/bundle/hooky.app (ad-hoc signed, fixed path)
+open desktop/target/release/bundle/hooky.app
+```
+
+Grant Accessibility + Automation to **hooky.app** once; re-running `make bundle`
+rebuilds in place, so the grant sticks. (Optionally drag `hooky.app` to /Applications
+for an even more stable location.)
+
 ## Manual steps (a Mac with a desktop session) — what stays ENV-blocked
 
 1. **Wire the Tauri command layer — DONE (compile-verified).** The `desktop/` crate

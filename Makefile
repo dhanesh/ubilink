@@ -23,7 +23,7 @@ UI_DIR   := dist
 UI_PORT  ?= 1420
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-release build-desktop test test-rust test-js validate check \
+.PHONY: help build build-release build-desktop bundle test test-rust test-js validate check \
         run run-desktop run-ui run-registry fmt clean
 
 help: ## Show available targets
@@ -40,6 +40,9 @@ build-release: ## Build all crates optimized (release)
 
 build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
 	$(CARGO) build --manifest-path $(DESKTOP)
+
+bundle: ## Build a signed macOS hooky.app (stable path so TCC grants persist)
+	bash scripts/bundle-macos.sh
 
 test: test-rust test-js ## Run every test suite (Rust core + registry, then JS panel)
 
