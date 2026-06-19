@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-18T10:15:00Z",
+    "timestamp": "2026-06-19T09:30:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -30,12 +30,13 @@
       {
         "constraint": "B3",
         "type": "GOAL",
-        "code": "◐",
-        "test": "◐",
+        "code": "✓",
+        "test": "✓",
         "docs": "✓",
         "ops": "-",
-        "status": "PARTIAL",
-        "gap": "Extension surface (manifest schema+broker+sandbox) built+tested; installer/registry deferred"
+        "status": "SATISFIED",
+        "gap": "",
+        "residual": "SATISFIED headlessly: documented extension surface (docs/AUTHORING-INTEGRATIONS.md) + author validate command (hooky-sign validate, Manifest::validate test) + sign + install (R3 Installer) + sandbox-run (sandbox.rs) — adding an app exercises generic mechanisms, touches ZERO core files. No ENV residual (B3 is a structural claim, not a runtime/live one)."
       },
       {
         "constraint": "B4",
@@ -217,10 +218,10 @@
         "type": "GOAL",
         "code": "✓",
         "test": "✓",
-        "docs": "◐",
+        "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Capability matrix module built+tested; in-app/published-doc surfacing pending"
+        "gap": "PUBLISHED: docs/CAPABILITIES.md GENERATED from CapabilityMatrix::to_markdown and drift-guarded by a test (can never diverge from code). IN-APP DATA: PanelBackend::capabilities() returns the matrix as JSON (tested). Residual: the in-app RENDER of that data lives in the ENV-blocked GUI panel (docs/RUNBOOK-gui-panel.md step 5)."
       },
       {
         "constraint": "O3",
@@ -373,8 +374,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 65,
-      "tests_passed": 65,
+      "tests_run": 69,
+      "tests_passed": 69,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -386,14 +387,14 @@
       "node_tests_run": 8,
       "node_tests_passed": 8
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook)."
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook). | R10 (human-directed): B3 -> SATISFIED (documented extension surface + validate/sign/install/sandbox, zero core change; first satisfied-count increase since R5: 8->9). O2 published (generated+drift-guarded doc) + in-app data command; render pending GUI. 69 cargo + 8 node tests."
   },
   "file_hashes": {
-    "src-tauri/src/broker.rs": "0610786ae697518da8bd4e237f43bb576e7dd6965e3cc3704362613b8ee6b271",
+    "src-tauri/src/broker.rs": "56ab832ead9368022a51bc4ce0b0a133328debb28a02604b3fc84a8fc037ffa0",
     "src-tauri/src/sandbox.rs": "3739fe4b7040b5311c41e09526151e713fa4689e1047c02be7e35ce1d222fd81",
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
-    "src-tauri/src/capabilities.rs": "f7cbafc3f4960bbc79f058be99138f079796b07da362926d43acb1b8a9dfd1ba",
+    "src-tauri/src/capabilities.rs": "cb8c6c8f2cf5efc9b62eee8ed500a3437d7b2d345c52c6a22b01e570f7a1eaa8",
     "src-tauri/src/lib.rs": "a4e70d060c3c11f56f6b5de6a9b145a57e1f991abcff368777f3bc1de80f0049",
     "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
@@ -408,16 +409,18 @@
     "LICENSE": "a27f7c7fdd2bc3cf1aa43fe37349be78bd9866ba5ee4dee07050ba1ec01a507d",
     "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
     "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd",
-    "src-tauri/src/service.rs": "5abfd5ade47f49c40c7e16933969c88a7641195072155d68ba92fb64554e62ee",
+    "src-tauri/src/service.rs": "910da10800dedc17fa2d5fbad8b6f5a80af23067aba04a523ad9024bb4f01dcd",
     "src-tauri/src/live_capture.rs": "97e4466aa978e86ae94c9817b76697648907385e9ae9666c7532b44215d0f240",
     "src-tauri/src/release.rs": "bfcedf9faa1a3ce6385627baa963791daf540d0bf0f55f13df09efcfec602742",
-    "src-tauri/src/bin/hooky-sign.rs": "6bb31897abc6a11fdfdcd9ae30020c844e039fc38e0a4917291b72692c0e5cdb",
-    "src-tauri/src/panel.rs": "f32be64cf4aa11cb3e461da05d9e83db2131aab80084ca6ade3e0d4d62fd635e",
+    "src-tauri/src/bin/hooky-sign.rs": "88ebd23f940da171b1f182f44f957ced76e043fea60c9683e029d4caa8c88700",
+    "src-tauri/src/panel.rs": "f16d7b3ea29ac999a25b5c5d6802040b1bfb50b531e3c8ac12e5f8b50c52cc83",
     "dist/index.html": "7ab23ea9c4b4f4ebf047dc8e2878e2f863c880e55a2648a9fbdb90e277d1cb83",
     "dist/panel.css": "64f5588b22fba165d6b961ae56167843d3aad7a486536e3d0cb706d2550e811b",
     "dist/panel.js": "2a28e8e09cf0dbac01813f56bf26a8b9425084130afcd59b223f5436f93a421f",
     "dist/panel-state.mjs": "a29d1d215b1878f6a73f86415440429fca59883bd43280bfe57b3a24149c8689",
-    "dist/panel-state.test.mjs": "29e5c807dcb148642571c4425abd93778c256016ef67e9bf8d7c3baacbf4ccd0"
+    "dist/panel-state.test.mjs": "29e5c807dcb148642571c4425abd93778c256016ef67e9bf8d7c3baacbf4ccd0",
+    "docs/CAPABILITIES.md": "c23d3fa24a684faf8cb305ebebd56e4d12898ad27e45ae1b692a79f98e15e621",
+    "docs/AUTHORING-INTEGRATIONS.md": "9b2564aa4362ce60dec07c26e78239fda11f2f3870d28c680e457b6053003ee3"
   },
-  "hashes_updated_at": "2026-06-18T10:15:00.000Z"
+  "hashes_updated_at": "2026-06-19T09:30:00.000Z"
 }

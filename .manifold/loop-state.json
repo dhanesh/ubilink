@@ -1,13 +1,13 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 9,
+  "round": 10,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
   "gap_attempts": {},
   "max_attempts_per_gap": 2,
-  "last_satisfied_count": 8,
+  "last_satisfied_count": 9,
   "env_blocked": [
     "U1",
     "U2",
@@ -109,7 +109,20 @@
       "node_tests": 8,
       "progress": "env-surface-reduction",
       "note": "Human-directed. No-build vanilla panel in dist/ (zero npm deps -> S2-safe) + Rust PanelBackend command contract over HookyService. Render-first U1 state machine, <=2-action U2 flow, U4 a11y markup/CSS, U5 backlinks, U3 explained errors -- all contract-tested (65 cargo + 8 node). U1/U2/U4 upgraded MISSING->PARTIAL. No SATISFIED flip: p99 timing, VoiceOver/contrast, hotkey + Tauri command wiring need a real display (docs/RUNBOOK-gui-panel.md). Escalated, not faked."
+    },
+    {
+      "round": 10,
+      "cluster": "B3 documented extension surface (SATISFIED) + O2 published matrix",
+      "constraints_closed": [
+        "B3"
+      ],
+      "satisfied_before": 8,
+      "satisfied_after": 9,
+      "tests": 69,
+      "node_tests": 8,
+      "progress": true,
+      "note": "Human-directed. B3 -> SATISFIED: docs/AUTHORING-INTEGRATIONS.md + `hooky-sign validate` (Manifest::validate, unit-tested) + sign + R3 install + sandbox run \u2014 adding an app touches ZERO core files. B3 is a structural claim with no ENV residual, so it flips honestly (first satisfied-count increase since R5). O2: docs/CAPABILITIES.md generated from the matrix + drift-guarded; in-app data command tested; render stays GUI-ENV-blocked."
     }
   ],
-  "terminal": "HEADLESS_MAXED: all four ENV-blocked gap-areas (live capture, CI signing, GUI panel) built + contract-tested headlessly; residuals are real-display/live-CI observations behind runbooks"
+  "terminal": "9/23 SATISFIED; B3 closed headlessly; remaining gaps need real-display/live-CI/hosted-infra (runbooks) or are statistical/other-platform"
 }

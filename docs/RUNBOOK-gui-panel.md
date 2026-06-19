@@ -39,6 +39,11 @@ Run them: `node --test 'dist/*.test.mjs'` and `cargo test panel`.
    Run VoiceOver: confirm the dialog, status, error, and backlinks are announced.
    Check text contrast meets WCAG AA (the tokens in `panel.css` are chosen for it,
    but verify on the real display).
+5. **O2 — in-app capability disclosure (render).** The backend command
+   `PanelBackend::capabilities()` already returns the supported matrix (tested); the
+   remaining work is a GUI surface that renders it (e.g. a "What works where" view
+   fed by an `invoke('capabilities')` call). The published doc half of O2
+   (`docs/CAPABILITIES.md`) is already done + drift-guarded.
 
 ## Recording the result
 Each measured item flips its constraint only on observed evidence:

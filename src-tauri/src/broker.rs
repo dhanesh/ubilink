@@ -234,6 +234,21 @@ mod tests {
     }
 
     #[test]
+    fn manifest_validate_is_the_author_facing_gate() {
+        // B3: an author validates a manifest before signing. A well-formed one
+        // passes; empty required fields and malformed capability strings are caught
+        // with a message (so authoring fails loudly, not silently downstream).
+        assert!(manifest(&["open:obsidian://", "read:focused-resource"]).validate().is_ok());
+
+        let mut empty_id = manifest(&[]);
+        empty_id.id = "  ".into();
+        assert!(empty_id.validate().unwrap_err().contains("id"));
+
+        // a capability string with no `verb:scope` shape is rejected.
+        assert!(manifest(&["not-a-capability"]).validate().is_err());
+    }
+
+    #[test]
     fn grant_allows_scheme_prefix() {
         let b = Broker::new(&manifest(&["open:obsidian://"]), res());
         let d = b.decide("open:obsidian://vault/Note.md");

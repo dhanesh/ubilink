@@ -121,6 +121,57 @@ impl CapabilityMatrix {
     pub fn supported(&self) -> &[Support] {
         &self.rows
     }
+
+    /// Render the matrix as a published Markdown table (O2 "published in docs").
+    /// `docs/CAPABILITIES.md` is GENERATED from this and drift-guarded by a test,
+    /// so the published capability disclosure can never silently diverge from the
+    /// code that enforces it. Rows are sorted for a stable, diffable artifact.
+    pub fn to_markdown(&self) -> String {
+        let mut rows = self.rows.clone();
+        rows.sort_by(|a, b| {
+            a.app
+                .to_lowercase()
+                .cmp(&b.app.to_lowercase())
+                .then(platform_name(a.platform).cmp(platform_name(b.platform)))
+        });
+        let mut out = String::from(
+            "<!-- GENERATED from CapabilityMatrix::to_markdown() (O2). Do not edit by hand;\n\
+             regenerate via the capabilities_doc_is_in_sync test. -->\n\
+             # hooky capability matrix\n\n\
+             What linking works where, and by which mechanism. Unsupported app/platform\n\
+             pairs degrade with an explanation in-app (U3).\n\n\
+             | App | Platform | Mechanism |\n\
+             | --- | --- | --- |\n",
+        );
+        for s in &rows {
+            out.push_str(&format!(
+                "| {} | {} | {} |\n",
+                s.app,
+                platform_name(s.platform),
+                mechanism_name(s.mechanism),
+            ));
+        }
+        out
+    }
+}
+
+/// Human display name for a platform (used in the published matrix + UI).
+pub fn platform_name(p: Platform) -> &'static str {
+    match p {
+        Platform::MacOS => "macOS",
+        Platform::Windows => "Windows",
+        Platform::Linux => "Linux",
+    }
+}
+
+/// Human display name for a link mechanism (used in the published matrix + UI).
+pub fn mechanism_name(m: LinkMechanism) -> &'static str {
+    match m {
+        LinkMechanism::UrlScheme => "URL scheme",
+        LinkMechanism::AppleScript => "AppleScript",
+        LinkMechanism::Accessibility => "Accessibility API",
+        LinkMechanism::FilePath => "File path",
+    }
 }
 
 fn fallback_note(fallback: &Option<LinkMechanism>) -> String {
@@ -185,5 +236,48 @@ mod tests {
         for p in [Platform::MacOS, Platform::Windows, Platform::Linux] {
             assert_eq!(m.capability("Files", p), Capability::Supported(LinkMechanism::FilePath));
         }
+    }
+
+    #[test]
+    fn markdown_table_lists_every_supported_pair_sorted() {
+        // O2: the published table must contain a row for each supported pair, with
+        // human-readable names, in a stable (sorted) order.
+        let md = CapabilityMatrix::baseline().to_markdown();
+        assert!(md.contains("| App | Platform | Mechanism |"));
+        assert!(md.contains("| Safari | macOS | AppleScript |"));
+        assert!(md.contains("| Obsidian | macOS | URL scheme |"));
+        assert!(md.contains("| Files | Windows | File path |"));
+        // one body row per supported pair (exclude the header + the `---` separator).
+        let is_data = |l: &&str| l.starts_with("| ") && !l.starts_with("| App ") && !l.contains("---");
+        let body_rows = md.lines().filter(is_data).count();
+        assert_eq!(body_rows, CapabilityMatrix::baseline().supported().len());
+        // sorted: Files < Finder < Obsidian < Safari (case-insensitive) — Files first.
+        let first = md.lines().find(is_data).unwrap();
+        assert!(first.contains("Files"), "rows must be sorted by app: {first}");
+    }
+
+    #[test]
+    #[ignore = "generator: run with `--ignored regenerate_capabilities_doc` to (re)write docs/CAPABILITIES.md"]
+    fn regenerate_capabilities_doc() {
+        // The doc is a build artifact of the matrix. Run this when the matrix changes,
+        // then the drift guard below proves the committed doc matches.
+        let md = CapabilityMatrix::baseline().to_markdown();
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/CAPABILITIES.md");
+        std::fs::write(&p, md).unwrap();
+        eprintln!("wrote {}", p.display());
+    }
+
+    #[test]
+    fn capabilities_doc_is_in_sync_with_the_matrix() {
+        // O2 drift guard: docs/CAPABILITIES.md is GENERATED from the matrix. If the
+        // matrix changes without regenerating, this fails — the published disclosure
+        // can never silently diverge from the code that enforces it.
+        let generated = CapabilityMatrix::baseline().to_markdown();
+        let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/CAPABILITIES.md");
+        let committed = std::fs::read_to_string(&doc_path).unwrap_or_else(|e| panic!("read {}: {e}", doc_path.display()));
+        assert_eq!(
+            committed, generated,
+            "docs/CAPABILITIES.md is stale — regenerate it from CapabilityMatrix::to_markdown()"
+        );
     }
 }

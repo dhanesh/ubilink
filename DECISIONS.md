@@ -171,3 +171,26 @@ Copy action + Enter shortcut; `panel.css` has a `:focus-visible` ring and respec
 timing, the VoiceOver + AA-contrast + keyboard-only pass, the global hotkey, and the
 actual `#[tauri::command]` wiring — all in `docs/RUNBOOK-gui-panel.md`.
 `satisfied_count` stays 8. 65 cargo + 8 node tests green.
+
+## D9 — B3 extension surface SATISFIED + O2 capability matrix published (R10)
+
+**Date:** 2026-06-19 · **Constraints:** B3 (→ SATISFIED), O2
+
+**B3 — the first satisfied-count increase since R5 (8 → 9), and an honest one.** B3
+asserts a *structural* property — "a documented extension surface lets anyone add an
+integration without forking core" — not a runtime/live one, so it is fully provable
+headlessly. The surface now exists end-to-end: `docs/AUTHORING-INTEGRATIONS.md` (the
+walkthrough), `hooky-sign validate` over `Manifest::validate` (author-facing check,
+unit-tested), `hooky-sign sign` (which now validates before signing), R3's
+`Installer` (verify + trust + downgrade), and the R1 sandbox run. Adding an app
+exercises these generic mechanisms and touches **zero** core files. No ENV residual —
+unlike B1/U1/O3, B3 needs no real device to be true.
+
+**O2 — published, drift-guarded; render is the only residual.** `docs/CAPABILITIES.md`
+is GENERATED from `CapabilityMatrix::to_markdown()` and pinned to the code by the
+`capabilities_doc_is_in_sync` test: the published disclosure can never silently
+diverge from the matrix that enforces it. The in-app *data* path
+(`PanelBackend::capabilities()`) is tested; the in-app *render* lives in the
+ENV-blocked GUI (folded into `docs/RUNBOOK-gui-panel.md`), so O2 stays PARTIAL.
+
+69 cargo + 8 node tests green.

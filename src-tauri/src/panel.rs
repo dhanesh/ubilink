@@ -65,6 +65,12 @@ impl PanelBackend {
     pub fn service_mut(&mut self) -> &mut HookyService {
         &mut self.service
     }
+
+    /// The `capabilities` command (O2): the supported app/platform/mechanism set,
+    /// serialized for the webview to disclose what works where.
+    pub fn capabilities(&self) -> Vec<crate::capabilities::Support> {
+        self.service.capability_overview()
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +124,18 @@ mod tests {
         let mut panel = PanelBackend::new(svc);
         let err = panel.capture_current(&LiveAdapter).unwrap_err();
         assert!(!err.trim().is_empty(), "U3: empty explanation");
+    }
+
+    #[test]
+    fn capabilities_command_discloses_the_supported_set() {
+        // O2: the panel can surface what works where (the in-app disclosure).
+        let svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
+        let panel = PanelBackend::new(svc);
+        let caps = panel.capabilities();
+        assert!(!caps.is_empty(), "O2: in-app capability disclosure must be non-empty");
+        assert!(caps.iter().any(|s| s.app == "Safari"), "expected the baseline matrix");
+        // serializable for the webview (the disclosure crosses the IPC boundary).
+        assert!(serde_json::to_string(&caps).is_ok());
     }
 
     // ── Static markup contract (U1/U2/U3/U4) — proven without a GUI ──

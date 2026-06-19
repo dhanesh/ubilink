@@ -110,6 +110,13 @@ impl HookyService {
     pub fn capability(&self, app: &str) -> Capability {
         self.matrix.capability(app, self.platform)
     }
+
+    /// The full supported set, for in-app capability disclosure (O2 "surfaced
+    /// in-app"). The UI renders this so users see what works where before they hit
+    /// an unsupported app.
+    pub fn capability_overview(&self) -> Vec<crate::capabilities::Support> {
+        self.matrix.supported().to_vec()
+    }
 }
 
 fn current_platform() -> Platform {

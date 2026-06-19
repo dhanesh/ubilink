@@ -16,7 +16,9 @@ fn usage() -> &'static str {
               reads HOOKY_SIGNING_KEY (64-hex); writes the signed bundle JSON to stdout\n\
        verify --bundle <bundle.json>\n\
               reads HOOKY_TRUSTED_KEYS (comma-separated 64-hex pubkeys); exit 0 iff valid\n\
-       pubkey reads HOOKY_SIGNING_KEY; prints the public key hex to trust\n"
+       pubkey reads HOOKY_SIGNING_KEY; prints the public key hex to trust\n\
+       validate --manifest <m.json>\n\
+              checks a third-party manifest against the schema (B3); exit 0 iff valid\n"
 }
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
@@ -39,6 +41,9 @@ fn run() -> Result<(), String> {
             let manifest: Manifest = serde_json::from_str(
                 &std::fs::read_to_string(&mpath).map_err(|e| format!("read {mpath}: {e}"))?,
             ).map_err(|e| format!("parse {mpath}: {e}"))?;
+            // B3: refuse to sign a malformed manifest — authors get the error here,
+            // not a broken bundle downstream.
+            manifest.validate().map_err(|e| format!("invalid manifest: {e}"))?;
             let source = std::fs::read_to_string(&spath).map_err(|e| format!("read {spath}: {e}"))?;
             let json = sign_to_json(&key, manifest, source, version).map_err(|e| e.message())?;
             println!("{json}");
@@ -51,6 +56,16 @@ fn run() -> Result<(), String> {
                 .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             verify_json(&json, &trusted).map_err(|e| e.message())?;
             eprintln!("[hooky-sign] bundle {bpath} verified against {} trusted key(s) ✓", trusted.len());
+            Ok(())
+        }
+        Some("validate") => {
+            // B3: the author-facing check — is this manifest installable as-is?
+            let mpath = arg(&args, "--manifest").ok_or("validate needs --manifest <file>")?;
+            let manifest: Manifest = serde_json::from_str(
+                &std::fs::read_to_string(&mpath).map_err(|e| format!("read {mpath}: {e}"))?,
+            ).map_err(|e| format!("parse {mpath}: {e}"))?;
+            manifest.validate().map_err(|e| format!("invalid manifest: {e}"))?;
+            eprintln!("[hooky-sign] manifest {mpath} is valid ✓ (id={}, {} capability/ies)", manifest.id, manifest.needs.len());
             Ok(())
         }
         Some("pubkey") => {
