@@ -12,6 +12,13 @@ edition = "2021"
 license = "MIT"
 description = "Tauri desktop shell for hooky — wires the panel UI to hooky-core's command contract."
 
+# The crate is `hooky-desktop`, but the binary (and therefore the macOS process /
+# dock name for an unbundled `cargo run`) is `hooky` — matching tauri.conf.json's
+# productName, so the app identifies as "hooky" everywhere.
+[[bin]]
+name = "hooky"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
