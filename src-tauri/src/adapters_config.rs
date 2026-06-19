@@ -37,6 +37,11 @@ pub struct AdapterSpec {
     /// Optional template for a path identifier (RT-3), e.g. Finder's "{path}".
     #[serde(default)]
     pub path: Option<String>,
+    /// URI schemes this adapter may emit when the `uri` is DYNAMIC (e.g. built from
+    /// a clipboard value, so no literal scheme can be inferred). Declared schemes are
+    /// trusted by the bounded API (S5). Literal-template adapters don't need this.
+    #[serde(default)]
+    pub schemes: Vec<String>,
     /// Whether capturing needs OS automation permission (live apps do).
     #[serde(default = "default_true")]
     pub needs_permission: bool,
@@ -213,11 +218,19 @@ impl AdapterRegistry {
     /// service feeds these to `LinkApi::allow` so config-added apps pass S5.
     pub fn declared_schemes(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
+        let mut add = |s: String| {
+            if !s.is_empty() && !out.contains(&s) {
+                out.push(s);
+            }
+        };
         for spec in &self.specs {
+            // a literal-scheme template (bear://…) contributes its scheme automatically…
             if let Some(scheme) = literal_scheme(&spec.uri) {
-                if !out.contains(&scheme) {
-                    out.push(scheme);
-                }
+                add(scheme);
+            }
+            // …and a dynamic-uri adapter declares its scheme(s) explicitly.
+            for s in &spec.schemes {
+                add(s.to_ascii_lowercase());
             }
         }
         out
@@ -278,6 +291,7 @@ mod tests {
             uri: "{url}".into(),
             name: "{title}".into(),
             path: None,
+            schemes: vec![],
             needs_permission: true,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("https://example.com/x\tExample\n".into())));
@@ -296,6 +310,7 @@ mod tests {
             uri: "file://{path}".into(),
             name: "{path|basename}".into(),
             path: Some("{path}".into()),
+            schemes: vec![],
             needs_permission: true,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("/Users/me/Docs/Report.pdf".into())));
@@ -315,6 +330,7 @@ mod tests {
             uri: "bear://x-callback-url/open-note?title={title|urlencode}".into(),
             name: "{title}".into(),
             path: None,
+            schemes: vec![],
             needs_permission: true,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("My Note: ideas".into())));
@@ -328,7 +344,7 @@ mod tests {
         let spec = AdapterSpec {
             app: "Safari".into(), script: "…".into(), delimiter: Some("\t".into()),
             fields: vec!["url".into(), "title".into()], uri: "{url}".into(), name: "{title}".into(),
-            path: None, needs_permission: true,
+            path: None, schemes: vec![], needs_permission: true,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("   \n".into())));
         match a.capture().unwrap_err() {
@@ -369,7 +385,8 @@ mod tests {
     fn declared_schemes_extracts_literals_not_dynamic_ones() {
         let reg = AdapterRegistry::defaults();
         let schemes = reg.declared_schemes();
-        // Literal-scheme templates contribute their scheme…
+        // `things`/`file` from literal templates; `bear` from an explicit declaration
+        // (its uri is dynamic — built from the clipboard — so it can't be inferred).
         for s in ["bear", "things", "file"] {
             assert!(schemes.contains(&s.to_string()), "expected scheme {s}; got {schemes:?}");
         }

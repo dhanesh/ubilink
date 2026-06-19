@@ -375,8 +375,8 @@
       }
     ],
     "evidence_executed": {
-      "tests_run": 79,
-      "tests_passed": 79,
+      "tests_run": 73,
+      "tests_passed": 73,
       "test_passes_now_VERIFIED": [
         "E1",
         "E11",
@@ -435,8 +435,8 @@
     "desktop/src/main.rs": "219ce719b92b3d847129fcc33785b5b1e5a0dca667efb5760c69f7576f8b4003",
     "Makefile": "2cb1fc5a0f20aaa2359736036bcd633977fbd3dcc9ac9b1c84c9bb4c3a40cc2a",
     "docs/RUNBOOK-gui-panel.md": "a7e35a578b5515f601d523acd40fc14b75c0bb1d2b73e02b07d2c96d3d633558",
-    "src-tauri/src/adapters_config.rs": "1cce3e9d72f4f65680cc32f2671771f0f261524673f56fe4d62baa2902d3ade4",
-    "src-tauri/src/adapters.default.json": "542082318e7b6a5ddad1b2056d17265aa3e67a5e0ff2b53ac13cea7ab75393f1",
+    "src-tauri/src/adapters_config.rs": "f2844f23b67cbc68ba05fd8776db522a44809b82493d1fe939d6b3fd7d646edc",
+    "src-tauri/src/adapters.default.json": "a6a62a307a46a1eec59b9f72ddde92dbf2d358f69bb4d7520c765ed6d51180b7",
     "docs/SUPPORTED-APPS.md": "3f605a6a4ae6f74e845d49339a13d57223bdbe669fd63a3282ef46a595cebf8e",
     "src-tauri/src/api.rs": "0adb309d347229d5b5e724ad4148c021119131725bc5171d626a781f1decedfa"
   },

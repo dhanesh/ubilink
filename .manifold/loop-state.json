@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 15,
+  "round": 16,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -177,6 +177,16 @@
       "node_tests": 9,
       "progress": "bugfix",
       "note": "From running: a captured bear:// link was rejected by the S5 scheme allowlist. Fix: AdapterRegistry::declared_schemes() extracts literal scheme prefixes from uri templates; HookyService::allow_schemes feeds them to LinkApi::allow. Adapter schemes are template literals (safe by construction); browser {url} templates still ride the base http/https set, so a javascript: tab is still blocked. S5 stays an allowlist."
+    },
+    {
+      "round": 16,
+      "cluster": "Bear id-based adapter + AdapterSpec.schemes declaration",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 73,
+      "node_tests": 9,
+      "progress": "bugfix",
+      "note": "Running showed title-based Bear captured the app name (\"Bear\"), not the note title \u2014 Bear AX window name is just \"Bear\". Switched Bear to id-based: UI-script Note>Copy Link to Note + read clipboard -> stable bear://...?id=. Added AdapterSpec.schemes so dynamic-uri adapters (clipboard-built) declare their scheme for the S5 allowlist. Menu item name + clipboard format are best-effort guesses needing Mac verification; user-fixable via adapters.json (no recompile)."
     }
   ],
   "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"

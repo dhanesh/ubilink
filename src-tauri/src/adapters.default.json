@@ -65,10 +65,11 @@
   },
   {
     "app": "Bear",
-    "script": "tell application \"System Events\" to tell process \"Bear\" to return name of front window",
-    "fields": ["title"],
-    "uri": "bear://x-callback-url/open-note?title={title|urlencode}",
-    "name": "{title}"
+    "script": "tell application \"System Events\" to tell process \"Bear\"\n\tset frontmost to true\n\tclick menu item \"Copy Link to Note\" of menu \"Note\" of menu bar 1\nend tell\ndelay 0.2\nreturn (the clipboard as text)",
+    "fields": ["link"],
+    "uri": "{link}",
+    "name": "{link}",
+    "schemes": ["bear"]
   },
   {
     "app": "Things3",
