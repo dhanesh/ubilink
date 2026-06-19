@@ -84,35 +84,55 @@ function setPerm(name, ok, label) {
   el.setAttribute('aria-label', `${name}: ${label}`);
 }
 
-async function refreshPermissions() {
-  let report;
-  try {
-    report = await invoke('permission_status');
-  } catch {
-    // Browser preview (no Tauri bridge): just show the capture layout.
-    showCaptureView();
-    render();
-    return false;
-  }
+/** Query the Rust permission_status command; null if unavailable (browser preview). */
+async function checkPermissions() {
+  try { return await invoke('permission_status'); }
+  catch { return null; }
+}
+
+/** Paint the per-permission ✓/✗ rows + the hint. Pure DOM. */
+function renderPermStatuses(report) {
   setPerm('accessibility', report.accessibility === true, report.accessibility ? 'granted' : 'not granted');
   const autoOk = report.automation === 'granted';
   setPerm('automation', autoOk, report.automation.replace('_', ' '));
+  $('onboarding-hint').textContent = permissionsComplete(report)
+    ? 'All set — press ⌘⇧K from any supported app.'
+    : 'Grant the items above, then press Re-check.';
+}
+
+/** Check + switch view. `resetIdle` shows the idle prompt when complete. */
+async function refreshPermissions({ resetIdle = false } = {}) {
+  const report = await checkPermissions();
+  if (!report) { showCaptureView(); render(); return false; } // browser preview
+  renderPermStatuses(report);
   const done = permissionsComplete(report);
-  $('onboarding-hint').textContent = done ? 'All set!' : 'Grant the items above, then press Re-check.';
   if (done) {
     showCaptureView();
-    if (state.phase !== 'ready') dispatch({ type: 'reset' }); // idle prompt
+    if (resetIdle && state.phase !== 'ready') dispatch({ type: 'reset' });
   } else {
     showOnboarding();
   }
   return done;
 }
 
+/** Always open the setup screen (the "Permissions" affordance), even when complete. */
+async function openSetup() {
+  const report = await checkPermissions();
+  if (report) renderPermStatuses(report);
+  showOnboarding();
+}
+
 // ── wiring ──
 for (const b of document.querySelectorAll('.open-settings')) {
   b.addEventListener('click', () => invoke('open_settings', { pane: b.dataset.pane }).catch(() => {}));
 }
-$('recheck').addEventListener('click', refreshPermissions);
+$('grant-accessibility').addEventListener('click', async () => {
+  await invoke('request_accessibility').catch(() => {}); // shows the macOS dialog
+  refreshPermissions(); // reflect the new state
+});
+$('recheck').addEventListener('click', () => refreshPermissions({ resetIdle: true }));
+$('setup-done').addEventListener('click', () => refreshPermissions({ resetIdle: true }));
+$('open-setup').addEventListener('click', openSetup);
 $('copy').addEventListener('click', confirmCopy);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && canConfirm(state)) { e.preventDefault(); confirmCopy(); }
@@ -121,8 +141,15 @@ document.addEventListener('keydown', (e) => {
 
 // Capture results pushed by the Rust hotkey handler (captures the app you were IN).
 onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); });
-onEvent('capture-err', (e) => { showCaptureView(); dispatch({ type: 'failed', message: e.payload }); });
+onEvent('capture-err', async (e) => {
+  showCaptureView();
+  dispatch({ type: 'failed', message: e.payload });
+  // If the failure is because a permission is missing, route to setup so the user
+  // knows what to fix (rather than just seeing an opaque error).
+  const report = await checkPermissions();
+  if (report && !permissionsComplete(report)) { renderPermStatuses(report); showOnboarding(); }
+});
 
 // Boot: check permissions (shows onboarding or the capture view), then paint.
-refreshPermissions();
+refreshPermissions({ resetIdle: true });
 render();

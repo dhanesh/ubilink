@@ -86,6 +86,10 @@ kbd {
 #backlinks a { color: var(--accent); }
 
 .hint { margin-top: auto; color: var(--muted); font-size: 0.8rem; }
+.linklike {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--accent); font: inherit; text-decoration: underline;
+}
 
 /* Spinner — pure CSS, honours reduced-motion (U4 / accessibility). */
 #status-line[data-phase="capturing"]::before {

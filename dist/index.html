@@ -25,7 +25,8 @@
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
               <strong>Accessibility</strong>
-              <p>Lets the <kbd>⌘⇧K</kbd> hotkey work.</p>
+              <p>Lets hooky script an app's menus — needed for apps like Bear that have no API.</p>
+              <button type="button" id="grant-accessibility">Grant Access…</button>
               <button type="button" class="open-settings" data-pane="accessibility">Open Settings</button>
             </div>
           </li>
@@ -33,13 +34,14 @@
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
               <strong>Automation</strong>
-              <p>Lets hooky read the link of the app you're in.</p>
+              <p>Lets hooky read the link of the app you're in (browsers, Finder, …).</p>
               <button type="button" class="open-settings" data-pane="automation">Open Settings</button>
             </div>
           </li>
         </ul>
         <div class="onboarding-actions">
           <button id="recheck" type="button">Re-check</button>
+          <button id="setup-done" type="button">Done</button>
           <span id="onboarding-hint" aria-live="polite"></span>
         </div>
       </section>
@@ -61,7 +63,7 @@
           <ul id="backlinks-list"></ul>
         </section>
 
-        <p class="hint" id="hint">Esc to dismiss · Enter to copy</p>
+        <p class="hint" id="hint">Esc to dismiss · Enter to copy · <button type="button" id="open-setup" class="linklike">Permissions</button></p>
       </section>
     </main>
 

@@ -117,6 +117,64 @@ fn accessibility_trusted() -> bool {
     false
 }
 
+/// Trigger the macOS "grant Accessibility" system dialog
+/// (`AXIsProcessTrustedWithOptions` with the prompt option) and return the current
+/// trust state. Needed for UI-scripting app menus (e.g. Bear's "Copy Link"). Builds
+/// the options CFDictionary by hand — dep-free CoreFoundation FFI.
+#[cfg(target_os = "macos")]
+fn prompt_accessibility() -> bool {
+    use std::ffi::c_void;
+    use std::ptr;
+    type CFRef = *const c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFBooleanTrue: CFRef;
+        static kCFTypeDictionaryKeyCallBacks: [u8; 0];
+        static kCFTypeDictionaryValueCallBacks: [u8; 0];
+        fn CFDictionaryCreate(
+            allocator: CFRef,
+            keys: *const CFRef,
+            values: *const CFRef,
+            num_values: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> CFRef;
+        fn CFRelease(cf: CFRef);
+    }
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        static kAXTrustedCheckOptionPrompt: CFRef;
+        fn AXIsProcessTrustedWithOptions(options: CFRef) -> u8;
+    }
+    unsafe {
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            ptr::addr_of!(kCFTypeDictionaryKeyCallBacks) as *const c_void,
+            ptr::addr_of!(kCFTypeDictionaryValueCallBacks) as *const c_void,
+        );
+        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
+        if !options.is_null() {
+            CFRelease(options);
+        }
+        trusted
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn prompt_accessibility() -> bool {
+    false
+}
+
+/// Show the macOS Accessibility prompt and report whether trust is now granted.
+#[tauri::command]
+fn request_accessibility() -> bool {
+    prompt_accessibility()
+}
+
 /// Report current permission state (called by the onboarding screen + its Re-check).
 #[tauri::command]
 fn permission_status() -> PermissionReport {
@@ -228,7 +286,8 @@ fn main() {
             open_link,
             dismiss_panel,
             permission_status,
-            open_settings
+            open_settings,
+            request_accessibility
         ])
         .run(tauri::generate_context!())
         .expect("error while running hooky desktop");

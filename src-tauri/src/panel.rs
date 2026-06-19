@@ -174,6 +174,8 @@ mod tests {
         assert!(html.contains("data-perm=\"automation\""), "must surface the Automation permission");
         assert!(html.contains("id=\"recheck\""), "must offer a re-check action");
         assert!(html.contains("data-pane=\"accessibility\""), "must offer to open the Accessibility pane");
+        assert!(html.contains("id=\"grant-accessibility\""), "must offer a native Accessibility prompt");
+        assert!(html.contains("id=\"open-setup\""), "permissions must be reachable from the capture view");
     }
 
     #[test]
