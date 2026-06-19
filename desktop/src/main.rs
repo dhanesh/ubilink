@@ -79,17 +79,25 @@ fn dismiss_panel(app: AppHandle) -> Result<(), String> {
 }
 
 fn main() {
-    // The on-device link graph (RT-8): persistent, local-only. A real app resolves a
-    // proper data dir; in-memory keeps first-run simple and is swapped in setup().
-    let graph = LinkGraph::open_in_memory().expect("failed to open link graph");
-    // Probe the automation permission once at startup (S4); capture_current degrades
-    // honestly if it's not granted.
-    let permission = hooky_core::probe_automation_permission(&OsaScriptRunner);
-    let backend: Backend = Mutex::new(PanelBackend::new(HookyService::new(graph).with_permission(permission)));
-
     tauri::Builder::default()
-        .manage(backend)
         .setup(|app| {
+            // The on-device link graph (RT-8): a persistent SQLite file in the OS
+            // app-data dir, so hooks survive restarts. Resolved here because the
+            // path API needs the running app. Local-only — never leaves the device.
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            let db_path = data_dir.join("hooky-graph.sqlite");
+            let graph = LinkGraph::open(&db_path.to_string_lossy())
+                .map_err(|e| format!("couldn't open link graph at {}: {e}", db_path.display()))?;
+            eprintln!("[hooky] link graph: {}", db_path.display());
+
+            // Probe the automation permission once at startup (S4); capture_current
+            // degrades honestly if it's not granted.
+            let permission = hooky_core::probe_automation_permission(&OsaScriptRunner);
+            app.manage::<Backend>(Mutex::new(PanelBackend::new(
+                HookyService::new(graph).with_permission(permission),
+            )));
+
             // Show the panel on launch so there is ALWAYS visible UI. The global
             // hotkey below needs macOS Accessibility permission and may not fire
             // until it's granted — relying on it alone would leave a blank dock icon.
