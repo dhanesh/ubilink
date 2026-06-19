@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 10,
+  "round": 11,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -122,7 +122,18 @@
       "node_tests": 8,
       "progress": true,
       "note": "Human-directed. B3 -> SATISFIED: docs/AUTHORING-INTEGRATIONS.md + `hooky-sign validate` (Manifest::validate, unit-tested) + sign + R3 install + sandbox run \u2014 adding an app touches ZERO core files. B3 is a structural claim with no ENV residual, so it flips honestly (first satisfied-count increase since R5). O2: docs/CAPABILITIES.md generated from the matrix + drift-guarded; in-app data command tested; render stays GUI-ENV-blocked."
+    },
+    {
+      "round": 11,
+      "cluster": "O4 integration registry service (separate std-only crate)",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 75,
+      "registry_tests": 6,
+      "node_tests": 8,
+      "progress": "env-surface-reduction",
+      "note": "Human-directed. Built registry/ as a SEPARATE crate (a server can't live in hooky-core under S2; separation keeps the core's no_network_deps guard true). std-only HTTP (zero added deps), reuses hooky-core ed25519 verify + monotonicity. Functional-core/imperative-shell: RegistryIndex + pure handle_request + handle_stream, 6 tests, plus a real-socket smoke (publish/list/search/fetch/untrusted-reject/404). Review process = trusted-key gate, documented in RUNBOOK-registry.md. O4 MISSING->PARTIAL; hosting a governed public instance is the ENV residual, not faked."
     }
   ],
-  "terminal": "9/23 SATISFIED; B3 closed headlessly; remaining gaps need real-display/live-CI/hosted-infra (runbooks) or are statistical/other-platform"
+  "terminal": "9/23 SATISFIED; all four directed gap-areas + O4 registry built & verified headlessly; remaining residuals = hosted/live-CI/real-display ops behind 5 runbooks, plus statistical/other-platform"
 }

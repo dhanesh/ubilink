@@ -1,0 +1,26 @@
+# Satisfies: O4 (plugin/integration registry service). A SEPARATE crate from
+# hooky-core on purpose: a registry is a network service, and S2 forbids the CORE
+# from egress — not a standalone service. Keeping it out of hooky-core means the
+# core's `no_network_deps` guard stays physically true.
+#
+# Dependencies are deliberately minimal: hooky-core (reuse the proven ed25519
+# sign/verify + WireBundle wire format) and serde_json. The HTTP layer is std-only
+# (no axum/hyper/warp) — zero added supply-chain surface, matching the project ethos.
+[package]
+name = "hooky-registry"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Signed-integration registry service for hooky (O4). std-only HTTP, reuses hooky-core's ed25519 trust model."
+
+[lib]
+name = "hooky_registry"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hooky-registry"
+path = "src/bin/hooky-registry.rs"
+
+[dependencies]
+hooky-core = { path = "../src-tauri" }
+serde_json = "1"

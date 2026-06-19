@@ -194,3 +194,33 @@ diverge from the matrix that enforces it. The in-app *data* path
 ENV-blocked GUI (folded into `docs/RUNBOOK-gui-panel.md`), so O2 stays PARTIAL.
 
 69 cargo + 8 node tests green.
+
+## D10 — Integration registry as a separate std-only crate (R11 / O4)
+
+**Date:** 2026-06-19 · **Constraints:** O4, B3 (ecosystem), S2, S3/RT-10
+
+**Architecture call: the registry is a SEPARATE crate (`registry/`), not part of
+hooky-core.** A registry is a network *service*; S2 forbids the *core* from egress,
+not a standalone service. Keeping it out of hooky-core means the core's
+`no_network_deps` guard stays physically true. The registry adds **zero** new
+third-party deps — its HTTP layer is hand-rolled over `std::net` (no axum/hyper),
+matching the project's minimalist supply-chain ethos — and it reuses hooky-core's
+proven ed25519 `verify_json` + `WireBundle` rather than reimplementing crypto.
+
+Same functional-core / imperative-shell split: `RegistryIndex` (publish verifies +
+enforces version monotonicity; get/list/search) and the pure `handle_request` router
+are tested with no sockets; `handle_stream` (HTTP/1.1 parse) is tested with an
+in-memory stream; `bin/hooky-registry` is the thin `TcpListener` loop. Verified by 6
+lib tests **and** a real-socket smoke: `POST /publish` → 201, list + `?q=` search,
+verbatim bundle fetch, untrusted publisher → 400, unknown id → 404.
+
+**Review = the trusted-key gate.** A publish is accepted only if signed by a key in
+the registry's trusted set; approving a contribution means adding its publisher
+pubkey, revoking means removing it — review is enforced cryptographically, not by
+convention (`docs/RUNBOOK-registry.md`).
+
+**O4 MISSING → PARTIAL, not SATISFIED.** The registry mechanism and the documented
+review process exist and are proven; what remains is *operating a hosted, governed
+instance* (public host, TLS, durable storage, a standing review team) — genuinely
+ENV-blocked. Unlike B3 (a purely structural claim), O4 implies a running governed
+channel, so it stays PARTIAL. `satisfied_count` stays 9. 75 cargo + 8 node tests green.
