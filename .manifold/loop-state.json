@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 17,
+  "round": 18,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -197,6 +197,16 @@
       "node_tests": 9,
       "progress": "env-surface-reduction",
       "note": "User never saw accessibility instructions (Carbon hotkey needs none; onboarding was bypassed by the hotkey->capture path). Added: AXIsProcessTrustedWithOptions native prompt (request_accessibility cmd, dep-free CF FFI); a Permissions affordance in the capture view (openSetup) so status is always viewable; capture-err now routes to onboarding when a permission is missing. Split checkPermissions/renderPermStatuses/refreshPermissions so it never clobbers capture state. 73 cargo + 9 node green."
+    },
+    {
+      "round": 18,
+      "cluster": "Bear menu item fix (Copy Link) + markdown-link transforms",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 75,
+      "node_tests": 9,
+      "progress": "bugfix",
+      "note": "User supplied Bear menu data: item is \"Copy Link\" (not \"Copy Link to Note\"); resolves -1728. Added mdurl/mdtext transforms so the adapter is robust whether Copy Link puts a plain bear:// URL or a markdown [title](url) on the clipboard \u2014 clean title if markdown, url fallback if plain. Clicking the menu needs Accessibility (now grantable via the new prompt)."
     }
   ],
   "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"

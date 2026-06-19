@@ -435,8 +435,8 @@
     "desktop/src/main.rs": "004c1ec5c13bbacaeb1a8f5bddb9181f285045aed4c7967dde942d295ecd4be6",
     "Makefile": "2cb1fc5a0f20aaa2359736036bcd633977fbd3dcc9ac9b1c84c9bb4c3a40cc2a",
     "docs/RUNBOOK-gui-panel.md": "a7e35a578b5515f601d523acd40fc14b75c0bb1d2b73e02b07d2c96d3d633558",
-    "src-tauri/src/adapters_config.rs": "f2844f23b67cbc68ba05fd8776db522a44809b82493d1fe939d6b3fd7d646edc",
-    "src-tauri/src/adapters.default.json": "a6a62a307a46a1eec59b9f72ddde92dbf2d358f69bb4d7520c765ed6d51180b7",
+    "src-tauri/src/adapters_config.rs": "21c2531ce42896f2ba1caa6a4549dd16148a9b2d8c33ba1a0bd6c5ff87713493",
+    "src-tauri/src/adapters.default.json": "4875a9ce25cd6b4da25c2ff82b63eb0f51a869f44d8ad76cccddcc17351867fe",
     "docs/SUPPORTED-APPS.md": "3f605a6a4ae6f74e845d49339a13d57223bdbe669fd63a3282ef46a595cebf8e",
     "src-tauri/src/api.rs": "0adb309d347229d5b5e724ad4148c021119131725bc5171d626a781f1decedfa"
   },

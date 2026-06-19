@@ -71,6 +71,10 @@ fn render(template: &str, fields: &HashMap<String, String>) -> Result<String, St
             None => val.clone(),
             Some("urlencode") => urlencode(val),
             Some("basename") => basename(val),
+            // For values that may be a markdown link `[text](url)` (e.g. some apps'
+            // "Copy Link" puts markdown on the clipboard); pass through if not.
+            Some("mdurl") => md_url(val),
+            Some("mdtext") => md_text(val),
             Some(other) => return Err(format!("unknown template transform '{other}'")),
         };
         out.push_str(&rendered);
@@ -95,6 +99,28 @@ fn urlencode(s: &str) -> String {
 /// The final path component (Finder paths -> a display name).
 fn basename(s: &str) -> String {
     s.trim_end_matches('/').rsplit('/').next().unwrap_or(s).to_string()
+}
+
+/// The URL out of a markdown link `[text](url)`, or the input unchanged if it isn't one.
+fn md_url(s: &str) -> String {
+    let s = s.trim();
+    if s.starts_with('[') {
+        if let (Some(mid), true) = (s.find("]("), s.ends_with(')')) {
+            return s[mid + 2..s.len() - 1].to_string();
+        }
+    }
+    s.to_string()
+}
+
+/// The text out of a markdown link `[text](url)`, or the input unchanged if it isn't one.
+fn md_text(s: &str) -> String {
+    let s = s.trim();
+    if s.starts_with('[') {
+        if let Some(mid) = s.find("](") {
+            return s[1..mid].to_string();
+        }
+    }
+    s.to_string()
 }
 
 /// A live adapter built from a spec + a command runner (the I/O seam).
@@ -271,6 +297,18 @@ mod tests {
         assert_eq!(render("t={title|urlencode}", &f).unwrap(), "t=A%20B%20%26%20C");
         assert_eq!(render("{path|basename}", &f).unwrap(), "My Doc.pdf");
         assert_eq!(render("file://{path}", &f).unwrap(), "file:///Users/me/My Doc.pdf");
+    }
+
+    #[test]
+    fn markdown_transforms_handle_both_link_and_plain() {
+        // A markdown link splits into url/text…
+        let md = fields(&[("link", "[Daily Memories](bear://x-callback-url/open-note?id=ABC)")]);
+        assert_eq!(render("{link|mdurl}", &md).unwrap(), "bear://x-callback-url/open-note?id=ABC");
+        assert_eq!(render("{link|mdtext}", &md).unwrap(), "Daily Memories");
+        // …a plain URL passes through unchanged (graceful fallback).
+        let plain = fields(&[("link", "bear://x-callback-url/open-note?id=ABC")]);
+        assert_eq!(render("{link|mdurl}", &plain).unwrap(), "bear://x-callback-url/open-note?id=ABC");
+        assert_eq!(render("{link|mdtext}", &plain).unwrap(), "bear://x-callback-url/open-note?id=ABC");
     }
 
     #[test]
