@@ -1,6 +1,6 @@
 {
   "verification": {
-    "timestamp": "2026-06-19T20:30:00Z",
+    "timestamp": "2026-06-20T10:00:00Z",
     "result": "PARTIAL",
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
@@ -14,7 +14,7 @@
         "docs": "✓",
         "ops": "-",
         "status": "PARTIAL",
-        "gap": "Live macOS capture (Safari/Chrome/Finder) IMPLEMENTED in live_capture.rs behind a CommandRunner seam; 10 headless tests prove script selection, parsing, U3 degradation + S4 gating. Residual shrunk to ONE osascript seam: an #[ignore] live test + docs/RUNBOOK-live-capture.md verify it on a real desktop with a TCC grant. UI panel still ENV-blocked.",
+        "gap": "Live capture via DECLARATIVE adapters (adapters_config.rs): browsers (Safari/Chrome/Arc/Brave/Edge/Vivaldi/Opera) + Finder + Bear + Things3 ship as config; engine (template render + parse) unit-tested incl. a guard that every shipped spec renders. Frontmost-app routing in the desktop shell. Residual ENV-blocked: per-app live verification on a Mac (docs/SUPPORTED-APPS.md).",
         "residual": "residual ENV-blocked: 1 osascript seam (TCC grant + live app) + GUI panel"
       },
       {
@@ -36,7 +36,7 @@
         "ops": "-",
         "status": "SATISFIED",
         "gap": "",
-        "residual": "SATISFIED headlessly: documented extension surface (docs/AUTHORING-INTEGRATIONS.md) + author validate command (hooky-sign validate, Manifest::validate test) + sign + install (R3 Installer) + sandbox-run (sandbox.rs) — adding an app exercises generic mechanisms, touches ZERO core files. No ENV residual (B3 is a structural claim, not a runtime/live one)."
+        "residual": "SATISFIED headlessly: documented extension surface (docs/AUTHORING-INTEGRATIONS.md) + author validate command (hooky-sign validate, Manifest::validate test) + sign + install (R3 Installer) + sandbox-run (sandbox.rs) — adding an app exercises generic mechanisms, touches ZERO core files. No ENV residual (B3 is a structural claim, not a runtime/live one). R14: live-capture adapters are now ALSO config-driven (adapters_config.rs + adapters.default.json): adding an app is a JSON entry, no recompile — built-ins overridable via a user adapters.json (B3 deepened beyond the plugin/broker path to the addressing layer itself)."
       },
       {
         "constraint": "B4",
@@ -390,7 +390,7 @@
       "registry_tests": 6,
       "desktop_compiles": true
     },
-    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook). | R10 (human-directed): B3 -> SATISFIED (documented extension surface + validate/sign/install/sandbox, zero core change; first satisfied-count increase since R5: 8->9). O2 published (generated+drift-guarded doc) + in-app data command; render pending GUI. 69 cargo + 8 node tests. | R11 (human-directed): O4 registry service built as a separate std-only crate (zero added deps, S2-safe), reusing hooky-core trust; 6 tests + real-socket smoke; review process documented. O4 MISSING->PARTIAL; hosted governed operation is the residual. | R12 (human-directed): Tauri desktop shell built (desktop/ crate, separate from core); commands wrap PanelBackend, global hotkey wired; COMPILES against Tauri v2 (T1 wiring gap closed in code). Run needs a display. make run -> desktop app. 76 cargo + 8 node tests; desktop compiles. | R13 (human-directed): inverted capture flow (captures the app you were in, via Rust hotkey->emit->show; re-captures each press) + S4 permission onboarding screen (Accessibility AXIsProcessTrusted + automation probe, guided granting). Compiles; 77 cargo + 9 node tests."
+    "loop_terminal_state": "HEADLESS_CONVERGED — every gap verifiable in this environment is SATISFIED; remainder is ENV-blocked (GUI/live-app/TCC/other-platforms/CI) | R6 m6-integrate: HookyService facade wires capture->validate->hook->backlinks; 43 tests green; no status flip (residuals ENV-blocked). | R7 (human-directed): live-app capture adapter built; ENV-blocked surface reduced to a single osascript seam (ignored live test + runbook); 53 tests green; no status flip. | R8 (human-directed): O3 release-signing pipeline built (hooky-sign CLI + workflow), reusing R3 crypto; 60 tests green + CLI smoke; residual = live CI run with the secret. | R9 (human-directed): GUI panel scaffolded (no-build vanilla + Rust command contract); U1/U2/U4 MISSING->PARTIAL (logic+a11y contract-tested headlessly: 65 cargo + 8 node tests); real-display p99/SR/hotkey verification ENV-blocked (runbook). | R10 (human-directed): B3 -> SATISFIED (documented extension surface + validate/sign/install/sandbox, zero core change; first satisfied-count increase since R5: 8->9). O2 published (generated+drift-guarded doc) + in-app data command; render pending GUI. 69 cargo + 8 node tests. | R11 (human-directed): O4 registry service built as a separate std-only crate (zero added deps, S2-safe), reusing hooky-core trust; 6 tests + real-socket smoke; review process documented. O4 MISSING->PARTIAL; hosted governed operation is the residual. | R12 (human-directed): Tauri desktop shell built (desktop/ crate, separate from core); commands wrap PanelBackend, global hotkey wired; COMPILES against Tauri v2 (T1 wiring gap closed in code). Run needs a display. make run -> desktop app. 76 cargo + 8 node tests; desktop compiles. | R13 (human-directed): inverted capture flow (captures the app you were in, via Rust hotkey->emit->show; re-captures each press) + S4 permission onboarding screen (Accessibility AXIsProcessTrusted + automation probe, guided granting). Compiles; 77 cargo + 9 node tests. | R14 (human-directed): adapters are now declarative config (adapters_config.rs + adapters.default.json) — replaced hardcoded MacAppAdapter/AppKind; seeds 10 apps (7 browsers, Finder, Bear, Things), user-extensible via adapters.json, no recompile (B3). 77 cargo + 9 node tests; desktop compiles."
   },
   "file_hashes": {
     "src-tauri/src/broker.rs": "56ab832ead9368022a51bc4ce0b0a133328debb28a02604b3fc84a8fc037ffa0",
@@ -398,7 +398,7 @@
     "src-tauri/src/resource.rs": "7a383969d2287c78a358751f94a2228bfac39894ee3e1e07d8101b2f8ca81939",
     "src-tauri/src/graph.rs": "518e0dd2498100de364cf013adda078572d397cd6a4f54a3c929c4fa9a2c575e",
     "src-tauri/src/capabilities.rs": "cb8c6c8f2cf5efc9b62eee8ed500a3437d7b2d345c52c6a22b01e570f7a1eaa8",
-    "src-tauri/src/lib.rs": "db6ab341e0ce9d68d6ea6f39b0f49c23fa2f01018daadd7bbe7ff84649171873",
+    "src-tauri/src/lib.rs": "c547aa7c6707727ae6f6b420dcde9b352011db52c9ded54f361b0482d3b6f453",
     "src-tauri/tests/sandbox.rs": "9c896d9e04df370f72d277091abdc81a6665a797d0a992ff3d6027bca8e00fd9",
     "plugins/runtime/plugin-host.mjs": "3ecf8c1c8dd0785abe95194e81693ee97908112164a972d90b72c2f5e4fdaec7",
     "plugins/examples/malicious/plugin.mjs": "9f8eb526ffad1a717d5170ab298adb3400cb70dc85a9c7dc6f23cfa73e38220c",
@@ -413,13 +413,13 @@
     "src-tauri/Cargo.toml": "38501b7e8043e4a20d6781d6acd9811419ae4b1dbfe2b5ae9602fd4381d424cf",
     "src-tauri/tauri.conf.json": "c2690d967082bcfabf21e5e544053d80f7ee501041f4c4b0dd7e6511fcf37cbd",
     "src-tauri/src/service.rs": "910da10800dedc17fa2d5fbad8b6f5a80af23067aba04a523ad9024bb4f01dcd",
-    "src-tauri/src/live_capture.rs": "6bf2cf4c2a93e2ba58d4de4679faf286624e07b3fe4e80a3b79f8f40007b4acc",
+    "src-tauri/src/live_capture.rs": "b8b2d64583f291777f004ccb389b86534f320c4fe0af7db83b95b63b9e060d9b",
     "src-tauri/src/release.rs": "bfcedf9faa1a3ce6385627baa963791daf540d0bf0f55f13df09efcfec602742",
     "src-tauri/src/bin/hooky-sign.rs": "88ebd23f940da171b1f182f44f957ced76e043fea60c9683e029d4caa8c88700",
     "src-tauri/src/panel.rs": "20204d56f7d4b32b435bf900ce4fa7e3402c8613fdbb225f08d0ac1d208686a8",
     "dist/index.html": "925c4a337d07d9c2578efb2180ace4036f49a151da4cd9e84da5ec2e7e6e9a5f",
     "dist/panel.css": "e85a6c6b6e729d9cd3981844ab353ae0350be08648670ca3f767d4954416da28",
-    "dist/panel.js": "b0bdd6ef775cc0db22567136140ab59880ea2492ccc73345a48adc029f0667be",
+    "dist/panel.js": "ec82e134747b7e1f5b402abf7519b8c894376d99d7b8ce69c813d8660c8098fd",
     "dist/panel-state.mjs": "15e289f361adbb3a26098e19639189a06ab8fbf020e691b77be6b6d65f7a521f",
     "dist/panel-state.test.mjs": "12ca5a6b1eeb14f90176a4aa023b0f9b33204aef778ead10844df5169ba71b0f",
     "docs/CAPABILITIES.md": "c23d3fa24a684faf8cb305ebebd56e4d12898ad27e45ae1b692a79f98e15e621",
@@ -432,9 +432,12 @@
     "desktop/build.rs": "6aeeab41bc35efde4e3c2b644a6248f7fc06d24ae30b75c0d33491cbb0c1fa31",
     "desktop/tauri.conf.json": "ed16bc3a54460fd1112c1b88a150cb1fd83380539d1bb100804cf8498dac53da",
     "desktop/capabilities/default.json": "30aa099a7ef45d9561f08fb633abd8d9e0ee64e0cc1252c17533b6a4579b0907",
-    "desktop/src/main.rs": "2d3b32e23da9438d5d8c37248059054029bf37d95f6dd5f04af702b8725c4efd",
+    "desktop/src/main.rs": "bdd66398043de9a39f779c0fe29f217a61d43a19f9226884b0f28da7f2c9b7e7",
     "Makefile": "2cb1fc5a0f20aaa2359736036bcd633977fbd3dcc9ac9b1c84c9bb4c3a40cc2a",
-    "docs/RUNBOOK-gui-panel.md": "a7e35a578b5515f601d523acd40fc14b75c0bb1d2b73e02b07d2c96d3d633558"
+    "docs/RUNBOOK-gui-panel.md": "a7e35a578b5515f601d523acd40fc14b75c0bb1d2b73e02b07d2c96d3d633558",
+    "src-tauri/src/adapters_config.rs": "e8d9a862152129fcfc104b662a6c6d44ad7191004cf942b780f9f50795f04418",
+    "src-tauri/src/adapters.default.json": "542082318e7b6a5ddad1b2056d17265aa3e67a5e0ff2b53ac13cea7ab75393f1",
+    "docs/SUPPORTED-APPS.md": "3f605a6a4ae6f74e845d49339a13d57223bdbe669fd63a3282ef46a595cebf8e"
   },
-  "hashes_updated_at": "2026-06-19T20:30:00.000Z"
+  "hashes_updated_at": "2026-06-20T10:00:00.000Z"
 }

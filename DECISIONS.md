@@ -282,3 +282,30 @@ These advance U1/S4's *code* but **flip nothing** — the actual grant and the
 on-screen behaviour are observed on a Mac. `satisfied_count` stays 9. 77 cargo + 9
 node tests green; desktop compiles. (The "captures itself" class of bug is exactly
 why U1–U5 were never flipped on compile alone — only a human running it finds them.)
+
+## D13 — Adapters become declarative config, not code (R14)
+
+**Date:** 2026-06-20 · **Constraints:** B3 (deepened), B1, T5 · **Source:** user — "can adapters be configuration instead of code, so we can add all the Linking Manifesto apps?"
+
+The hardcoded `MacAppAdapter`/`AppKind`/`app_kind_for` enum was a stopgap — adding an
+app meant editing Rust. Replaced with **declarative adapters** (`adapters_config.rs`):
+an `AdapterSpec` is `{ app, script, fields, delimiter?, uri, name, path? }` where
+`uri`/`name`/`path` are templates over the script's output fields, with `urlencode`
+and `basename` transforms. `ConfiguredAdapter` runs the script via the existing
+`CommandRunner` seam and renders the templates; `AdapterRegistry` loads embedded
+defaults (`adapters.default.json`) and merges a user `adapters.json` (user entries
+override built-ins by app name).
+
+So **adding an app is a JSON entry, no recompile** — this extends B3 (already
+SATISFIED for the plugin/broker path) down to the addressing layer itself, which is
+the manifesto's whole premise: the ecosystem scales app coverage. Seeds 10 apps
+(Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the
+~80-app [Hookmark list](https://hookproductivity.com/what-mac-apps-are-compatible-with-hook-app/)
+is now reachable as config. Honest scope: only seeds with verifiable patterns ship;
+the rest need a per-app script + a Mac with the app (`docs/SUPPORTED-APPS.md`) — but
+that work is now config a user/community can contribute, not a core change.
+
+The template engine (`render`) and `parse` are pure and unit-tested, including a
+guard that **every shipped spec's templates render** (a typo can't ship a broken
+adapter). The single `osascript` call is the only ENV-blocked part. 77 cargo + 9
+node tests green; desktop compiles.

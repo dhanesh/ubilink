@@ -13,38 +13,44 @@
 use std::sync::Mutex;
 
 use hooky_core::{
-    app_kind_for, CommandRunner, HookyService, LinkGraph, MacAppAdapter, OsaScriptRunner,
+    AdapterRegistry, CommandRunner, ConfiguredAdapter, HookyService, LinkGraph, OsaScriptRunner,
     PanelBackend, PanelView, PermissionState, Support, FRONTMOST_APP_SCRIPT,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-type Backend = Mutex<PanelBackend>;
+/// App state: the link-graph-backed panel backend + the declarative adapter registry.
+struct AppState {
+    backend: Mutex<PanelBackend>,
+    adapters: AdapterRegistry,
+}
 
-/// Capture the resource of whatever app is frontmost RIGHT NOW: detect it, route to
-/// its adapter, capture+validate+surface-backlinks. Called from the hotkey handler
-/// (before the panel steals focus) and the `capture_current` command. U3 explains an
-/// unsupported app instead of failing silently.
-fn capture_now(backend: &Backend) -> Result<PanelView, String> {
+/// Capture the resource of whatever app is frontmost RIGHT NOW: detect it, look up
+/// its declarative adapter (adapters_config), capture+validate+surface-backlinks.
+/// Called from the hotkey handler (before the panel steals focus) and the
+/// `capture_current` command. U3 explains an unsupported app instead of failing.
+fn capture_now(state: &AppState) -> Result<PanelView, String> {
     let frontmost = OsaScriptRunner
         .run("osascript", &["-e", FRONTMOST_APP_SCRIPT])
         .map_err(|e| format!("Couldn't tell which app is active: {e}"))?;
-    let kind = app_kind_for(&frontmost)
+    let spec = state
+        .adapters
+        .for_app(&frontmost)
         .ok_or_else(|| format!("Linking from \u{201c}{}\u{201d} isn't supported yet.", frontmost.trim()))?;
-    let adapter = MacAppAdapter::new(kind, OsaScriptRunner);
-    let mut b = backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let adapter = ConfiguredAdapter::new(spec.clone(), OsaScriptRunner);
+    let mut b = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     b.capture_current(&adapter)
 }
 
 #[tauri::command]
-fn capture_current(state: State<'_, Backend>) -> Result<PanelView, String> {
+fn capture_current(state: State<'_, AppState>) -> Result<PanelView, String> {
     capture_now(state.inner())
 }
 
 /// In-app capability disclosure (O2): what linking works where.
 #[tauri::command]
-fn capabilities(state: State<'_, Backend>) -> Result<Vec<Support>, String> {
-    let backend = state.lock().map_err(|_| "internal state was poisoned".to_string())?;
+fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
+    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     Ok(backend.capabilities())
 }
 
@@ -153,9 +159,23 @@ fn main() {
             // Probe automation permission at startup (S4); capture degrades honestly
             // if it's not granted, and the onboarding screen re-checks on demand.
             let permission = hooky_core::probe_automation_permission(&OsaScriptRunner);
-            app.manage::<Backend>(Mutex::new(PanelBackend::new(
-                HookyService::new(graph).with_permission(permission),
-            )));
+
+            // Declarative adapters (B3): built-in defaults, extended by an optional
+            // user adapters.json in the data dir — add an app with NO recompile.
+            let mut adapters = AdapterRegistry::defaults();
+            let user_adapters = data_dir.join("adapters.json");
+            if let Ok(json) = std::fs::read_to_string(&user_adapters) {
+                match adapters.extend_from_json(&json) {
+                    Ok(n) => eprintln!("[hooky] loaded {n} user adapter(s) from {}", user_adapters.display()),
+                    Err(e) => eprintln!("[hooky] ignoring invalid {}: {e}", user_adapters.display()),
+                }
+            }
+            eprintln!("[hooky] {} app adapter(s) available", adapters.apps().len());
+
+            app.manage(AppState {
+                backend: Mutex::new(PanelBackend::new(HookyService::new(graph).with_permission(permission))),
+                adapters,
+            });
 
             // Show the panel on launch so there is ALWAYS visible UI. On load the
             // webview checks permissions and shows onboarding if anything's missing.
@@ -174,7 +194,7 @@ fn main() {
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
                         if let Some(w) = app.get_webview_window("panel") {
-                            let state = app.state::<Backend>();
+                            let state = app.state::<AppState>();
                             match capture_now(state.inner()) {
                                 Ok(view) => {
                                     let _ = w.emit("capture-ok", view);

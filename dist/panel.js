@@ -29,7 +29,7 @@ function render() {
   // error shows the explanation (so "Capturing…" never lingers under either).
   statusLine.hidden = !(phase === 'capturing' || phase === 'idle');
   if (phase === 'capturing') statusLine.textContent = 'Capturing the active resource…';
-  if (phase === 'idle') statusLine.textContent = 'Switch to Safari, Chrome or Finder, then press ⌘⇧K to capture its link.';
+  if (phase === 'idle') statusLine.textContent = 'Switch to a supported app (a browser, Finder, Bear, Things…), then press ⌘⇧K to capture its link.';
 
   const ready = phase === 'ready';
   $('resource-name').hidden = !ready;

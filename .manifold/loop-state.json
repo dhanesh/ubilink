@@ -1,7 +1,7 @@
 {
   "loop": "build-to-convergence",
   "feature": "linking-manifesto-app",
-  "round": 13,
+  "round": 14,
   "max_rounds": 8,
   "stall_count": 0,
   "max_stalls": 2,
@@ -156,6 +156,17 @@
       "desktop_compiles": true,
       "progress": "env-surface-reduction",
       "note": "Human-directed, from running the app. Fixed two real bugs running surfaced: panel captured ITSELF (frontmost=hooky once focused) and captured only once at load. Inverted the trigger: Rust hotkey handler captures the previously-frontmost app, emits capture-ok/err to the webview, then shows the panel; re-captures each press. Added S4 onboarding: AXIsProcessTrusted FFI + automation probe -> permission_status command, open_settings (jumps to the privacy pane), a checklist UI with \u2713/\u2717 + Re-check. permissionsComplete() node-tested; onboarding markup Rust-tested; all compiles. Running/granting still needs a Mac (ENV)."
+    },
+    {
+      "round": 14,
+      "cluster": "declarative config-driven adapters (replaces hardcoded MacAppAdapter)",
+      "constraints_closed": [],
+      "satisfied_after": 9,
+      "tests": 77,
+      "node_tests": 9,
+      "desktop_compiles": true,
+      "progress": "architecture",
+      "note": "Human-directed, from running + the Linking Manifesto app list. Made live-capture adapters DECLARATIVE: AdapterSpec (app match + osascript + fields + uri/name/path templates with urlencode/basename transforms) + AdapterRegistry (embedded defaults + user adapters.json override). Replaced hardcoded MacAppAdapter/AppKind/app_kind_for. Seeds 10 apps (Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the ~80-app Hookmark list is now reachable as config, no recompile (B3 deepened to the addressing layer). Engine fully unit-tested incl. a guard that every shipped spec's templates render. Per-app live verification still needs a Mac."
     }
   ],
   "terminal": "9/23 SATISFIED; full vertical slice now exists incl a compile-verified Tauri desktop shell; remaining residuals are runtime observations on a real Mac/CI + statistical/other-platform"

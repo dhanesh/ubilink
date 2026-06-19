@@ -1,0 +1,81 @@
+[
+  {
+    "app": "Safari",
+    "script": "tell application \"Safari\" to return (URL of current tab of front window) & \"\\t\" & (name of current tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Google Chrome",
+    "script": "tell application \"Google Chrome\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Arc",
+    "script": "tell application \"Arc\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Brave Browser",
+    "script": "tell application \"Brave Browser\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Microsoft Edge",
+    "script": "tell application \"Microsoft Edge\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Vivaldi",
+    "script": "tell application \"Vivaldi\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Opera",
+    "script": "tell application \"Opera\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
+    "delimiter": "\t",
+    "fields": ["url", "title"],
+    "uri": "{url}",
+    "name": "{title}"
+  },
+  {
+    "app": "Finder",
+    "script": "tell application \"Finder\" to return POSIX path of (target of front window as alias)",
+    "fields": ["path"],
+    "uri": "file://{path}",
+    "name": "{path|basename}",
+    "path": "{path}"
+  },
+  {
+    "app": "Bear",
+    "script": "tell application \"System Events\" to tell process \"Bear\" to return name of front window",
+    "fields": ["title"],
+    "uri": "bear://x-callback-url/open-note?title={title|urlencode}",
+    "name": "{title}"
+  },
+  {
+    "app": "Things3",
+    "script": "tell application \"Things3\" to return (id of item 1 of (selected to dos)) & \"\\t\" & (name of item 1 of (selected to dos))",
+    "delimiter": "\t",
+    "fields": ["id", "title"],
+    "uri": "things:///show?id={id}",
+    "name": "{title}"
+  }
+]
