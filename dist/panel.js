@@ -19,8 +19,9 @@ function render() {
   const phase = state.phase;
   statusLine.dataset.phase = phase;
 
-  // status text
-  statusLine.hidden = phase === 'ready';
+  // status text — only while actually capturing; ready shows the resource, error
+  // shows the explanation, so the "Capturing…" line must not linger under either.
+  statusLine.hidden = phase !== 'capturing';
   if (phase === 'capturing') statusLine.textContent = 'Capturing the active resource…';
 
   // resource (U5 context)
