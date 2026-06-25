@@ -107,10 +107,10 @@ function reportError(e) { showCaptureView(); dispatch({ type: 'failed', message:
 // selection is an aria listbox option so VoiceOver announces it (U4).
 function renderBrowser() {
   const trail = breadcrumb(browse);
-  $('browser-heading').textContent = atRoot(browse) ? 'Your links' : (trail[trail.length - 1] || 'Links');
-  const trailEl = $('browser-trail');
-  trailEl.hidden = trail.length === 0;
-  trailEl.textContent = trail.length ? `Linked to ${trail.join(' › ')}` : '';
+  const heading = $('browser-heading');
+  heading.textContent = atRoot(browse) ? 'Your links' : `Linked to ${trail.join(' › ')}`;
+  heading.title = heading.textContent; // full text on hover; the view truncates to one line
+  $('browser-trail').hidden = true; // folded into the heading (was redundant + wrapped)
   $('browser-empty').hidden = browse.items.length !== 0;
 
   const marked = markedUri(browse);

@@ -120,7 +120,10 @@ kbd {
 
 /* ── Link-browser (Cmd+Shift+L) ── */
 #browser { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
-#browser-heading { margin: 0; font-size: 1.2rem; }
+#browser-heading {
+  margin: 0; font-size: 1.2rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* one line, no wrap */
+}
 .trail { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); }
 #browser-list {
