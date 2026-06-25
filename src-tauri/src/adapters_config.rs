@@ -5,7 +5,7 @@
 // Declarative, config-driven adapters. An adapter is a spec: which frontmost app it
 // matches, the `osascript` to run, how to split that output into named fields, and
 // templates that build the link URI + name from those fields. So adding an app — any
-// of the apps on the Linking Manifesto / Hookmark compatibility list — is a JSON
+// of the apps that support ubiquitous linking — is a JSON
 // entry, not a code change and not a recompile (B3). Built-ins ship embedded; users
 // drop an `adapters.json` to extend or override.
 //
@@ -209,7 +209,7 @@ impl AdapterRegistry {
         Ok(AdapterRegistry { specs })
     }
 
-    /// The built-in adapters shipped with hooky (embedded at compile time).
+    /// The built-in adapters shipped with ubilink (embedded at compile time).
     pub fn defaults() -> AdapterRegistry {
         Self::from_json(include_str!("adapters.default.json"))
             .expect("built-in adapters.default.json must be valid")

@@ -15,8 +15,8 @@ file (see below).
 | Bear | window title via System Events | `bear://x-callback-url/open-note?title=…` |
 | Things3 | AppleScript (selected to-do) | `things:///show?id=…` |
 
-These follow patterns hooky can verify; the broader
-[Hookmark compatibility list](https://hookproductivity.com/what-mac-apps-are-compatible-with-hook-app/)
+These follow patterns ubilink can verify; the broader
+list of apps that support ubiquitous linking
 (browsers, PDF readers, mail, task/notes, dev tools — ~80 apps) is reachable the same
 way: each is a config entry. They are **not** all shipped because each needs the
 correct per-app script and testing on a Mac that has the app — exactly the work a
@@ -25,8 +25,8 @@ config entry makes cheap and shareable.
 ## Add an app yourself — no recompile
 
 Drop an `adapters.json` (a JSON array of specs) in the app data dir:
-`~/Library/Application Support/org.linkingmanifesto.hooky/adapters.json`. Entries
-with an `app` matching a built-in **override** it; new apps are added. Restart hooky.
+`~/Library/Application Support/org.dhanesh.ubilink/adapters.json`. Entries
+with an `app` matching a built-in **override** it; new apps are added. Restart ubilink.
 
 ### Spec fields
 - `app` — the frontmost-app name to match (what `System Events` reports), e.g. `"Notes"`.
@@ -50,4 +50,4 @@ with an `app` matching a built-in **override** it; new apps are added. Restart h
 ```
 
 If the app you want has no AppleScript/URL-scheme support, capture isn't possible —
-hooky says so honestly (U3) rather than producing a dead link.
+ubilink says so honestly (U3) rather than producing a dead link.

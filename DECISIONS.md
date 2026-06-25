@@ -76,17 +76,17 @@ unbounded line cannot exhaust memory. Proven by
 <1s instead of blocking forever). NOTE: this is plugin-IPC DoS hardening; S5's
 *own* scope (the public local link API size/rate bounds) is a separate later task.
 
-## D5 — Integration facade: `HookyService` ties every round into the user flow (R6 / m6-integrate)
+## D5 — Integration facade: `UbilinkService` ties every round into the user flow (R6 / m6-integrate)
 
 **Date:** 2026-06-17 · **Constraints:** B1, RT-1/RT-3/RT-4, T2, U5, S4, S5, RT-7/U3
 
 `src-tauri/src/service.rs` is the single entry point a UI (or Tauri command layer)
 calls. It composes the pieces built across R1–R5 into the core flow:
 permission-gated capture (S4) → bounded-API re-validation of the adapter's URI,
-defense-in-depth (S5/SC-1) → bidirectional hook in the graph (RT-4) → backlinks
+defense-in-depth (S5/SC-1) → bidirectional link in the graph (RT-4) → backlinks
 from either endpoint (U5), with honest degradation for unsupported apps (RT-7/U3,
 non-empty `ServiceError::message`). Proven by 4 e2e tests in `service.rs`
-(end-to-end capture→hook→backlinks; content-hash survives validation; no-permission
+(end-to-end capture→link→backlinks; content-hash survives validation; no-permission
 degrades not panics; unknown-app capability explains). Full suite: **43 green**.
 
 **No constraint flipped to SATISFIED.** B1, U5 and S4 keep their PARTIAL status:
@@ -124,11 +124,11 @@ runbook is observed green on a Mac. `satisfied_count` stays 8. 53 tests green.
 **Date:** 2026-06-18 · **Constraints:** O3, S3/RT-10, O1/T4
 
 O3 (release artifacts signed by a pipeline, not a dev laptop) was ENV-blocked. The
-crypto is *not* new — `hooky_core::release` reuses R3's `sign_bundle` +
+crypto is *not* new — `ubilink_core::release` reuses R3's `sign_bundle` +
 `Installer::verify`, which already passed the GAP-09 attack matrix. O3 adds only the
 operational seam: a JSON `WireBundle` wire format (hex-encoded sig/pubkey, dep-free
 hex codec so S2 holds — no new crates), pure `sign_to_json` / `verify_json` entry
-points keyed by hex (so the key comes from a CI secret), a thin `bin/hooky-sign` CLI
+points keyed by hex (so the key comes from a CI secret), a thin `bin/ubilink-sign` CLI
 (`sign` / `verify` / `pubkey`), and `.github/workflows/release.yml`
 (test → sign → **self-verify** → upload; the build fails if the artifact doesn't
 validate).
@@ -140,7 +140,7 @@ tampered → exit 1).
 
 **No status flip.** O3 stays PARTIAL: its code/test cells are now ✓ but the ops cell
 is ◐ — the residual is GitHub Actions actually running the workflow with the org
-`HOOKY_SIGNING_KEY` secret (`docs/RUNBOOK-ci-signing.md`), which needs the real CI
+`UBILINK_SIGNING_KEY` secret (`docs/RUNBOOK-ci-signing.md`), which needs the real CI
 environment. Escalated, not faked. `satisfied_count` stays 8. 60 tests green.
 
 ## D8 — GUI panel: no-build vanilla frontend + Rust command contract (R9 / U1·U2·U4·U3·U5)
@@ -159,7 +159,7 @@ fill-async.** `dist/panel-state.mjs` is a pure view-state reducer where `open()`
 transitions to `capturing` synchronously (no capture data in the first paint), and
 `captured`/`failed` arrive later — proven by 8 `node --test` cases (built-in runner,
 zero deps, S2-safe). `src-tauri/src/panel.rs` is the command contract
-(`capture_current` over the integrated `HookyService`): it surfaces backlinks (U5)
+(`capture_current` over the integrated `UbilinkService`): it surfaces backlinks (U5)
 and converts any failure to a non-empty explained message (U3) — 2 Rust tests. Three
 more Rust tests assert the static **markup/style contract**: `index.html` has
 `role="dialog"`, an accessible name, `aria-live`, `role="alert"`, a single primary
@@ -180,8 +180,8 @@ actual `#[tauri::command]` wiring — all in `docs/RUNBOOK-gui-panel.md`.
 asserts a *structural* property — "a documented extension surface lets anyone add an
 integration without forking core" — not a runtime/live one, so it is fully provable
 headlessly. The surface now exists end-to-end: `docs/AUTHORING-INTEGRATIONS.md` (the
-walkthrough), `hooky-sign validate` over `Manifest::validate` (author-facing check,
-unit-tested), `hooky-sign sign` (which now validates before signing), R3's
+walkthrough), `ubilink-sign validate` over `Manifest::validate` (author-facing check,
+unit-tested), `ubilink-sign sign` (which now validates before signing), R3's
 `Installer` (verify + trust + downgrade), and the R1 sandbox run. Adding an app
 exercises these generic mechanisms and touches **zero** core files. No ENV residual —
 unlike B1/U1/O3, B3 needs no real device to be true.
@@ -200,17 +200,17 @@ ENV-blocked GUI (folded into `docs/RUNBOOK-gui-panel.md`), so O2 stays PARTIAL.
 **Date:** 2026-06-19 · **Constraints:** O4, B3 (ecosystem), S2, S3/RT-10
 
 **Architecture call: the registry is a SEPARATE crate (`registry/`), not part of
-hooky-core.** A registry is a network *service*; S2 forbids the *core* from egress,
-not a standalone service. Keeping it out of hooky-core means the core's
+ubilink-core.** A registry is a network *service*; S2 forbids the *core* from egress,
+not a standalone service. Keeping it out of ubilink-core means the core's
 `no_network_deps` guard stays physically true. The registry adds **zero** new
 third-party deps — its HTTP layer is hand-rolled over `std::net` (no axum/hyper),
-matching the project's minimalist supply-chain ethos — and it reuses hooky-core's
+matching the project's minimalist supply-chain ethos — and it reuses ubilink-core's
 proven ed25519 `verify_json` + `WireBundle` rather than reimplementing crypto.
 
 Same functional-core / imperative-shell split: `RegistryIndex` (publish verifies +
 enforces version monotonicity; get/list/search) and the pure `handle_request` router
 are tested with no sockets; `handle_stream` (HTTP/1.1 parse) is tested with an
-in-memory stream; `bin/hooky-registry` is the thin `TcpListener` loop. Verified by 6
+in-memory stream; `bin/ubilink-registry` is the thin `TcpListener` loop. Verified by 6
 lib tests **and** a real-socket smoke: `POST /publish` → 201, list + `?q=` search,
 verbatim bundle fetch, untrusted publisher → 400, unknown id → 404.
 
@@ -230,9 +230,9 @@ channel, so it stays PARTIAL. `satisfied_count` stays 9. 75 cargo + 8 node tests
 **Date:** 2026-06-19 · **Constraints:** T1, U1, U2, U3, U5, O2
 
 **`desktop/` is a SEPARATE crate** (third time the rule applies, after registry/):
-Tauri pulls a ~300-crate tree, and hooky-core is deliberately Tauri-free (D1/D8) so
+Tauri pulls a ~300-crate tree, and ubilink-core is deliberately Tauri-free (D1/D8) so
 its S2 `no_network_deps` guard stays physically true. The desktop crate depends on
-hooky-core + `tauri` v2 + `tauri-plugin-global-shortcut`; the core is untouched.
+ubilink-core + `tauri` v2 + `tauri-plugin-global-shortcut`; the core is untouched.
 
 It registers `#[tauri::command]` wrappers over the headlessly-tested `PanelBackend`:
 `capture_current` (detects the frontmost app via `app_kind_for` → routes to the live
@@ -246,7 +246,7 @@ no-build `panel.js` already calls.
 v2 (`make build-desktop` → a 26 MB binary): the command signatures, the v2
 global-shortcut API (`Shortcut::new`/`on`/`register`), and `generate_context!`
 (config + capabilities + icon) all type-check. The frontmost-routing logic is
-unit-tested in hooky-core (`app_kind_for`). **`make run` now launches the real OS
+unit-tested in ubilink-core (`app_kind_for`). **`make run` now launches the real OS
 app** (was the UI preview).
 
 **T1's literal gap — "broker IPC not wired into Tauri commands" — is closed in
@@ -261,7 +261,7 @@ green; desktop compiles.
 
 Running the desktop app surfaced two real bugs that compilation could never catch:
 (1) the panel **captured itself** — once shown it takes focus, so the frontmost app
-is hooky, not the app you were in; (2) capture ran **only once at page load**, so
+is ubilink, not the app you were in; (2) capture ran **only once at page load**, so
 re-summoning showed a stale result.
 
 **Fix — invert the trigger.** The Rust global-shortcut handler now `capture_now()`s
@@ -300,7 +300,7 @@ So **adding an app is a JSON entry, no recompile** — this extends B3 (already
 SATISFIED for the plugin/broker path) down to the addressing layer itself, which is
 the manifesto's whole premise: the ecosystem scales app coverage. Seeds 10 apps
 (Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the
-~80-app [Hookmark list](https://hookproductivity.com/what-mac-apps-are-compatible-with-hook-app/)
+~80-app list of linking-capable apps
 is now reachable as config. Honest scope: only seeds with verifiable patterns ship;
 the rest need a per-app script + a Mac with the app (`docs/SUPPORTED-APPS.md`) — but
 that work is now config a user/community can contribute, not a core change.

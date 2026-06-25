@@ -7,12 +7,12 @@
 // This is the command-layer contract: the functions a Tauri `#[tauri::command]` will
 // wrap (capture_current / open / dismiss). The Tauri binding itself is ENV-blocked
 // (needs a webview + display) and lives behind docs/RUNBOOK-gui-panel.md; everything
-// HERE is plain Rust over HookyService and is cargo-tested. Keeping the logic out of
+// HERE is plain Rust over UbilinkService and is cargo-tested. Keeping the logic out of
 // the Tauri layer is why the panel's behaviour is verifiable without a GUI.
 
 use crate::adapter::ResourceAdapter;
 use crate::resource::ResourceIdentity;
-use crate::service::HookyService;
+use crate::service::UbilinkService;
 use serde::Serialize;
 
 /// One link as the panel renders it (name + uri). Serialized to the webview as JSON.
@@ -38,11 +38,11 @@ pub struct PanelView {
 /// Backs the Tauri command layer. Wraps the integrated service so the panel's logic
 /// is testable headlessly.
 pub struct PanelBackend {
-    service: HookyService,
+    service: UbilinkService,
 }
 
 impl PanelBackend {
-    pub fn new(service: HookyService) -> PanelBackend {
+    pub fn new(service: UbilinkService) -> PanelBackend {
         PanelBackend { service }
     }
 
@@ -61,8 +61,8 @@ impl PanelBackend {
         Ok(PanelView { resource: id.into(), backlinks })
     }
 
-    /// Expose the service for commands that hook/open (kept thin on purpose).
-    pub fn service_mut(&mut self) -> &mut HookyService {
+    /// Expose the service for commands that link/open (kept thin on purpose).
+    pub fn service_mut(&mut self) -> &mut UbilinkService {
         &mut self.service
     }
 
@@ -87,16 +87,16 @@ mod tests {
 
     #[test]
     fn capture_current_surfaces_backlinks_for_the_resource() {
-        // U5 through the panel path: a hooked resource shows what it's hooked to.
-        let dir = std::env::temp_dir().join(format!("hooky-panel-{}", std::process::id()));
+        // U5 through the panel path: a linked resource shows what it's linked to.
+        let dir = std::env::temp_dir().join(format!("ubilink-panel-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let note = FileAdapter::new(tmp(&dir, "Note.md"));
         let paper = FileAdapter::new(tmp(&dir, "Paper.pdf"));
-        let mut svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
-        // pre-hook note <-> paper
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        // pre-link note <-> paper
         let a = svc.capture(&note).unwrap();
         let b = svc.capture(&paper).unwrap();
-        svc.hook(&a, &b, Some(1)).unwrap();
+        svc.link(&a, &b, Some(1)).unwrap();
 
         let mut panel = PanelBackend::new(svc);
         let view = panel.capture_current(&note).unwrap();
@@ -119,7 +119,7 @@ mod tests {
                 OpenPlan { program: "open".into(), args: vec![r.uri.clone()] }
             }
         }
-        let svc = HookyService::new(LinkGraph::open_in_memory().unwrap())
+        let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
             .with_permission(PermissionState::Denied);
         let mut panel = PanelBackend::new(svc);
         let err = panel.capture_current(&LiveAdapter).unwrap_err();
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn capabilities_command_discloses_the_supported_set() {
         // O2: the panel can surface what works where (the in-app disclosure).
-        let svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
+        let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         let panel = PanelBackend::new(svc);
         let caps = panel.capabilities();
         assert!(!caps.is_empty(), "O2: in-app capability disclosure must be non-empty");

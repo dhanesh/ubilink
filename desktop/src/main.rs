@@ -4,7 +4,7 @@
 // disclosure), S4/RT-2 (permission detection + guided granting).
 // See docs/RUNBOOK-gui-panel.md.
 //
-// The imperative GUI shell. Logic lives in hooky-core (headlessly tested); this wires
+// The imperative GUI shell. Logic lives in ubilink-core (headlessly tested); this wires
 // it to Tauri + the macOS bits that genuinely need the OS (frontmost-app detection,
 // clipboard, opening URLs, permission checks). Building needs the Tauri toolchain;
 // running needs a desktop session.
@@ -13,8 +13,8 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hooky_core::{
-    AdapterRegistry, CommandRunner, ConfiguredAdapter, HookyService, LinkGraph, OsaScriptRunner,
+use ubilink_core::{
+    AdapterRegistry, CommandRunner, ConfiguredAdapter, UbilinkService, LinkGraph, OsaScriptRunner,
     PanelBackend, PanelView, PermissionState, Support, FRONTMOST_APP_SCRIPT,
 };
 use tauri::menu::{Menu, MenuItem};
@@ -95,7 +95,7 @@ fn dismiss_panel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// The two macOS permissions hooky needs, and their current state — so the
+/// The two macOS permissions ubilink needs, and their current state — so the
 /// onboarding screen can tell the user exactly what's left to do (S4/RT-2/U3).
 #[derive(serde::Serialize, Clone)]
 struct PermissionReport {
@@ -181,7 +181,7 @@ fn request_accessibility() -> bool {
 /// Report current permission state (called by the onboarding screen + its Re-check).
 #[tauri::command]
 fn permission_status() -> PermissionReport {
-    let automation = match hooky_core::probe_automation_permission(&OsaScriptRunner) {
+    let automation = match ubilink_core::probe_automation_permission(&OsaScriptRunner) {
         PermissionState::Granted => "granted",
         PermissionState::Denied => "denied",
         PermissionState::NotDetermined => "not_determined",
@@ -208,18 +208,18 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             // The on-device link graph (RT-8): a persistent SQLite file in the OS
-            // app-data dir, so hooks survive restarts. Resolved here because the
+            // app-data dir, so links survive restarts. Resolved here because the
             // path API needs the running app. Local-only — never leaves the device.
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let db_path = data_dir.join("hooky-graph.sqlite");
+            let db_path = data_dir.join("ubilink-graph.sqlite");
             let graph = LinkGraph::open(&db_path.to_string_lossy())
                 .map_err(|e| format!("couldn't open link graph at {}: {e}", db_path.display()))?;
-            eprintln!("[hooky] link graph: {}", db_path.display());
+            eprintln!("[ubilink] link graph: {}", db_path.display());
 
             // Probe automation permission at startup (S4); capture degrades honestly
             // if it's not granted, and the onboarding screen re-checks on demand.
-            let permission = hooky_core::probe_automation_permission(&OsaScriptRunner);
+            let permission = ubilink_core::probe_automation_permission(&OsaScriptRunner);
 
             // Declarative adapters (B3): built-in defaults, extended by an optional
             // user adapters.json in the data dir — add an app with NO recompile.
@@ -227,24 +227,24 @@ fn main() {
             let user_adapters = data_dir.join("adapters.json");
             if let Ok(json) = std::fs::read_to_string(&user_adapters) {
                 match adapters.extend_from_json(&json) {
-                    Ok(n) => eprintln!("[hooky] loaded {n} user adapter(s) from {}", user_adapters.display()),
-                    Err(e) => eprintln!("[hooky] ignoring invalid {}: {e}", user_adapters.display()),
+                    Ok(n) => eprintln!("[ubilink] loaded {n} user adapter(s) from {}", user_adapters.display()),
+                    Err(e) => eprintln!("[ubilink] ignoring invalid {}: {e}", user_adapters.display()),
                 }
             }
-            eprintln!("[hooky] {} app adapter(s) available", adapters.apps().len());
+            eprintln!("[ubilink] {} app adapter(s) available", adapters.apps().len());
 
             // The bounded API (S5) must trust the schemes the adapters declare
             // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
             let schemes = adapters.declared_schemes();
             app.manage(AppState {
                 backend: Mutex::new(PanelBackend::new(
-                    HookyService::new(graph).with_permission(permission).allow_schemes(schemes),
+                    UbilinkService::new(graph).with_permission(permission).allow_schemes(schemes),
                 )),
                 adapters,
             });
 
             // U1 render-first: run as an Accessory app (overlay-style, like Spotlight/
-            // Raycast). Showing the panel then does NOT make hooky the frontmost
+            // Raycast). Showing the panel then does NOT make ubilink the frontmost
             // *application*, so the async capture below still sees the app you were in
             // — which lets us paint the panel BEFORE the slow osascript capture runs.
             // Trade-off: no Dock icon (summon with the hotkey; Esc dismisses).
@@ -253,11 +253,11 @@ fn main() {
 
             // With no Dock icon, the menu-bar tray is the always-reachable home for the
             // app: Show (summon the panel) + Quit (the affordance the Dock used to give).
-            let show_i = MenuItem::with_id(app, "show", "Show hooky", true, Some("Cmd+Shift+K"))?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit hooky", true, Some("Cmd+Q"))?;
+            let show_i = MenuItem::with_id(app, "show", "Show ubilink", true, Some("Cmd+Shift+K"))?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit ubilink", true, Some("Cmd+Q"))?;
             let tray_menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-            let mut tray = TrayIconBuilder::with_id("hooky-tray")
-                .tooltip("hooky — ⌘⇧K to capture a link")
+            let mut tray = TrayIconBuilder::with_id("ubilink-tray")
+                .tooltip("Ubilink — ⌘⇧K to capture a link")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
@@ -269,8 +269,16 @@ fn main() {
                     }
                     _ => {}
                 });
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
+            // A monochrome link glyph as a macOS TEMPLATE image: macOS recolors it
+            // for the light/dark menu bar (black square -> adaptive). Falls back to the
+            // app icon if decoding ever fails. Source SVG lives beside it for re-export.
+            match tauri::image::Image::from_bytes(include_bytes!("../icons/ubilink-link.png")) {
+                Ok(icon) => tray = tray.icon(icon).icon_as_template(true),
+                Err(_) => {
+                    if let Some(icon) = app.default_window_icon() {
+                        tray = tray.icon(icon.clone());
+                    }
+                }
             }
             tray.build(app)?;
 
@@ -294,11 +302,11 @@ fn main() {
                             // U1 render-first: paint the spinner and reveal the panel NOW,
                             // before the slow (osascript) capture. The 'capturing' event
                             // drives the webview into its spinner state; its optional t0
-                            // payload (epoch-ms, opt-in via HOOKY_PERF) lets panel.js measure
+                            // payload (epoch-ms, opt-in via UBILINK_PERF) lets panel.js measure
                             // Date.now()-t0 at first paint — i.e. the true hotkey->visible
                             // latency U1 governs (NOT hotkey->link-ready, which is bounded by
                             // osascript and can't go sub-200ms). Same machine = same wall clock.
-                            let t0: Option<u64> = if std::env::var_os("HOOKY_PERF").is_some() {
+                            let t0: Option<u64> = if std::env::var_os("UBILINK_PERF").is_some() {
                                 SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
                             } else {
                                 None
@@ -334,9 +342,9 @@ fn main() {
                 })
                 .build();
             if let Err(e) = app.handle().plugin(plugin) {
-                eprintln!("[hooky] global-shortcut plugin failed to load: {e}");
+                eprintln!("[ubilink] global-shortcut plugin failed to load: {e}");
             } else if let Err(e) = app.global_shortcut().register(toggle) {
-                eprintln!("[hooky] couldn't register Cmd+Shift+K (grant Accessibility permission): {e}");
+                eprintln!("[ubilink] couldn't register Cmd+Shift+K (grant Accessibility permission): {e}");
             }
             Ok(())
         })
@@ -351,5 +359,5 @@ fn main() {
             request_accessibility
         ])
         .run(tauri::generate_context!())
-        .expect("error while running hooky desktop");
+        .expect("error while running ubilink desktop");
 }

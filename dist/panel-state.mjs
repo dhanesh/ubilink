@@ -39,7 +39,7 @@ export function reduce(state, event) {
         message:
           event.message && String(event.message).trim().length > 0
             ? String(event.message)
-            : "hooky couldn't capture a link, and isn't sure why. Try again.",
+            : "ubilink couldn't capture a link, and isn't sure why. Try again.",
       };
     case 'reset':
       return { phase: 'idle' };

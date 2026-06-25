@@ -13,7 +13,7 @@ webview is listed under "Manual steps".
   non-empty explanation (U3).
 - **Command contract** (`panel.rs`): `capture_current` surfaces a resource's
   backlinks (U5) and turns any capture failure into an explained message (U3) — 2
-  Rust tests over the integrated `HookyService`.
+  Rust tests over the integrated `UbilinkService`.
 - **Markup/style contract** (`panel.rs`): `dist/index.html` carries `role="dialog"`,
   an accessible name, an `aria-live` status, a `role="alert"` error region, a single
   primary Copy action with an Enter shortcut; `dist/panel.css` has a `:focus-visible`
@@ -27,12 +27,12 @@ Run them: `node --test 'dist/*.test.mjs'` and `cargo test panel`.
 re-prompts for Accessibility/Automation each time. For a stable experience:
 
 ```sh
-make bundle     # -> desktop/target/release/bundle/hooky.app (ad-hoc signed, fixed path)
-open desktop/target/release/bundle/hooky.app
+make bundle     # -> desktop/target/release/bundle/ubilink.app (ad-hoc signed, fixed path)
+open desktop/target/release/bundle/ubilink.app
 ```
 
-Grant Accessibility + Automation to **hooky.app** once; re-running `make bundle`
-rebuilds in place, so the grant sticks. (Optionally drag `hooky.app` to /Applications
+Grant Accessibility + Automation to **ubilink.app** once; re-running `make bundle`
+rebuilds in place, so the grant sticks. (Optionally drag `ubilink.app` to /Applications
 for an even more stable location.)
 
 ## Manual steps (a Mac with a desktop session) — what stays ENV-blocked
@@ -41,7 +41,7 @@ for an even more stable location.)
    registers `#[tauri::command]` wrappers over `PanelBackend` (`capture_current`,
    `capabilities`, `copy_to_clipboard`, `open_link`, `dismiss_panel`) and a global
    shortcut (Cmd/Ctrl+Shift+K) that toggles the hidden `panel` window. It is a
-   separate crate so hooky-core stays Tauri-free (S2). It **compiles and links**
+   separate crate so ubilink-core stays Tauri-free (S2). It **compiles and links**
    against Tauri v2 + the global-shortcut plugin (`make build-desktop`); only
    *running* it needs a display. Launch it on your Mac:
    ```sh

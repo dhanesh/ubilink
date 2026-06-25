@@ -2,12 +2,12 @@
 // fetched — the ecosystem distribution point B3's extension surface feeds into).
 // See .manifold/linking-manifesto-app.md
 //
-// Functional-core / imperative-shell, same as the rest of hooky: `RegistryIndex`
+// Functional-core / imperative-shell, same as the rest of ubilink: `RegistryIndex`
 // (publish/get/list/search) and the pure `handle_request` router are 100% testable
-// with no sockets; `bin/hooky-registry.rs` is the thin std-only TcpListener shell.
+// with no sockets; `bin/ubilink-registry.rs` is the thin std-only TcpListener shell.
 //
-// Trust reuses hooky-core's proven model: a publish is accepted ONLY if the bundle
-// verifies (ed25519, via hooky_core::verify_json) against the registry's trusted
+// Trust reuses ubilink-core's proven model: a publish is accepted ONLY if the bundle
+// verifies (ed25519, via ubilink_core::verify_json) against the registry's trusted
 // publisher set, AND its version is strictly newer than what's already published
 // (monotonicity — no silent downgrade of a published integration).
 
@@ -54,14 +54,14 @@ impl RegistryIndex {
         RegistryIndex { trusted_pub_hex, by_id: HashMap::new() }
     }
 
-    /// Publish a signed bundle (the JSON `hooky-sign sign` produces). Accepted iff it
+    /// Publish a signed bundle (the JSON `ubilink-sign sign` produces). Accepted iff it
     /// verifies against a trusted publisher AND is strictly newer than any existing
-    /// version for the same id. Reuses hooky-core's crypto verbatim (no reimpl).
+    /// version for the same id. Reuses ubilink-core's crypto verbatim (no reimpl).
     pub fn publish(&mut self, wire_json: &str) -> Result<(), String> {
         // 1) crypto + trusted-publisher check (the R3/R8 proven path).
-        hooky_core::verify_json(wire_json, &self.trusted_pub_hex).map_err(|e| e.message())?;
+        ubilink_core::verify_json(wire_json, &self.trusted_pub_hex).map_err(|e| e.message())?;
         // 2) parse for id/version/name/app (WireBundle is the public wire format).
-        let wire: hooky_core::WireBundle =
+        let wire: ubilink_core::WireBundle =
             serde_json::from_str(wire_json).map_err(|e| format!("malformed bundle JSON: {e}"))?;
         // 3) monotonicity: never replace a published version with an older/equal one.
         if let Some(cur) = self.by_id.get(&wire.manifest.id) {
@@ -259,8 +259,8 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hooky_core::broker::Manifest;
-    use hooky_core::release::{public_hex, sign_to_json, signing_key_from_hex};
+    use ubilink_core::broker::Manifest;
+    use ubilink_core::release::{public_hex, sign_to_json, signing_key_from_hex};
 
     fn key_hex(seed: u8) -> String {
         (0..32).map(|_| format!("{seed:02x}")).collect()
@@ -313,7 +313,7 @@ mod tests {
     fn search_matches_id_name_and_app_case_insensitively() {
         let mut idx = index_trusting(7);
         idx.publish(&signed(7, "com.x.obsidian", "Obsidian", "Note Linker", 1)).unwrap();
-        idx.publish(&signed(7, "com.x.finder", "Finder", "File Hooker", 1)).unwrap();
+        idx.publish(&signed(7, "com.x.finder", "Finder", "File Indexer", 1)).unwrap();
         assert_eq!(idx.search("obsidian").len(), 1);
         assert_eq!(idx.search("LINKER").len(), 1); // matches name "Note Linker"
         assert_eq!(idx.search("com.x").len(), 2);   // both ids

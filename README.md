@@ -1,4 +1,4 @@
-# hooky
+# Ubilink
 
 An open-source, cross-platform desktop app for **ubiquitous linking** — a faithful,
 extensible implementation of the [Linking Manifesto](https://linkingmanifesto.org/).
@@ -6,10 +6,9 @@ extensible implementation of the [Linking Manifesto](https://linkingmanifesto.or
 > *"The ability to copy a link to a resource is as important for cognitive
 > productivity as the ability to copy other types of information."* — the Linking Manifesto
 
-hooky lets you copy a robust link to whatever resource is active in *any* supported
-app, hook resources together into a **bidirectional graph**, and navigate that graph —
-all locally, privately, and extensibly. It is an open reimplementation of the idea
-pioneered by [Hook.app](https://hookproductivity.com/).
+Ubilink lets you copy a robust link to whatever resource is active in *any* supported
+app, link resources together into a **bidirectional graph**, and navigate that graph —
+all locally, privately, and extensibly. It is a clean-room, open implementation of ubiquitous linking.
 
 ## What it does (the manifesto's two asks)
 
@@ -67,7 +66,7 @@ cd src-tauri && cargo test
 node --version   # v24+ required for the Node Permission Model
 ```
 
-## Extending hooky
+## Extending Ubilink
 
 Add support for a new app by writing an **integration**: a manifest (declaring the
 capabilities it needs) plus sandboxed JS. See [`plugins/README.md`](plugins/README.md)

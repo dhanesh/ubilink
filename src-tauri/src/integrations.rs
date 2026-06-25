@@ -30,7 +30,7 @@ pub struct SignedBundle {
 /// The exact bytes a signature must cover. Any change to id/version/source flips
 /// the signature invalid (forgery/tamper detection).
 pub fn canonical_message(manifest_id: &str, version: u32, source: &str) -> Vec<u8> {
-    format!("hooky-integration\nid={manifest_id}\nv={version}\n{source}").into_bytes()
+    format!("ubilink-integration\nid={manifest_id}\nv={version}\n{source}").into_bytes()
 }
 
 /// Sign a bundle with a publisher key (used by publishers / in tests).

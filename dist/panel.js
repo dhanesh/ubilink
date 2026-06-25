@@ -66,7 +66,7 @@ function render() {
 function dispatch(event) { state = reduce(state, event); render(); }
 function reportError(e) { showCaptureView(); dispatch({ type: 'failed', message: e?.message ?? String(e) }); }
 
-// ── U1 perf harness (inert unless Rust emits 'perf-mark', i.e. HOOKY_PERF=1) ──
+// ── U1 perf harness (inert unless Rust emits 'perf-mark', i.e. UBILINK_PERF=1) ──
 // Measures hotkey-press → first-paint over many invocations and surfaces p50/p99
 // in-panel (release bundles have no devtools, so we can't rely on the console).
 const __perf = { t0: null, samples: [] };
@@ -76,8 +76,8 @@ function __percentiles() {
   const q = (p) => s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)];
   return { n: s.length, p50: q(0.5), p99: q(0.99), min: s[0], max: s[s.length - 1] };
 }
-// Console accessor for a dev session: window.__hookyPerf()
-window.__hookyPerf = () => { const r = __percentiles(); if (r) console.log(`[hooky-perf] n=${r.n} p50=${r.p50}ms p99=${r.p99}ms (target p50<80 p99<200) min=${r.min} max=${r.max}`); return r; };
+// Console accessor for a dev session: window.__ubilinkPerf()
+window.__ubilinkPerf = () => { const r = __percentiles(); if (r) console.log(`[ubilink-perf] n=${r.n} p50=${r.p50}ms p99=${r.p99}ms (target p50<80 p99<200) min=${r.min} max=${r.max}`); return r; };
 function __renderPerf() {
   const r = __percentiles();
   if (!r) return;
@@ -173,7 +173,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Render-first (U1): the hotkey handler fires 'capturing' BEFORE running capture, so
-// the spinner paints immediately. The optional payload is t0 (epoch-ms, HOOKY_PERF
+// the spinner paints immediately. The optional payload is t0 (epoch-ms, UBILINK_PERF
 // only) — we measure Date.now()-t0 at this first paint, the real hotkey->visible time.
 onEvent('capturing', (e) => {
   if (e.payload != null) __perf.t0 = e.payload;

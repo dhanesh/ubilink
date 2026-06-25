@@ -1,29 +1,29 @@
 # Satisfies: T1 (wire the broker/core into the Tauri command layer), U1 (global
 # hotkey -> panel), U2/U3/U5 (the panel commands). See docs/RUNBOOK-gui-panel.md.
 #
-# SEPARATE crate from hooky-core on purpose (same rule as registry/): Tauri pulls a
+# SEPARATE crate from ubilink-core on purpose (same rule as registry/): Tauri pulls a
 # large dependency tree, and the core is deliberately Tauri-free (D1/D8) so its S2
 # `no_network_deps` guard stays physically true. This crate is the imperative GUI
-# shell; all logic lives in hooky-core and is unit-tested without a display.
+# shell; all logic lives in ubilink-core and is unit-tested without a display.
 [package]
-name = "hooky-desktop"
+name = "ubilink-desktop"
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
-description = "Tauri desktop shell for hooky — wires the panel UI to hooky-core's command contract."
+description = "Tauri desktop shell for ubilink — wires the panel UI to ubilink-core's command contract."
 
-# The crate is `hooky-desktop`, but the binary (and therefore the macOS process /
-# dock name for an unbundled `cargo run`) is `hooky` — matching tauri.conf.json's
-# productName, so the app identifies as "hooky" everywhere.
+# The crate is `ubilink-desktop`, but the binary (and therefore the macOS process /
+# dock name for an unbundled `cargo run`) is `ubilink` — matching tauri.conf.json's
+# productName, so the app identifies as "ubilink" everywhere.
 [[bin]]
-name = "hooky"
+name = "ubilink"
 path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-hooky-core = { path = "../src-tauri" }
-tauri = { version = "2", features = ["tray-icon"] }
+ubilink-core = { path = "../src-tauri" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }

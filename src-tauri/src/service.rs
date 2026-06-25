@@ -5,10 +5,10 @@
 // library an actual linking engine.
 // See .manifold/linking-manifesto-app.md
 //
-// HookyService is the single entry point a UI (or the Tauri command layer) calls.
+// UbilinkService is the single entry point a UI (or the Tauri command layer) calls.
 // It composes the pieces built in earlier rounds into the core user flow:
 //   capture active resource (permission-gated, S4) -> validate the link through
-//   the bounded API (S5) -> hook it to another resource in the graph (RT-4) ->
+//   the bounded API (S5) -> link it to another resource in the graph (RT-4) ->
 //   query backlinks from either end (U5). Unsupported apps degrade honestly (U3).
 
 use crate::adapter::{capture_active, CaptureFailure, PermissionState, ResourceAdapter};
@@ -39,7 +39,7 @@ impl ServiceError {
     }
 }
 
-pub struct HookyService {
+pub struct UbilinkService {
     graph: LinkGraph,
     matrix: CapabilityMatrix,
     api: LinkApi,
@@ -47,9 +47,9 @@ pub struct HookyService {
     platform: Platform,
 }
 
-impl HookyService {
-    pub fn new(graph: LinkGraph) -> HookyService {
-        HookyService {
+impl UbilinkService {
+    pub fn new(graph: LinkGraph) -> UbilinkService {
+        UbilinkService {
             graph,
             matrix: CapabilityMatrix::baseline(),
             api: LinkApi::new(),
@@ -59,7 +59,7 @@ impl HookyService {
     }
 
     /// Set the automation permission (real detection wires `detect_automation_permission`).
-    pub fn with_permission(mut self, p: PermissionState) -> HookyService {
+    pub fn with_permission(mut self, p: PermissionState) -> UbilinkService {
         self.permission = p;
         self
     }
@@ -67,7 +67,7 @@ impl HookyService {
     /// Trust the URI schemes that registered adapters declare (B3 + S5): an adapter
     /// producing `bear://…` links means `bear:` is an expected, safe scheme. Keeps
     /// the bounded API an allowlist while letting config-added apps work.
-    pub fn allow_schemes(mut self, schemes: impl IntoIterator<Item = String>) -> HookyService {
+    pub fn allow_schemes(mut self, schemes: impl IntoIterator<Item = String>) -> UbilinkService {
         for s in schemes {
             self.api.allow(&s);
         }
@@ -92,14 +92,14 @@ impl HookyService {
             .map_err(ServiceError::Validation)
     }
 
-    /// Hook two captured resources bidirectionally (RT-4). `created_at` supplied by
+    /// Link two captured resources bidirectionally (RT-4). `created_at` supplied by
     /// the caller (the core has no clock).
-    pub fn hook(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> Result<Link, ServiceError> {
-        self.graph.hook(a, b, created_at).map_err(|e| ServiceError::Store(e.to_string()))
+    pub fn link(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> Result<Link, ServiceError> {
+        self.graph.link(a, b, created_at).map_err(|e| ServiceError::Store(e.to_string()))
     }
 
-    /// The full flow: capture both ends via their adapters, then hook them.
-    pub fn capture_and_hook(
+    /// The full flow: capture both ends via their adapters, then link them.
+    pub fn capture_and_link(
         &mut self,
         active: &dyn ResourceAdapter,
         target: &dyn ResourceAdapter,
@@ -107,7 +107,7 @@ impl HookyService {
     ) -> Result<Link, ServiceError> {
         let a = self.capture(active)?;
         let b = self.capture(target)?;
-        self.hook(&a, &b, created_at)
+        self.link(&a, &b, created_at)
     }
 
     /// Backlinks of a resource — from EITHER endpoint (U5).
@@ -151,16 +151,16 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_capture_hook_and_backlinks() {
-        // The core user flow, fully exercised: capture two files, hook them, and
+    fn end_to_end_capture_link_and_backlinks() {
+        // The core user flow, fully exercised: capture two files, link them, and
         // see each as the other's backlink (B1 + RT-1/3/4 + T2 + U5).
-        let dir = std::env::temp_dir().join(format!("hooky-svc-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ubilink-svc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let note = FileAdapter::new(tmp_file(&dir, "Note.md", b"note body"));
         let paper = FileAdapter::new(tmp_file(&dir, "Paper.pdf", b"%PDF paper"));
 
-        let mut svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
-        let link = svc.capture_and_hook(&note, &paper, Some(1)).unwrap();
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        let link = svc.capture_and_link(&note, &paper, Some(1)).unwrap();
         assert_ne!(link.source_id, link.target_id);
 
         let note_uri = format!("file://{}", dir.join("Note.md").to_string_lossy());
@@ -176,10 +176,10 @@ mod tests {
     fn captured_link_carries_content_hash_through_validation() {
         // RT-3 survives the API-validation round trip (defense-in-depth doesn't
         // strip the richer identifiers).
-        let dir = std::env::temp_dir().join(format!("hooky-svc2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ubilink-svc2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = FileAdapter::new(tmp_file(&dir, "x.md", b"abc"));
-        let mut svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         let id = svc.capture(&f).unwrap();
         assert!(id.content_hash.is_some(), "content hash lost through validation");
         let _ = std::fs::remove_dir_all(&dir);
@@ -200,7 +200,7 @@ mod tests {
                 OpenPlan { program: "open".into(), args: vec![r.uri.clone()] }
             }
         }
-        let mut svc = HookyService::new(LinkGraph::open_in_memory().unwrap())
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
             .with_permission(PermissionState::Denied);
         let err = svc.capture(&LiveAdapter).unwrap_err();
         assert!(!err.message().trim().is_empty(), "U3: empty error message");
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn unsupported_app_capability_explains() {
         // RT-7 / U3: capability query for an unknown app returns an explanation.
-        let svc = HookyService::new(LinkGraph::open_in_memory().unwrap());
+        let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         match svc.capability("TotallyUnknownApp") {
             Capability::Unsupported { explanation, .. } => assert!(explanation.contains("TotallyUnknownApp")),
             other => panic!("expected Unsupported, got {other:?}"),

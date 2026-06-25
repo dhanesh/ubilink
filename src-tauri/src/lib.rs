@@ -2,7 +2,7 @@
 // broker), TN6 (isolation proof), SC-3 (revocable grants).
 // See .manifold/linking-manifesto-app.md
 //
-// hooky-core — the trusted core's plugin-sandbox layer.
+// ubilink-core — the trusted core's plugin-sandbox layer.
 //
 // Threat model (S1 / RT-5): third-party plugin code is UNTRUSTED. It must run
 // outside the core's trust domain (T1), with NO ambient network / filesystem /
@@ -56,4 +56,4 @@ pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Su
 pub use graph::LinkGraph;
 pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};
 pub use sandbox::{Session, EscapeAttempt};
-pub use service::{HookyService, ServiceError};
+pub use service::{UbilinkService, ServiceError};

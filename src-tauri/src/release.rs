@@ -7,12 +7,12 @@
 // `Installer::verify`, which already passed the GAP-09 attack matrix). This module
 // adds only what a pipeline needs: a JSON wire format for a signed bundle and pure
 // sign/verify entry points keyed by hex strings (so a key can come from a CI secret
-// env var). `bin/hooky-sign.rs` is a thin CLI over these functions.
+// env var). `bin/ubilink-sign.rs` is a thin CLI over these functions.
 //
 // ENV boundary: every function here is unit-tested headlessly (sign->verify
 // roundtrip, tamper rejection, untrusted-key rejection, malformed input). The ONLY
 // part that needs the real environment is GitHub Actions executing the CLI with the
-// org's `HOOKY_SIGNING_KEY` secret — see docs/RUNBOOK-ci-signing.md and
+// org's `UBILINK_SIGNING_KEY` secret — see docs/RUNBOOK-ci-signing.md and
 // .github/workflows/release.yml.
 
 use crate::broker::Manifest;
@@ -78,7 +78,7 @@ impl SignError {
     }
 }
 
-/// Decode a 32-byte ed25519 signing key from hex (the CI secret `HOOKY_SIGNING_KEY`).
+/// Decode a 32-byte ed25519 signing key from hex (the CI secret `UBILINK_SIGNING_KEY`).
 pub fn signing_key_from_hex(hex: &str) -> Result<SigningKey, SignError> {
     let bytes = from_hex(hex.trim())?;
     let arr: [u8; 32] = bytes
@@ -177,7 +177,7 @@ mod tests {
         // step (and any on-device installer trusting that pubkey) accepts it.
         let key = signing_key_from_hex(&key_hex(7)).unwrap();
         let pub_hex = public_hex(&key);
-        let json = sign_to_json(&key, manifest("hooky.obsidian"), "export function run(){}".into(), 3).unwrap();
+        let json = sign_to_json(&key, manifest("ubilink.obsidian"), "export function run(){}".into(), 3).unwrap();
         assert!(verify_json(&json, &[pub_hex]).is_ok());
     }
 
@@ -187,7 +187,7 @@ mod tests {
         // caught (the signature covers id/version/source).
         let key = signing_key_from_hex(&key_hex(7)).unwrap();
         let pub_hex = public_hex(&key);
-        let json = sign_to_json(&key, manifest("hooky.obsidian"), "good()".into(), 1).unwrap();
+        let json = sign_to_json(&key, manifest("ubilink.obsidian"), "good()".into(), 1).unwrap();
         let tampered = json.replace("good()", "evil()");
         assert_ne!(json, tampered, "test setup: source must appear in the artifact");
         assert_eq!(verify_json(&tampered, &[pub_hex]), Err(SignError::Verify(InstallError::BadSignature)));
@@ -199,7 +199,7 @@ mod tests {
         // because the app trusts only the release pubkey.
         let attacker = signing_key_from_hex(&key_hex(9)).unwrap();
         let release_pub = public_hex(&signing_key_from_hex(&key_hex(1)).unwrap());
-        let json = sign_to_json(&attacker, manifest("hooky.obsidian"), "run()".into(), 1).unwrap();
+        let json = sign_to_json(&attacker, manifest("ubilink.obsidian"), "run()".into(), 1).unwrap();
         assert_eq!(verify_json(&json, &[release_pub]), Err(SignError::Verify(InstallError::UntrustedSigner)));
     }
 

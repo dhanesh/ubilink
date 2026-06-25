@@ -1,6 +1,6 @@
 <!-- GENERATED from CapabilityMatrix::to_markdown() (O2). Do not edit by hand;
 regenerate via the capabilities_doc_is_in_sync test. -->
-# hooky capability matrix
+# ubilink capability matrix
 
 What linking works where, and by which mechanism. Unsupported app/platform
 pairs degrade with an explanation in-app (U3).

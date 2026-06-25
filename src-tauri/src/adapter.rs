@@ -146,14 +146,14 @@ pub fn capture_active(
     permission: PermissionState,
 ) -> Result<ResourceIdentity, CaptureFailure> {
     if adapter.needs_permission() && permission != PermissionState::Granted {
-        let how_to_fix = "Grant hooky automation/accessibility access in System Settings › Privacy & Security, then try again.".to_string();
+        let how_to_fix = "Grant ubilink automation/accessibility access in System Settings › Privacy & Security, then try again.".to_string();
         let explanation = match permission {
             PermissionState::Denied => format!(
-                "hooky can't read the active resource from \"{}\" because automation access was denied.",
+                "ubilink can't read the active resource from \"{}\" because automation access was denied.",
                 adapter.id()
             ),
             _ => format!(
-                "hooky needs your permission to read the active resource from \"{}\".",
+                "ubilink needs your permission to read the active resource from \"{}\".",
                 adapter.id()
             ),
         };
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn file_adapter_captures_uri_name_path_and_hash() {
         // B1 (link addr+name) + RT-3 (multiple identifiers) via a real file.
-        let dir = std::env::temp_dir().join(format!("hooky-adapter-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ubilink-adapter-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("My Note.md");
         std::fs::write(&f, b"hello").unwrap();

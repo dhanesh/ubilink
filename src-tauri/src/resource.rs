@@ -85,7 +85,7 @@ fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:016x}", h.finish())
 }
 
-/// A bidirectional link ("hook") between two resources. Stored once; the graph
+/// A bidirectional link ("link") between two resources. Stored once; the graph
 /// (RT-4) makes it queryable from BOTH endpoints. IDs reference resources in the
 /// graph; `created_at` is supplied by the caller (the core has no clock here).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

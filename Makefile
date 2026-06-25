@@ -1,9 +1,9 @@
-# hooky — build / test / run
+# ubilink — build / test / run
 #
 # This is a no-build, dependency-light project: two standalone Rust crates
 # (no workspace) plus a zero-npm vanilla frontend in dist/.
-#   • src-tauri/  — hooky-core lib + the `hooky-sign` CLI
-#   • registry/   — the `hooky-registry` service (separate crate; S2 keeps a server
+#   • src-tauri/  — ubilink-core lib + the `ubilink-sign` CLI
+#   • registry/   — the `ubilink-registry` service (separate crate; S2 keeps a server
 #                   out of the core)
 #   • dist/       — the panel UI (hand-authored ES modules; no bundler)
 #
@@ -30,7 +30,7 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
 
-build: ## Build all crates (debug): core lib, hooky-sign, hooky-registry
+build: ## Build all crates (debug): core lib, ubilink-sign, ubilink-registry
 	$(CARGO) build --manifest-path $(CORE)
 	$(CARGO) build --manifest-path $(REGISTRY)
 
@@ -41,7 +41,7 @@ build-release: ## Build all crates optimized (release)
 build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
 	$(CARGO) build --manifest-path $(DESKTOP)
 
-bundle: ## Build a signed macOS hooky.app (stable path so TCC grants persist)
+bundle: ## Build a signed macOS ubilink.app (stable path so TCC grants persist)
 	bash scripts/bundle-macos.sh
 
 test: test-rust test-js ## Run every test suite (Rust core + registry, then JS panel)
@@ -60,8 +60,8 @@ check: build test validate ## Full local verification: build + all tests + spec 
 
 run: run-desktop ## Run the local OS app (the Tauri desktop panel; needs a desktop session)
 
-run-desktop: ## Build + launch the hooky desktop app (global hotkey: Cmd/Ctrl+Shift+K)
-	@echo "Launching hooky. Summon the panel with Cmd/Ctrl+Shift+K."
+run-desktop: ## Build + launch the ubilink desktop app (global hotkey: Cmd/Ctrl+Shift+K)
+	@echo "Launching Ubilink. Summon the panel with Cmd/Ctrl+Shift+K."
 	@echo "(Grant Automation access on first capture — see docs/RUNBOOK-gui-panel.md.)"
 	$(CARGO) run --manifest-path $(DESKTOP)
 
@@ -74,9 +74,9 @@ h = http.server.SimpleHTTPRequestHandler; \
 h.extensions_map['.mjs'] = 'text/javascript'; \
 http.server.test(HandlerClass=f.partial(h, directory='$(UI_DIR)'), port=$(UI_PORT))"
 
-run-registry: build ## Run the integration registry server (set HOOKY_TRUSTED_KEYS=<hex,...>)
-	@echo "Starting hooky-registry on 127.0.0.1:8787 (set HOOKY_TRUSTED_KEYS to allow publishes)"
-	./registry/target/debug/hooky-registry
+run-registry: build ## Run the integration registry server (set UBILINK_TRUSTED_KEYS=<hex,...>)
+	@echo "Starting ubilink-registry on 127.0.0.1:8787 (set UBILINK_TRUSTED_KEYS to allow publishes)"
+	./registry/target/debug/ubilink-registry
 
 fmt: ## Format Rust code in both crates
 	$(CARGO) fmt --manifest-path $(CORE)

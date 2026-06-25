@@ -1,6 +1,6 @@
-# Authoring a hooky integration (B3)
+# Authoring a ubilink integration (B3)
 
-You can add linking support for a new app **without forking or rebuilding hooky's
+You can add linking support for a new app **without forking or rebuilding ubilink's
 core**. An integration is an installable bundle: a manifest + a small JS plugin,
 signed by you. The core loads it through the same sandbox + capability broker every
 integration uses — your code never runs in the core's trust domain (S1/T1).
@@ -41,24 +41,24 @@ even `read:link-graph` / `read:*` is denied (S1). Declare the least you need.
 2. **Validate** the manifest before you ship — catches empty fields and malformed
    capability strings:
    ```sh
-   cargo run -q --bin hooky-sign -- validate --manifest manifest.json
+   cargo run -q --bin ubilink-sign -- validate --manifest manifest.json
    ```
 3. **Sign** the bundle with your publisher key (a 64-hex ed25519 key; the same key
    model the app verifies against — see `docs/RUNBOOK-ci-signing.md`):
    ```sh
-   HOOKY_SIGNING_KEY=<your-hex-key> \
-     cargo run -q --bin hooky-sign -- sign \
+   UBILINK_SIGNING_KEY=<your-hex-key> \
+     cargo run -q --bin ubilink-sign -- sign \
        --manifest manifest.json --source plugin.mjs --version 1 \
        > my-integration.signed.json
    ```
-4. **Install** — the user installs `my-integration.signed.json`. hooky's `Installer`
+4. **Install** — the user installs `my-integration.signed.json`. ubilink's `Installer`
    verifies the signature, the trusted publisher, and version monotonicity, then
-   loads it (R3 / S3). No rebuild of hooky is involved.
+   loads it (R3 / S3). No rebuild of ubilink is involved.
 
 ## Why this satisfies B3 without touching core
 
 Every piece above is already in the core as a *generic* mechanism: the manifest
 schema, the validator (`Manifest::validate`), the broker (`broker.rs`), the sandbox
-(`sandbox.rs`), the signer (`hooky-sign`), and the installer (`integrations.rs`).
+(`sandbox.rs`), the signer (`ubilink-sign`), and the installer (`integrations.rs`).
 Adding an app exercises these — it never edits them. The supported-app set
 (`docs/CAPABILITIES.md`, O2) grows by installation, not by a core release.

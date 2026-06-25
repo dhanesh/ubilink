@@ -7,14 +7,14 @@
 # these functions into Tauri commands (capability-gated IPC, per T1) is a later task.
 # Dep tree kept tiny (serde + serde_json only) so `cargo test` builds fast.
 [package]
-name = "hooky-core"
+name = "ubilink-core"
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
-description = "Capability broker + separate-process plugin sandbox spike for hooky (Linking Manifesto app)."
+description = "Capability broker + separate-process plugin sandbox spike for ubilink (Linking Manifesto app)."
 
 [lib]
-name = "hooky_core"
+name = "ubilink_core"
 path = "src/lib.rs"
 
 [dependencies]

@@ -10,22 +10,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>hooky</title>
+    <title>Ubilink</title>
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
-    <main id="panel" role="dialog" aria-modal="true" aria-label="hooky linking panel">
+    <main id="panel" role="dialog" aria-modal="true" aria-label="Ubilink panel">
       <!-- Onboarding (S4): shown until both macOS permissions are granted, so the
            user always knows exactly what's left to do. -->
       <section id="onboarding" hidden aria-labelledby="onboarding-heading">
-        <h1 id="onboarding-heading">Set up hooky</h1>
-        <p class="sub">hooky needs two macOS permissions to capture links from your apps.</p>
+        <h1 id="onboarding-heading">Set up Ubilink</h1>
+        <p class="sub">Ubilink needs two macOS permissions to capture links from your apps.</p>
         <ul id="perm-list">
           <li class="perm" data-perm="accessibility">
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
               <strong>Accessibility</strong>
-              <p>Lets hooky script an app's menus — needed for apps like Bear that have no API.</p>
+              <p>Lets Ubilink script an app's menus — needed for apps like Bear that have no API.</p>
               <button type="button" id="grant-accessibility">Grant Access…</button>
               <button type="button" class="open-settings" data-pane="accessibility">Open Settings</button>
             </div>
@@ -34,7 +34,7 @@
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
               <strong>Automation</strong>
-              <p>Lets hooky read the link of the app you're in (browsers, Finder, …).</p>
+              <p>Lets Ubilink read the link of the app you're in (browsers, Finder, …).</p>
               <button type="button" class="open-settings" data-pane="automation">Open Settings</button>
             </div>
           </li>
@@ -59,7 +59,7 @@
         <p id="error" role="alert" hidden></p>
 
         <section id="backlinks" aria-labelledby="backlinks-heading" hidden>
-          <h2 id="backlinks-heading">Hooked to this</h2>
+          <h2 id="backlinks-heading">Linked to this</h2>
           <ul id="backlinks-list"></ul>
         </section>
 

@@ -1,6 +1,6 @@
 # Runbook — CI signed builds (O3)
 
-The release signing pipeline (`hooky_core::release` + `bin/hooky-sign` +
+The release signing pipeline (`ubilink_core::release` + `bin/ubilink-sign` +
 `.github/workflows/release.yml`) produces ed25519-signed integration bundles in CI
 and self-verifies them before upload. The crypto + wire format are proven headlessly
 by unit tests in `src-tauri/src/release.rs` and an end-to-end CLI smoke. The **only**
@@ -10,7 +10,7 @@ secret — this runbook enables that.
 ## What is already proven (no CI needed)
 - `sign_to_json` → `verify_json` roundtrip; tamper → `BadSignature`; untrusted key
   → `UntrustedSigner`; malformed key/hex/JSON → typed `SignError` (7 unit tests).
-- The `hooky-sign` CLI end-to-end: `sign`/`pubkey`/`verify` exit 0 on a trusted
+- The `ubilink-sign` CLI end-to-end: `sign`/`pubkey`/`verify` exit 0 on a trusted
   artifact and exit 1 on an untrusted or tampered one.
 - The real `plugins/examples/benign` manifest+source sign and verify through the CLI.
 
@@ -21,23 +21,23 @@ secret — this runbook enables that.
    openssl rand -hex 32        # 64 hex chars = the 32-byte ed25519 signing key
    ```
 2. **Store it as a secret:** repo → *Settings › Secrets and variables › Actions* →
-   New repository secret → name `HOOKY_SIGNING_KEY`, value = the hex from step 1.
+   New repository secret → name `UBILINK_SIGNING_KEY`, value = the hex from step 1.
 3. **Record the PUBLIC key to pin in consumers.** Locally:
    ```sh
-   HOOKY_SIGNING_KEY=<hex> cargo run -q --bin hooky-sign -- pubkey
+   UBILINK_SIGNING_KEY=<hex> cargo run -q --bin ubilink-sign -- pubkey
    ```
-   This is the 64-hex public key an on-device installer must trust (`HOOKY_TRUSTED_KEYS`).
+   This is the 64-hex public key an on-device installer must trust (`UBILINK_TRUSTED_KEYS`).
    It is safe to commit/publish.
 
 ## Triggering & verifying the pipeline
 - Push a tag `vX.Y.Z` (or run the workflow manually via *Actions › release-signed-build*).
 - Expected: the job runs `cargo test --locked` (incl. the S2 dep guard), builds
-  `hooky-sign`, signs `dist/benign.signed.json`, **self-verifies** it (the build
+  `ubilink-sign`, signs `dist/benign.signed.json`, **self-verifies** it (the build
   fails if the artifact doesn't validate), and uploads `signed-bundles`.
 - Download the artifact and confirm locally:
   ```sh
-  HOOKY_TRUSTED_KEYS=<published-pubkey> \
-    cargo run -q --bin hooky-sign -- verify --bundle benign.signed.json
+  UBILINK_TRUSTED_KEYS=<published-pubkey> \
+    cargo run -q --bin ubilink-sign -- verify --bundle benign.signed.json
   ```
 
 ## Recording the result

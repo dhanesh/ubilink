@@ -3,8 +3,8 @@
 // both ends).
 // See .manifold/linking-manifesto-app.md
 //
-// The link graph. This is what makes hooky a *linking tool* rather than a
-// clipboard helper (RT-4): hooking A<->B is stored ONCE, and the link is queryable
+// The link graph. This is what makes ubilink a *linking tool* rather than a
+// clipboard helper (RT-4): linking A<->B is stored ONCE, and the link is queryable
 // as a backlink from BOTH endpoints (U5). Storage is local SQLite (T2 / S2:
 // on-device), with WAL mode + a UNIQUE canonical-pair constraint so concurrent
 // captures (GAP-17) are serialized and idempotent rather than duplicating links.
@@ -48,7 +48,7 @@ impl LinkGraph {
                 lo_id      TEXT NOT NULL REFERENCES resources(id),
                 hi_id      TEXT NOT NULL REFERENCES resources(id),
                 created_at INTEGER,
-                -- one row per unordered pair: hooking A<->B and B<->A is the SAME link
+                -- one row per unordered pair: linking A<->B and B<->A is the SAME link
                 UNIQUE (lo_id, hi_id)
             );
             CREATE INDEX IF NOT EXISTS idx_links_lo ON links(lo_id);
@@ -77,10 +77,10 @@ impl LinkGraph {
         Ok(id)
     }
 
-    /// Hook two resources together (bidirectional). Idempotent: hooking an
+    /// Link two resources together (bidirectional). Idempotent: linking an
     /// already-linked pair (in either order) is a no-op that returns the existing
     /// link. Atomic via a single transaction (T2).
-    pub fn hook(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> rusqlite::Result<Link> {
+    pub fn link(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> rusqlite::Result<Link> {
         let tx = self.conn.transaction()?;
         let a_id = a.uri.clone();
         let b_id = b.uri.clone();
@@ -105,7 +105,7 @@ impl LinkGraph {
         Ok(Link { id: link_id, source_id: a_id, target_id: b_id, created_at })
     }
 
-    /// Backlinks (U5): every resource hooked to `uri`, found from EITHER endpoint
+    /// Backlinks (U5): every resource linked to `uri`, found from EITHER endpoint
     /// of the stored row. This is the proof that one stored link is bidirectional.
     pub fn backlinks(&self, uri: &str) -> rusqlite::Result<Vec<ResourceIdentity>> {
         let mut stmt = self.conn.prepare(
@@ -127,7 +127,7 @@ impl LinkGraph {
         rows.collect()
     }
 
-    /// Whether two resources are hooked (order-independent).
+    /// Whether two resources are linked (order-independent).
     pub fn are_linked(&self, a_uri: &str, b_uri: &str) -> rusqlite::Result<bool> {
         let (lo, hi) = if a_uri <= b_uri { (a_uri, b_uri) } else { (b_uri, a_uri) };
         let n: i64 = self.conn.query_row(
@@ -154,11 +154,11 @@ mod tests {
 
     #[test]
     fn backlink_visible_from_both_ends() {
-        // RT-4 / U5: hook A<->B once; B is a backlink of A AND A is a backlink of B.
+        // RT-4 / U5: link A<->B once; B is a backlink of A AND A is a backlink of B.
         let mut g = LinkGraph::open_in_memory().unwrap();
         let a = r("Note", "obsidian://Note");
         let b = r("Paper.pdf", "file:///Paper.pdf");
-        g.hook(&a, &b, Some(1)).unwrap();
+        g.link(&a, &b, Some(1)).unwrap();
 
         let from_a: Vec<String> = g.backlinks("obsidian://Note").unwrap().into_iter().map(|x| x.uri).collect();
         let from_b: Vec<String> = g.backlinks("file:///Paper.pdf").unwrap().into_iter().map(|x| x.uri).collect();
@@ -167,13 +167,13 @@ mod tests {
     }
 
     #[test]
-    fn hook_is_idempotent_in_either_order() {
+    fn link_is_idempotent_in_either_order() {
         let mut g = LinkGraph::open_in_memory().unwrap();
         let a = r("A", "x://a");
         let b = r("B", "x://b");
-        g.hook(&a, &b, Some(1)).unwrap();
-        g.hook(&a, &b, Some(2)).unwrap(); // same pair
-        g.hook(&b, &a, Some(3)).unwrap(); // reversed order
+        g.link(&a, &b, Some(1)).unwrap();
+        g.link(&a, &b, Some(2)).unwrap(); // same pair
+        g.link(&b, &a, Some(3)).unwrap(); // reversed order
         assert_eq!(g.link_count().unwrap(), 1, "A<->B must collapse to ONE link");
         assert!(g.are_linked("x://a", "x://b").unwrap());
         assert!(g.are_linked("x://b", "x://a").unwrap());
@@ -181,14 +181,14 @@ mod tests {
 
     #[test]
     fn persists_across_reopen() {
-        // RT-4: the graph is durable. Hook, drop the handle, reopen the file.
-        let dir = std::env::temp_dir().join(format!("hooky-graph-{}", std::process::id()));
+        // RT-4: the graph is durable. Link, drop the handle, reopen the file.
+        let dir = std::env::temp_dir().join(format!("ubilink-graph-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("graph.sqlite");
         let p = path.to_string_lossy().to_string();
         {
             let mut g = LinkGraph::open(&p).unwrap();
-            g.hook(&r("A", "x://a"), &r("B", "x://b"), Some(1)).unwrap();
+            g.link(&r("A", "x://a"), &r("B", "x://b"), Some(1)).unwrap();
         }
         {
             let g = LinkGraph::open(&p).unwrap();
@@ -198,10 +198,10 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_hooks_to_same_pair_stay_consistent() {
-        // GAP-17: many threads racing to hook the SAME pair must yield exactly one
+    fn concurrent_links_to_same_pair_stay_consistent() {
+        // GAP-17: many threads racing to link the SAME pair must yield exactly one
         // link and zero errors (WAL + busy_timeout + UNIQUE + INSERT OR IGNORE).
-        let dir = std::env::temp_dir().join(format!("hooky-graph-conc-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ubilink-graph-conc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("graph.sqlite");
         let p = path.to_string_lossy().to_string();
@@ -212,14 +212,14 @@ mod tests {
             let p2 = p.clone();
             handles.push(std::thread::spawn(move || {
                 let mut g = LinkGraph::open(&p2).unwrap();
-                g.hook(&r("A", "x://a"), &r("B", "x://b"), Some(1)).unwrap();
+                g.link(&r("A", "x://a"), &r("B", "x://b"), Some(1)).unwrap();
             }));
         }
         for h in handles {
             h.join().unwrap();
         }
         let g = LinkGraph::open(&p).unwrap();
-        assert_eq!(g.link_count().unwrap(), 1, "concurrent hooks duplicated the link");
+        assert_eq!(g.link_count().unwrap(), 1, "concurrent links duplicated the link");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

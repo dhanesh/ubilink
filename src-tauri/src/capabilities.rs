@@ -137,7 +137,7 @@ impl CapabilityMatrix {
         let mut out = String::from(
             "<!-- GENERATED from CapabilityMatrix::to_markdown() (O2). Do not edit by hand;\n\
              regenerate via the capabilities_doc_is_in_sync test. -->\n\
-             # hooky capability matrix\n\n\
+             # ubilink capability matrix\n\n\
              What linking works where, and by which mechanism. Unsupported app/platform\n\
              pairs degrade with an explanation in-app (U3).\n\n\
              | App | Platform | Mechanism |\n\

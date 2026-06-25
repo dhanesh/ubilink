@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hooky.dev/schema/integration.manifest.schema.json",
-  "title": "hooky integration manifest",
+  "$id": "https://ubilink.dev/schema/integration.manifest.schema.json",
+  "title": "ubilink integration manifest",
   "description": "Declares a third-party integration: its identity, the app it links, and the capabilities it needs. Satisfies RT-6 (a manifest schema lets plugins declare capabilities, granted per-integration; the broker enforces the grant) and feeds TN1's capability broker. See .manifold/linking-manifesto-app.md",
   "type": "object",
   "additionalProperties": false,
@@ -9,7 +9,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "Globally-unique reverse-DNS identifier, e.g. com.hooky.example.obsidian.",
+      "description": "Globally-unique reverse-DNS identifier, e.g. com.ubilink.example.obsidian.",
       "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$",
       "minLength": 3
     },
@@ -44,7 +44,7 @@
   },
   "examples": [
     {
-      "id": "com.hooky.example.obsidian",
+      "id": "com.ubilink.example.obsidian",
       "name": "Obsidian Linker",
       "app": "Obsidian",
       "version": "1.0.0",

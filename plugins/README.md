@@ -1,4 +1,4 @@
-# hooky plugin sandbox + capability broker
+# ubilink plugin sandbox + capability broker
 
 > Spike proving the plugin-isolation architecture (Solution Option B). Satisfies
 > **RT-5** (binding), **RT-6**, **S1**, **T1**, **TN1**, **TN6** (the isolation

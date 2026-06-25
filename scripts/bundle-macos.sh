@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a macOS .app bundle for hooky WITHOUT tauri-cli — just the release binary
+# Build a macOS .app bundle for ubilink WITHOUT tauri-cli — just the release binary
 # (Tauri embeds the frontend at compile time, so it's self-contained) wrapped in a
 # standard bundle, with an .icns icon and an ad-hoc code signature.
 #
@@ -10,8 +10,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="hooky"
-BUNDLE_ID="org.linkingmanifesto.hooky"
+APP_NAME="ubilink"
+BUNDLE_ID="org.dhanesh.ubilink"
 VERSION="0.0.1"
 BIN="$ROOT/desktop/target/release/$APP_NAME"
 OUT="$ROOT/desktop/target/release/bundle"
@@ -47,8 +47,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>$APP_NAME</string>
-  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+  <key>CFBundleName</key><string>Ubilink</string>
+  <key>CFBundleDisplayName</key><string>Ubilink</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>$APP_NAME</string>
   <key>CFBundleIconFile</key><string>icon</string>
@@ -60,7 +60,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- Required so macOS shows a reason on the Automation (Apple Events) prompt
        instead of killing the app when it scripts Safari/Finder/System Events. -->
   <key>NSAppleEventsUsageDescription</key>
-  <string>hooky reads the link (URL or file path) of the app you're in, to create a hook.</string>
+  <string>ubilink reads the link (URL or file path) of the app you're in, to create a link.</string>
 </dict>
 </plist>
 PLIST

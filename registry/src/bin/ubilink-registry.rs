@@ -1,31 +1,31 @@
-// Satisfies: O4. The std-only TcpListener shell over hooky_registry::handle_stream.
+// Satisfies: O4. The std-only TcpListener shell over ubilink_registry::handle_stream.
 // All logic + the HTTP wire parsing are tested in the lib; this binds a port and
 // loops. Deployment (TLS, persistence, real trusted-key set) is in
 // docs/RUNBOOK-registry.md — that hosting is the ENV-blocked residual of O4.
 //
 // Usage:
-//   HOOKY_TRUSTED_KEYS=<comma-separated 64-hex pubkeys> \
-//     hooky-registry [bind-addr]      # default 127.0.0.1:8787
-use hooky_registry::RegistryIndex;
+//   UBILINK_TRUSTED_KEYS=<comma-separated 64-hex pubkeys> \
+//     ubilink-registry [bind-addr]      # default 127.0.0.1:8787
+use ubilink_registry::RegistryIndex;
 use std::io;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 fn main() -> io::Result<()> {
     let addr = std::env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8787".to_string());
-    let trusted: Vec<String> = std::env::var("HOOKY_TRUSTED_KEYS")
+    let trusted: Vec<String> = std::env::var("UBILINK_TRUSTED_KEYS")
         .unwrap_or_default()
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
     if trusted.is_empty() {
-        eprintln!("warning: HOOKY_TRUSTED_KEYS is empty — every publish will be refused (no trusted publisher).");
+        eprintln!("warning: UBILINK_TRUSTED_KEYS is empty — every publish will be refused (no trusted publisher).");
     }
 
     let idx = Arc::new(Mutex::new(RegistryIndex::new(trusted)));
     let listener = TcpListener::bind(&addr)?;
-    eprintln!("[hooky-registry] listening on {addr}");
+    eprintln!("[ubilink-registry] listening on {addr}");
 
     for stream in listener.incoming() {
         let mut stream = match stream {
@@ -40,7 +40,7 @@ fn main() -> io::Result<()> {
                 Ok(g) => g,
                 Err(p) => p.into_inner(), // a poisoned lock still serves reads safely
             };
-            if let Err(e) = hooky_registry::handle_stream(&mut stream, &mut guard) {
+            if let Err(e) = ubilink_registry::handle_stream(&mut stream, &mut guard) {
                 eprintln!("connection error: {e}");
             }
         });

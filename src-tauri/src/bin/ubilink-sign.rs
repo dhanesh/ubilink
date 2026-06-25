@@ -1,22 +1,22 @@
-// Satisfies: O3 (CI signed builds). Thin CLI over `hooky_core::release` so a CI
-// pipeline can sign a release bundle with a key from the `HOOKY_SIGNING_KEY` secret
+// Satisfies: O3 (CI signed builds). Thin CLI over `ubilink_core::release` so a CI
+// pipeline can sign a release bundle with a key from the `UBILINK_SIGNING_KEY` secret
 // and self-verify the result. All real logic + tests live in src/release.rs; this
 // file is argument plumbing only (kept deliberately untestable-thin).
 // See docs/RUNBOOK-ci-signing.md and .github/workflows/release.yml.
 
-use hooky_core::broker::Manifest;
-use hooky_core::release::{public_hex, sign_to_json, signing_key_from_hex, verify_json};
+use ubilink_core::broker::Manifest;
+use ubilink_core::release::{public_hex, sign_to_json, signing_key_from_hex, verify_json};
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
-    "hooky-sign — release bundle signer (CI)\n\
+    "ubilink-sign — release bundle signer (CI)\n\
      \n\
      Commands:\n\
        sign   --manifest <m.json> --source <src.mjs> --version <N>\n\
-              reads HOOKY_SIGNING_KEY (64-hex); writes the signed bundle JSON to stdout\n\
+              reads UBILINK_SIGNING_KEY (64-hex); writes the signed bundle JSON to stdout\n\
        verify --bundle <bundle.json>\n\
-              reads HOOKY_TRUSTED_KEYS (comma-separated 64-hex pubkeys); exit 0 iff valid\n\
-       pubkey reads HOOKY_SIGNING_KEY; prints the public key hex to trust\n\
+              reads UBILINK_TRUSTED_KEYS (comma-separated 64-hex pubkeys); exit 0 iff valid\n\
+       pubkey reads UBILINK_SIGNING_KEY; prints the public key hex to trust\n\
        validate --manifest <m.json>\n\
               checks a third-party manifest against the schema (B3); exit 0 iff valid\n"
 }
@@ -33,7 +33,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("sign") => {
-            let key = signing_key_from_hex(&env("HOOKY_SIGNING_KEY")?).map_err(|e| e.message())?;
+            let key = signing_key_from_hex(&env("UBILINK_SIGNING_KEY")?).map_err(|e| e.message())?;
             let mpath = arg(&args, "--manifest").ok_or("sign needs --manifest <file>")?;
             let spath = arg(&args, "--source").ok_or("sign needs --source <file>")?;
             let version: u32 = arg(&args, "--version").ok_or("sign needs --version <N>")?
@@ -52,10 +52,10 @@ fn run() -> Result<(), String> {
         Some("verify") => {
             let bpath = arg(&args, "--bundle").ok_or("verify needs --bundle <file>")?;
             let json = std::fs::read_to_string(&bpath).map_err(|e| format!("read {bpath}: {e}"))?;
-            let trusted: Vec<String> = env("HOOKY_TRUSTED_KEYS")?
+            let trusted: Vec<String> = env("UBILINK_TRUSTED_KEYS")?
                 .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             verify_json(&json, &trusted).map_err(|e| e.message())?;
-            eprintln!("[hooky-sign] bundle {bpath} verified against {} trusted key(s) ✓", trusted.len());
+            eprintln!("[ubilink-sign] bundle {bpath} verified against {} trusted key(s) ✓", trusted.len());
             Ok(())
         }
         Some("validate") => {
@@ -65,11 +65,11 @@ fn run() -> Result<(), String> {
                 &std::fs::read_to_string(&mpath).map_err(|e| format!("read {mpath}: {e}"))?,
             ).map_err(|e| format!("parse {mpath}: {e}"))?;
             manifest.validate().map_err(|e| format!("invalid manifest: {e}"))?;
-            eprintln!("[hooky-sign] manifest {mpath} is valid ✓ (id={}, {} capability/ies)", manifest.id, manifest.needs.len());
+            eprintln!("[ubilink-sign] manifest {mpath} is valid ✓ (id={}, {} capability/ies)", manifest.id, manifest.needs.len());
             Ok(())
         }
         Some("pubkey") => {
-            let key = signing_key_from_hex(&env("HOOKY_SIGNING_KEY")?).map_err(|e| e.message())?;
+            let key = signing_key_from_hex(&env("UBILINK_SIGNING_KEY")?).map_err(|e| e.message())?;
             println!("{}", public_hex(&key));
             Ok(())
         }

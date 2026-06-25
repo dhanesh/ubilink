@@ -2,7 +2,7 @@
 
 O4 wants a documented path to contribute integrations and to publish/review them via
 a registry, enabling the B3 ecosystem. The registry **service** is built
-(`registry/`, std-only HTTP, reuses hooky-core's ed25519 trust) and verified
+(`registry/`, std-only HTTP, reuses ubilink-core's ed25519 trust) and verified
 headlessly — both by unit tests and a real-socket round trip. What stays ENV-blocked
 is *operating a hosted, governed instance* (a public host, TLS, persistence, and an
 actual review team).
@@ -11,7 +11,7 @@ actual review team).
 - `RegistryIndex`: publish verifies the bundle against trusted publishers and
   enforces version monotonicity; get / list / search work (6 lib tests).
 - `handle_request` + `handle_stream`: the full HTTP API, tested in-memory.
-- The real binary `hooky-registry` over a live local socket: `POST /publish` (201),
+- The real binary `ubilink-registry` over a live local socket: `POST /publish` (201),
   `GET /integrations` (+ `?q=` search), `GET /integrations/{id}` (verbatim bundle),
   untrusted publish → 400, unknown id → 404.
 
@@ -27,7 +27,7 @@ A publish is accepted only if the bundle is signed by a key in the registry's
    attempt at `read:link-graph`) and the plugin source (what it does with the
    capabilities). Use the criteria below.
 3. **Approve = trust.** On approval, the author's publisher **public key** is added
-   to the registry's `HOOKY_TRUSTED_KEYS`. Only then can they publish; revoke trust
+   to the registry's `UBILINK_TRUSTED_KEYS`. Only then can they publish; revoke trust
    by removing the key. Review is enforced cryptographically, not by convention.
 4. **Publish.** The signed bundle is `POST`ed to `/publish`; users discover it via
    `/integrations` and install the verbatim signed bundle (the `Installer` re-verifies
@@ -41,8 +41,8 @@ A publish is accepted only if the bundle is signed by a key in the registry's
 
 ## Running the registry
 ```sh
-HOOKY_TRUSTED_KEYS=<comma-separated approved pubkeys> \
-  cargo run -q --bin hooky-registry -- 0.0.0.0:8787
+UBILINK_TRUSTED_KEYS=<comma-separated approved pubkeys> \
+  cargo run -q --bin ubilink-registry -- 0.0.0.0:8787
 ```
 
 ## Deployment residual (ENV-blocked — what flips O4 → SATISFIED)

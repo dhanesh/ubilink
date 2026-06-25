@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hooky",
+  "productName": "Ubilink",
   "version": "0.0.1",
-  "identifier": "org.linkingmanifesto.hooky",
+  "identifier": "org.dhanesh.ubilink",
   "build": {
     "frontendDist": "../dist"
   },
@@ -10,7 +10,7 @@
     "windows": [
       {
         "label": "panel",
-        "title": "hooky",
+        "title": "ubilink",
         "width": 640,
         "height": 420,
         "visible": false,

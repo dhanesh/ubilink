@@ -8,7 +8,7 @@
 //
 // Run: cd src-tauri && cargo test
 
-use hooky_core::{FocusedResource, Manifest, Session};
+use ubilink_core::{FocusedResource, Manifest, Session};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn repo_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR = .../hooky/src-tauri ; repo root is its parent.
+    // CARGO_MANIFEST_DIR = .../ubilink/src-tauri ; repo root is its parent.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -51,7 +51,7 @@ fn focused() -> FocusedResource {
 /// were never created and the planted secret never leaked into the output.
 #[test]
 fn fail_closed_no_fs_no_child_escape() {
-    let tmp = std::env::temp_dir().join(format!("hooky-spike-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("ubilink-spike-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     let write_path = tmp.join("escaped_write.txt");
     let spawn_sentinel = tmp.join("escaped_spawn.txt");

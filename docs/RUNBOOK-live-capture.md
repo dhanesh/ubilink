@@ -23,7 +23,7 @@ confirms that one seam on a Mac.
 2. **Open Safari** to any page (e.g. `https://example.com`).
 3. **Run the ignored live test:**
    ```sh
-   cargo test -p hooky-core -- --ignored live_capture_against_real_safari
+   cargo test -p ubilink-core -- --ignored live_capture_against_real_safari
    ```
 4. **Expect:** the test prints `captured live: uri=https://… name=…` and passes.
    - Fails with a permission assertion → the TCC grant is missing (step 1).
