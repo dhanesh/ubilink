@@ -66,6 +66,39 @@ function render() {
 function dispatch(event) { state = reduce(state, event); render(); }
 function reportError(e) { showCaptureView(); dispatch({ type: 'failed', message: e?.message ?? String(e) }); }
 
+// ── U1 perf harness (inert unless Rust emits 'perf-mark', i.e. HOOKY_PERF=1) ──
+// Measures hotkey-press → first-paint over many invocations and surfaces p50/p99
+// in-panel (release bundles have no devtools, so we can't rely on the console).
+const __perf = { t0: null, samples: [] };
+function __percentiles() {
+  const s = [...__perf.samples].sort((a, b) => a - b);
+  if (!s.length) return null;
+  const q = (p) => s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)];
+  return { n: s.length, p50: q(0.5), p99: q(0.99), min: s[0], max: s[s.length - 1] };
+}
+// Console accessor for a dev session: window.__hookyPerf()
+window.__hookyPerf = () => { const r = __percentiles(); if (r) console.log(`[hooky-perf] n=${r.n} p50=${r.p50}ms p99=${r.p99}ms (target p50<80 p99<200) min=${r.min} max=${r.max}`); return r; };
+function __renderPerf() {
+  const r = __percentiles();
+  if (!r) return;
+  let el = document.getElementById('perf-readout');
+  if (!el) {
+    el = document.createElement('p');
+    el.id = 'perf-readout';
+    el.setAttribute('aria-hidden', 'true'); // measurement chrome, not part of the a11y flow
+    el.style.cssText = 'position:fixed;left:6px;right:6px;bottom:4px;margin:0;font:11px ui-monospace,SFMono-Regular,monospace;color:#8a8a8a;text-align:center';
+    document.body.appendChild(el);
+  }
+  const pass = r.p50 < 80 && r.p99 < 200 ? '✓' : '…';
+  el.textContent = `U1 ${pass} n=${r.n} · p50=${r.p50}ms · p99=${r.p99}ms (target p50<80 p99<200)`;
+}
+/** Record one hotkey→paint sample: rAF fires after the browser has painted this frame. */
+function __markPaint() {
+  if (__perf.t0 == null) return;
+  const t0 = __perf.t0; __perf.t0 = null;
+  requestAnimationFrame(() => { __perf.samples.push(Date.now() - t0); __renderPerf(); });
+}
+
 async function confirmCopy() {
   const payload = copyPayload(state);
   if (!payload) return;
@@ -139,11 +172,15 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') invoke('dismiss_panel').catch(() => {});
 });
 
+// U1 perf: the hotkey handler stamps t0 just before capture (HOOKY_PERF only).
+onEvent('perf-mark', (e) => { __perf.t0 = e.payload; });
+
 // Capture results pushed by the Rust hotkey handler (captures the app you were IN).
-onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); });
+onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); __markPaint(); });
 onEvent('capture-err', async (e) => {
   showCaptureView();
   dispatch({ type: 'failed', message: e.payload });
+  __markPaint();
   // If the failure is because a permission is missing, route to setup so the user
   // knows what to fix (rather than just seeing an opaque error).
   const report = await checkPermissions();

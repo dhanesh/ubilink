@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use hooky_core::{
     AdapterRegistry, CommandRunner, ConfiguredAdapter, HookyService, LinkGraph, OsaScriptRunner,
@@ -257,6 +258,16 @@ fn main() {
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
                         if let Some(w) = app.get_webview_window("panel") {
+                            // U1 perf harness (opt-in via HOOKY_PERF): stamp wall-clock
+                            // epoch-ms at the instant of the press, before any work. The
+                            // webview measures Date.now()-t0 at first paint, so the sample
+                            // spans the whole hotkey->visible path (Rust capture + IPC +
+                            // render). Same machine = same wall clock, so the delta is real.
+                            if std::env::var_os("HOOKY_PERF").is_some() {
+                                if let Ok(d) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                                    let _ = w.emit("perf-mark", d.as_millis() as u64);
+                                }
+                            }
                             let state = app.state::<AppState>();
                             match capture_now(state.inner()) {
                                 Ok(view) => {
