@@ -17,6 +17,8 @@ use hooky_core::{
     AdapterRegistry, CommandRunner, ConfiguredAdapter, HookyService, LinkGraph, OsaScriptRunner,
     PanelBackend, PanelView, PermissionState, Support, FRONTMOST_APP_SCRIPT,
 };
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -248,6 +250,29 @@ fn main() {
             // Trade-off: no Dock icon (summon with the hotkey; Esc dismisses).
             #[cfg(target_os = "macos")]
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // With no Dock icon, the menu-bar tray is the always-reachable home for the
+            // app: Show (summon the panel) + Quit (the affordance the Dock used to give).
+            let show_i = MenuItem::with_id(app, "show", "Show hooky", true, Some("Cmd+Shift+K"))?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit hooky", true, Some("Cmd+Q"))?;
+            let tray_menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let mut tray = TrayIconBuilder::with_id("hooky-tray")
+                .tooltip("hooky — ⌘⇧K to capture a link")
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => app.exit(0),
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("panel") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
 
             // Show the panel on launch so there is ALWAYS visible UI. On load the
             // webview checks permissions and shows onboarding if anything's missing.

@@ -312,6 +312,39 @@ mod tests {
     }
 
     #[test]
+    fn md_url_and_md_text_cover_edges_directly() {
+        // Well-formed markdown link: url vs. text.
+        assert_eq!(md_url("[Title](bear://x?id=1)"), "bear://x?id=1");
+        assert_eq!(md_text("[Title](bear://x?id=1)"), "Title");
+
+        // Not a markdown link → passthrough, both transforms.
+        assert_eq!(md_url("bear://x?id=1"), "bear://x?id=1");
+        assert_eq!(md_text("bear://x?id=1"), "bear://x?id=1");
+
+        // Surrounding whitespace is trimmed before parsing.
+        assert_eq!(md_url("  [t](u)  "), "u");
+        assert_eq!(md_text("  [t](u)  "), "t");
+
+        // A url that itself contains ')' — the LAST char closes the link.
+        assert_eq!(md_url("[t](http://x/(a))"), "http://x/(a)");
+        assert_eq!(md_text("[t](http://x/(a))"), "t");
+
+        // Empty link "[]()" yields empty parts, not the literal.
+        assert_eq!(md_url("[]()"), "");
+        assert_eq!(md_text("[]()"), "");
+
+        // Asymmetry worth pinning: md_url REQUIRES a trailing ')', so a truncated
+        // link falls back to the input untouched; md_text only needs "](" and so
+        // still extracts the label. (Documents behaviour, not an aspiration.)
+        assert_eq!(md_url("[t](u"), "[t](u");
+        assert_eq!(md_text("[t](u"), "t");
+
+        // "](" present but no leading '[' → neither treats it as a link.
+        assert_eq!(md_url("a](b"), "a](b");
+        assert_eq!(md_text("a](b"), "a](b");
+    }
+
+    #[test]
     fn render_errors_are_explained() {
         let f = fields(&[("a", "1")]);
         assert!(render("{missing}", &f).unwrap_err().contains("unknown field"));
