@@ -35,6 +35,21 @@ pub struct PanelView {
     pub backlinks: Vec<LinkView>,
 }
 
+/// One row in the link-browser: a resource (title + uri) plus how many links it
+/// has — the browser shows the count on the right (0 = not linked to anything).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BrowseEntry {
+    pub name: String,
+    pub uri: String,
+    pub links: i64,
+}
+
+impl From<(ResourceIdentity, i64)> for BrowseEntry {
+    fn from((r, links): (ResourceIdentity, i64)) -> BrowseEntry {
+        BrowseEntry { name: r.name, uri: r.uri, links }
+    }
+}
+
 /// Backs the Tauri command layer. Wraps the integrated service so the panel's logic
 /// is testable headlessly.
 pub struct PanelBackend {
@@ -66,27 +81,27 @@ impl PanelBackend {
         &mut self.service
     }
 
-    /// The `list_links` command: every captured resource as title+uri, A→Z — the
-    /// link-browser's top level (Cmd+Shift+L). The webview shows the names only.
-    pub fn list_links(&self) -> Result<Vec<LinkView>, String> {
+    /// The `list_links` command: every captured resource (title, uri, link count),
+    /// A→Z — the link-browser's top level (Cmd+Shift+L).
+    pub fn list_links(&self) -> Result<Vec<BrowseEntry>, String> {
         Ok(self
             .service
-            .list_resources()
+            .list_resources_with_counts()
             .map_err(|e| e.message())?
             .into_iter()
-            .map(LinkView::from)
+            .map(BrowseEntry::from)
             .collect())
     }
 
-    /// The `links_of` command: everything linked to `uri` (drill-in, →). Same
-    /// bidirectional backlinks as the capture view, but for any resource by uri.
-    pub fn links_of(&self, uri: &str) -> Result<Vec<LinkView>, String> {
+    /// The `links_of` command: everything linked to `uri` (drill-in, →), each with
+    /// its own link count so you can see where to keep navigating.
+    pub fn links_of(&self, uri: &str) -> Result<Vec<BrowseEntry>, String> {
         Ok(self
             .service
-            .backlinks(uri)
+            .linked_with_counts(uri)
             .map_err(|e| e.message())?
             .into_iter()
-            .map(LinkView::from)
+            .map(BrowseEntry::from)
             .collect())
     }
 
@@ -131,6 +146,9 @@ mod tests {
         assert_eq!(all.len(), 3, "every CAPTURED resource is listed, including the unlinked one");
         // titles are present (the browser shows names, not raw URIs)
         assert!(all.iter().all(|l| !l.name.is_empty()));
+        // link counts drive the right-hand indicator: note↔paper = 1 each, solo = 0
+        assert_eq!(all.iter().find(|l| l.uri == note.uri).unwrap().links, 1);
+        assert_eq!(all.iter().find(|l| l.uri == solo.uri).unwrap().links, 0);
         // drill into the note -> its one link (paper)
         let linked = panel.links_of(&note.uri).unwrap();
         assert_eq!(linked.len(), 1);

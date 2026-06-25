@@ -131,6 +131,16 @@ impl UbilinkService {
         self.graph.link_existing(a_uri, b_uri, created_at).map_err(|e| ServiceError::Store(e.to_string()))
     }
 
+    /// Every captured resource with its link count (browser list).
+    pub fn list_resources_with_counts(&self) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
+        self.graph.list_resources_with_counts().map_err(|e| ServiceError::Store(e.to_string()))
+    }
+
+    /// Backlinks of `uri`, each with its own link count (browser drill-in).
+    pub fn linked_with_counts(&self, uri: &str) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
+        self.graph.linked_with_counts(uri).map_err(|e| ServiceError::Store(e.to_string()))
+    }
+
     /// Capability for an app on the current platform (RT-7 / U3): drives whether
     /// linking is offered and, if not, the honest explanation.
     pub fn capability(&self, app: &str) -> Capability {

@@ -163,6 +163,43 @@ impl LinkGraph {
         rows.collect()
     }
 
+    /// Every captured resource with its link count — the browser shows the count
+    /// on the right so you can see at a glance what's connected and how richly.
+    pub fn list_resources_with_counts(&self) -> rusqlite::Result<Vec<(ResourceIdentity, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.id, r.name, r.uri, r.path, r.content_hash,
+                    (SELECT COUNT(*) FROM links l WHERE l.lo_id = r.id OR l.hi_id = r.id)
+             FROM resources r ORDER BY r.name COLLATE NOCASE, r.uri",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                ResourceIdentity { name: row.get(1)?, uri: row.get(2)?, path: row.get(3)?, bookmark: None, content_hash: row.get(4)? },
+                row.get(5)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Backlinks of `uri`, each annotated with ITS OWN total link count (so the
+    /// drill-in view shows where you can keep navigating).
+    pub fn linked_with_counts(&self, uri: &str) -> rusqlite::Result<Vec<(ResourceIdentity, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.id, r.name, r.uri, r.path, r.content_hash,
+                    (SELECT COUNT(*) FROM links l2 WHERE l2.lo_id = r.id OR l2.hi_id = r.id)
+             FROM links l
+             JOIN resources r ON r.id = CASE WHEN l.lo_id = ?1 THEN l.hi_id ELSE l.lo_id END
+             WHERE l.lo_id = ?1 OR l.hi_id = ?1
+             ORDER BY r.name COLLATE NOCASE, r.uri",
+        )?;
+        let rows = stmt.query_map(params![uri], |row| {
+            Ok((
+                ResourceIdentity { name: row.get(1)?, uri: row.get(2)?, path: row.get(3)?, bookmark: None, content_hash: row.get(4)? },
+                row.get(5)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
     /// Whether two resources are linked (order-independent).
     pub fn are_linked(&self, a_uri: &str, b_uri: &str) -> rusqlite::Result<bool> {
         let (lo, hi) = if a_uri <= b_uri { (a_uri, b_uri) } else { (b_uri, a_uri) };
@@ -215,6 +252,26 @@ mod tests {
         assert_eq!(g.link_count().unwrap(), 1);
         let titles: Vec<String> = g.list_resources().unwrap().into_iter().map(|x| x.name).collect();
         assert_eq!(titles, vec!["Note", "Paper.pdf"], "linking did not overwrite names");
+    }
+
+    #[test]
+    fn counts_track_how_many_links_each_resource_has() {
+        let mut g = LinkGraph::open_in_memory().unwrap();
+        let a = r("A", "x://a");
+        let b = r("B", "x://b");
+        let c = r("C", "x://c");
+        g.link(&a, &b, Some(1)).unwrap();
+        g.link(&a, &c, Some(2)).unwrap(); // A is linked to both B and C
+        g.upsert_resource(&r("D", "x://d")).unwrap(); // captured, unlinked
+        let counts: std::collections::HashMap<String, i64> =
+            g.list_resources_with_counts().unwrap().into_iter().map(|(r, n)| (r.uri, n)).collect();
+        assert_eq!(counts["x://a"], 2);
+        assert_eq!(counts["x://b"], 1);
+        assert_eq!(counts["x://d"], 0);
+        // drill into A: B and C, each reporting their own count (1 each)
+        let drilled: Vec<(String, i64)> = g.linked_with_counts("x://a").unwrap().into_iter().map(|(r, n)| (r.uri, n)).collect();
+        assert_eq!(drilled.len(), 2);
+        assert!(drilled.iter().all(|(_, n)| *n == 1));
     }
 
     #[test]

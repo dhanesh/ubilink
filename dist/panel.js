@@ -19,6 +19,37 @@ let state = { phase: 'idle' };
 let browse = initialBrowse();
 let view = 'capture'; // 'capture' | 'onboarding' | 'browser' — routes keyboard input
 
+// ── Alfred-style content-sized window ──
+// The window is sized to the content; #panel (height:100vh) fills it and the
+// browser list scrolls inside. The desired height is computed DETERMINISTICALLY
+// (from the row count for the browser, from scrollHeight for the static views) —
+// never by measuring the flex list, which depends on the window height and so
+// collapses to a feedback loop. The browser is capped at ~10 rows, then scrolls.
+const PANEL_W = 640;
+const ROW_H = 50;          // approx height of one two-line row (incl. gap)
+const BROWSER_ROWS = 10;   // show up to this many before scrolling
+let __lastFitH = 0;
+function desiredHeight() {
+  const padding = 36; // #panel vertical padding
+  if (!$('browser').hidden) {
+    const n = Math.max(browse.items.length, 1);
+    const listH = Math.min(n, BROWSER_ROWS) * ROW_H + 8;
+    const trail = $('browser-trail').hidden ? 0 : 24;
+    const status = $('browser-status').hidden ? 0 : 24;
+    return padding + 34 /*heading*/ + 26 /*hint*/ + 30 /*gaps*/ + trail + status + listH;
+  }
+  const v = !$('capture').hidden ? $('capture') : $('onboarding');
+  return v.scrollHeight + padding; // static views aren't scroll containers — reliable
+}
+function fitWindow() {
+  const h = Math.max(96, Math.ceil(desiredHeight()));
+  if (Math.abs(h - __lastFitH) < 2) return; // skip redundant resizes (e.g. arrow nav)
+  __lastFitH = h;
+  // Resize via Rust (set_size) — the JS window API didn't take effect under the
+  // transparent window. invoke() is the proven channel.
+  invoke('resize_panel', { height: h }).catch(() => {});
+}
+
 // ── section switching ──
 function showCaptureView() { $('onboarding').hidden = true; $('browser').hidden = true; $('capture').hidden = false; view = 'capture'; }
 function showOnboarding() { $('capture').hidden = true; $('browser').hidden = true; $('onboarding').hidden = false; view = 'onboarding'; }
@@ -63,8 +94,9 @@ function render() {
     li.appendChild(a);
     list.appendChild(li);
   }
-
-  if (canConfirm(state)) $('copy').focus();
+  // No auto-focus on the Copy button: ⌘C/↵ copy via the global handler, so the
+  // button needn't grab focus (which showed a heavy focus ring after the hotkey).
+  fitWindow();
 }
 
 function dispatch(event) { state = reduce(state, event); render(); }
@@ -99,16 +131,51 @@ function renderBrowser() {
     li.id = `browse-item-${i}`;
     li.setAttribute('role', 'option');
     const selected = i === browse.selected;
+    const isMarked = it.uri === marked;
     li.setAttribute('aria-selected', selected ? 'true' : 'false');
     if (selected) li.classList.add('sel');
-    if (it.uri === marked) li.classList.add('marked');
-    li.textContent = it.name || it.uri; // title, not the link
+    if (isMarked) li.classList.add('marked');
+
+    // Alfred-style row: scheme dot · title over dim uri · trailing affordance.
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = schemeColor(it.uri);
+
+    const main = document.createElement('span');
+    main.className = 'row-main';
+    const title = document.createElement('span');
+    title.className = 'row-title';
+    title.textContent = it.name || it.uri; // title leads
+    const sub = document.createElement('span');
+    sub.className = 'row-sub';
+    sub.textContent = it.uri; // the link, dimmed (Alfred's subtitle)
+    main.append(title, sub);
+
+    const key = document.createElement('span');
+    key.className = 'row-key';
+    key.textContent = isMarked ? 'link source' : selected ? '↵' : '';
+
+    // Link-count indicator (extreme right): how many resources this is linked to.
+    const count = document.createElement('span');
+    count.className = 'row-count';
+    const n = it.links | 0;
+    if (n > 0) {
+      count.textContent = String(n);
+      count.setAttribute('aria-label', `${n} link${n === 1 ? '' : 's'}`);
+    } else {
+      count.classList.add('zero'); // unlinked — faint dash
+      count.textContent = '–';
+      count.setAttribute('aria-label', 'no links');
+    }
+
+    li.append(dot, main, key, count);
     li.addEventListener('click', () => { browse = browseReduce(browse, { type: 'move', delta: i - browse.selected }); renderBrowser(); });
     li.addEventListener('dblclick', openSelected);
     list.appendChild(li);
   });
   const has = browse.items.length > 0;
   list.setAttribute('aria-activedescendant', has ? `browse-item-${browse.selected}` : '');
+  fitWindow(); // size the window to the list before scrolling the selection into view
   if (has) document.getElementById(`browse-item-${browse.selected}`)?.scrollIntoView({ block: 'nearest' });
 }
 
@@ -130,6 +197,12 @@ async function linkMarkedTo(target) {
     s.hidden = false;
     s.textContent = `Couldn't link: ${e?.message ?? e}`;
   }
+}
+
+/** A scheme-keyed accent dot, so rows read at a glance (Alfred's icon column). */
+function schemeColor(uri) {
+  const s = String(uri).split(':', 1)[0].toLowerCase();
+  return ({ bear: '#e0564f', file: '#9aa0aa', http: '#6ea8fe', https: '#6ea8fe', things: '#5b8def', obsidian: '#a986e0', mailto: '#e0a14f' })[s] || 'var(--accent)';
 }
 
 function openSelected() {
@@ -230,6 +303,7 @@ async function refreshPermissions({ resetIdle = false } = {}) {
   } else {
     showOnboarding();
   }
+  fitWindow(); // onboarding doesn't go through render()
   return done;
 }
 
@@ -238,6 +312,7 @@ async function openSetup() {
   const report = await checkPermissions();
   if (report) renderPermStatuses(report);
   showOnboarding();
+  fitWindow();
 }
 
 // ── wiring ──
@@ -278,6 +353,7 @@ document.addEventListener('keydown', (e) => {
       default: return;
     }
   }
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C') && canConfirm(state)) { e.preventDefault(); confirmCopy(); } // ⌘C copies
   if (e.key === 'Enter' && canConfirm(state)) { e.preventDefault(); confirmCopy(); }
   if (e.key === 'Escape') invoke('dismiss_panel').catch(() => {});
 });

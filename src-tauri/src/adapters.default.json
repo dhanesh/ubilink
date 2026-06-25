@@ -65,10 +65,11 @@
   },
   {
     "app": "Bear",
-    "script": "tell application \"System Events\" to tell process \"Bear\"\n\tset frontmost to true\n\tclick menu item \"Copy Link\" of menu \"Note\" of menu bar 1\nend tell\ndelay 0.2\nreturn (the clipboard as text)",
-    "fields": ["link"],
+    "script": "tell application \"System Events\" to tell process \"Bear\"\n\tset frontmost to true\n\tclick menu item \"Copy Link\" of menu \"Note\" of menu bar 1\nend tell\ndelay 0.2\nset theLink to (the clipboard as text)\nset AppleScript's text item delimiters to \"id=\"\nset idPart to last text item of theLink\nset AppleScript's text item delimiters to \"&\"\nset noteId to first text item of idPart\nset AppleScript's text item delimiters to \"\"\nset dbPath to (POSIX path of (path to home folder)) & \"Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear/Application Data/database.sqlite\"\nset theTitle to \"\"\ntry\n\tset theTitle to do shell script \"sqlite3 -readonly \" & quoted form of dbPath & \" \" & quoted form of (\"SELECT ZTITLE FROM ZSFNOTE WHERE ZUNIQUEIDENTIFIER='\" & noteId & \"' LIMIT 1;\")\nend try\nreturn theTitle & tab & theLink",
+    "delimiter": "\t",
+    "fields": ["title", "link"],
     "uri": "{link|mdurl}",
-    "name": "{link|mdtext}",
+    "name": "{title}",
     "schemes": ["bear"]
   },
   {

@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ubilink_core::{
-    AdapterRegistry, CommandRunner, ConfiguredAdapter, LinkGraph, LinkView, OsaScriptRunner,
+    AdapterRegistry, BrowseEntry, CommandRunner, ConfiguredAdapter, LinkGraph, OsaScriptRunner,
     PanelBackend, PanelView, PermissionState, Support, UbilinkService, FRONTMOST_APP_SCRIPT,
 };
 use tauri::menu::{Menu, MenuItem};
@@ -52,14 +52,14 @@ fn capture_current(state: State<'_, AppState>) -> Result<PanelView, String> {
 
 /// The link-browser top level (Cmd+Shift+L): every captured resource, title+uri.
 #[tauri::command]
-fn list_links(state: State<'_, AppState>) -> Result<Vec<LinkView>, String> {
+fn list_links(state: State<'_, AppState>) -> Result<Vec<BrowseEntry>, String> {
     let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     backend.list_links()
 }
 
 /// Drill-in (→): everything linked to `uri`.
 #[tauri::command]
-fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<LinkView>, String> {
+fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<BrowseEntry>, String> {
     let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     backend.links_of(&uri)
 }
@@ -106,6 +106,18 @@ fn open_link(uri: String) -> Result<(), String> {
         .arg(&uri)
         .spawn()
         .map_err(|e| format!("couldn't open {uri}: {e}"))?;
+    Ok(())
+}
+
+/// Resize the panel window to a content-fit height (the webview measures/computes
+/// it). Done in Rust because the JS window API proved unreliable under the
+/// transparent window; `invoke` + `set_size` are the proven path.
+#[tauri::command]
+fn resize_panel(app: AppHandle, height: f64) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("panel") {
+        let h = height.clamp(96.0, 900.0);
+        let _ = w.set_size(tauri::LogicalSize::new(640.0_f64, h));
+    }
     Ok(())
 }
 
@@ -407,6 +419,7 @@ fn main() {
             list_links,
             links_of,
             link_resources,
+            resize_panel,
             capabilities,
             copy_to_clipboard,
             open_link,

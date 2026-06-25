@@ -24,6 +24,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 ubilink-core = { path = "../src-tauri" }
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }

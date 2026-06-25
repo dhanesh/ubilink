@@ -12,36 +12,46 @@
 }
 
 * { box-sizing: border-box; }
+/* `hidden` must always win — id-level `display` rules (e.g. #browser) would
+   otherwise override the UA [hidden]{display:none} and leak both views at once. */
+[hidden] { display: none !important; }
 
-body {
+html, body {
   margin: 0;
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; /* system fonts: zero network */
   color: var(--fg);
-  background: var(--bg);
+  background: transparent; /* the window is transparent; #panel paints the surface */
 }
 
+/* The surface: an opaque rounded card filling the transparent window, so the app
+   itself reads as a rounded panel (macOS-style) rather than a square box. */
 #panel {
   padding: 18px 20px;
-  min-height: 100vh;
+  height: 100vh; /* fills the window; the window is sized to the content (see fitWindow) */
   display: flex;
   flex-direction: column;
   gap: 14px;
+  background: var(--bg);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 #resource-name { margin: 0; font-size: 1.15rem; }
 .uri { margin: 0; color: var(--muted); font-size: 0.85rem; word-break: break-all; }
 
+/* The copy action is keyboard-first (⌘C / ↵). The button stays for discoverability
+   + screen readers, but as a quiet secondary chip — not a dominating blue CTA. */
 #copy {
   align-self: flex-start;
-  padding: 9px 18px;
-  font-size: 1rem;
-  color: #10131a;
-  background: var(--accent);
-  border: 0;
-  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 0.88rem;
+  color: var(--fg);
+  background: #2a2d35;
+  border: 1px solid #3a3e48;
+  border-radius: 7px;
   cursor: pointer;
 }
-#copy:disabled { opacity: 0.45; cursor: default; }
+#copy:disabled { opacity: 0.4; cursor: default; }
 
 /* U4: an unmistakable focus indicator for keyboard users on every interactive element. */
 button:focus-visible,
@@ -109,24 +119,49 @@ kbd {
 }
 
 /* ── Link-browser (Cmd+Shift+L) ── */
-#browser { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#browser { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 #browser-heading { margin: 0; font-size: 1.2rem; }
 .trail { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); }
 #browser-list {
   list-style: none; margin: 0; padding: 4px; overflow-y: auto;
-  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px;
+  flex: 1; min-height: 0; /* scrolls within #browser; the WINDOW caps it at ~10 rows */
+  display: flex; flex-direction: column; gap: 2px;
 }
-/* visible keyboard focus for the list as a whole (U4) */
-#browser-list:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+#browser-list li { flex: 0 0 auto; } /* never let rows compress to fit */
+/* the blue selection bar is the focus indicator — no outline ring on the list */
+#browser-list:focus, #browser-list:focus-visible { outline: none; }
+/* Alfred-style two-line rows: scheme dot · title over dim uri · trailing key */
 #browser-list li {
-  padding: 8px 12px; border-radius: 7px; cursor: pointer;
+  display: flex; align-items: center; gap: 11px;
+  padding: 8px 12px; border-radius: 9px; cursor: pointer;
+}
+#browser-list li .dot { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; }
+#browser-list li .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+#browser-list li .row-title {
+  font-size: 1.02rem; line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* selected row: raised surface (--fg on it ≈ 12.4:1, exceeds AA) + accent edge */
-#browser-list li.sel { background: #2a2d35; box-shadow: inset 3px 0 0 var(--accent); }
-/* the resource picked up for linking (L): a focus-coloured edge + dot */
-#browser-list li.marked { box-shadow: inset 3px 0 0 var(--focus); }
-#browser-list li.marked.sel { box-shadow: inset 3px 0 0 var(--focus), inset 0 0 0 1px var(--focus); }
-#browser-list li.marked::after { content: " ●"; color: var(--focus); }
+#browser-list li .row-sub {
+  font-size: 0.78rem; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#browser-list li .row-key { flex: 0 0 auto; color: var(--muted); font-size: 0.92rem; }
+/* link-count chip at the extreme right */
+#browser-list li .row-count {
+  flex: 0 0 auto; min-width: 1.5em; text-align: center;
+  padding: 1px 7px; border-radius: 10px; font-size: 0.8rem;
+  background: #2a2d35; color: var(--muted);
+}
+#browser-list li .row-count.zero { background: transparent; color: #4d525c; } /* unlinked: faint */
+#browser-list li.sel .row-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+#browser-list li.sel .row-count.zero { background: transparent; color: rgba(255, 255, 255, 0.5); }
+/* Alfred-style solid selection (white on --select ≈ 6.9:1, sub ≈ 5.2:1 — AA) */
+#browser-list li.sel { background: var(--select); }
+#browser-list li.sel .row-title { color: #fff; font-weight: 600; }
+#browser-list li.sel .row-sub { color: rgba(255, 255, 255, 0.82); }
+#browser-list li.sel .row-key { color: rgba(255, 255, 255, 0.92); }
+/* picked up for linking (L): the dot goes focus-yellow with a halo */
+#browser-list li.marked .dot { background: var(--focus) !important; box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.25); }
+#browser-list li.marked .row-key { color: var(--focus); }
 .status-link { margin: 0; color: var(--focus); font-size: 0.85rem; }

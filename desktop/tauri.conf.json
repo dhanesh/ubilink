@@ -8,14 +8,16 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "panel",
         "title": "ubilink",
         "width": 640,
-        "height": 420,
+        "height": 140,
         "visible": false,
         "decorations": false,
+        "transparent": true,
         "alwaysOnTop": true
       }
     ],
