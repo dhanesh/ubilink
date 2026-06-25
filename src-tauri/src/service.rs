@@ -80,7 +80,8 @@ impl UbilinkService {
         let raw = capture_active(adapter, self.permission).map_err(ServiceError::Capture)?;
         // Re-validate the adapter's output through the bounded API (defense in depth:
         // even a trusted adapter's URI is size/scheme-checked, S5/SC-1).
-        self.api
+        let id = self
+            .api
             .construct_link(&raw.uri, &raw.name)
             .map(|validated| ResourceIdentity {
                 // keep the richer identifiers the adapter gathered (RT-3)
@@ -89,7 +90,12 @@ impl UbilinkService {
                 content_hash: raw.content_hash,
                 ..validated
             })
-            .map_err(ServiceError::Validation)
+            .map_err(ServiceError::Validation)?;
+        // Persist the capture so the link-browser (Cmd+Shift+L) can list every link
+        // you've grabbed — not just ones that happen to be linked to something.
+        // Idempotent upsert keyed by URI, so re-capturing the same resource is a no-op.
+        self.graph.upsert_resource(&id).map_err(|e| ServiceError::Store(e.to_string()))?;
+        Ok(id)
     }
 
     /// Link two captured resources bidirectionally (RT-4). `created_at` supplied by
@@ -113,6 +119,16 @@ impl UbilinkService {
     /// Backlinks of a resource — from EITHER endpoint (U5).
     pub fn backlinks(&self, uri: &str) -> Result<Vec<ResourceIdentity>, ServiceError> {
         self.graph.backlinks(uri).map_err(|e| ServiceError::Store(e.to_string()))
+    }
+
+    /// Every captured resource (the link-browser's top level, Cmd+Shift+L).
+    pub fn list_resources(&self) -> Result<Vec<ResourceIdentity>, ServiceError> {
+        self.graph.list_resources().map_err(|e| ServiceError::Store(e.to_string()))
+    }
+
+    /// Link two already-captured resources by uri (the browser's "L" action).
+    pub fn link_existing(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> Result<(), ServiceError> {
+        self.graph.link_existing(a_uri, b_uri, created_at).map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Capability for an app on the current platform (RT-7 / U3): drives whether

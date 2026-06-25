@@ -107,3 +107,26 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   #status-line[data-phase="capturing"]::before { animation: none; }
 }
+
+/* ── Link-browser (Cmd+Shift+L) ── */
+#browser { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#browser-heading { margin: 0; font-size: 1.2rem; }
+.trail { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.muted { color: var(--muted); }
+#browser-list {
+  list-style: none; margin: 0; padding: 4px; overflow-y: auto;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px;
+}
+/* visible keyboard focus for the list as a whole (U4) */
+#browser-list:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+#browser-list li {
+  padding: 8px 12px; border-radius: 7px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* selected row: raised surface (--fg on it ≈ 12.4:1, exceeds AA) + accent edge */
+#browser-list li.sel { background: #2a2d35; box-shadow: inset 3px 0 0 var(--accent); }
+/* the resource picked up for linking (L): a focus-coloured edge + dot */
+#browser-list li.marked { box-shadow: inset 3px 0 0 var(--focus); }
+#browser-list li.marked.sel { box-shadow: inset 3px 0 0 var(--focus), inset 0 0 0 1px var(--focus); }
+#browser-list li.marked::after { content: " ●"; color: var(--focus); }
+.status-link { margin: 0; color: var(--focus); font-size: 0.85rem; }

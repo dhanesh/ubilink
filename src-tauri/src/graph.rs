@@ -105,6 +105,24 @@ impl LinkGraph {
         Ok(Link { id: link_id, source_id: a_id, target_id: b_id, created_at })
     }
 
+    /// Link two resources that ALREADY exist in the graph, by uri (the browser's
+    /// "L" action). Bidirectional + idempotent like `link`, but it does NOT upsert
+    /// the resources — they're already captured, so their titles are left untouched.
+    /// A self-link (a == b) is a no-op.
+    pub fn link_existing(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> rusqlite::Result<()> {
+        if a_uri == b_uri {
+            return Ok(());
+        }
+        let (lo, hi) = if a_uri <= b_uri { (a_uri, b_uri) } else { (b_uri, a_uri) };
+        let link_id = format!("{lo}\u{1f}{hi}");
+        self.conn.execute(
+            "INSERT INTO links (id, lo_id, hi_id, created_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(lo_id, hi_id) DO NOTHING",
+            params![link_id, lo, hi, created_at],
+        )?;
+        Ok(())
+    }
+
     /// Backlinks (U5): every resource linked to `uri`, found from EITHER endpoint
     /// of the stored row. This is the proof that one stored link is bidirectional.
     pub fn backlinks(&self, uri: &str) -> rusqlite::Result<Vec<ResourceIdentity>> {
@@ -121,6 +139,24 @@ impl LinkGraph {
                 uri: row.get(2)?,
                 path: row.get(3)?,
                 bookmark: None, // bookmarks are not persisted in the graph (opaque, large)
+                content_hash: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Every captured resource, by title (name), A→Z — the link-browser's top level
+    /// (Cmd+Shift+L). The browser shows these names, never the raw URIs.
+    pub fn list_resources(&self) -> rusqlite::Result<Vec<ResourceIdentity>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, uri, path, content_hash FROM resources ORDER BY name COLLATE NOCASE, uri",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ResourceIdentity {
+                name: row.get(1)?,
+                uri: row.get(2)?,
+                path: row.get(3)?,
+                bookmark: None,
                 content_hash: row.get(4)?,
             })
         })?;
@@ -164,6 +200,31 @@ mod tests {
         let from_b: Vec<String> = g.backlinks("file:///Paper.pdf").unwrap().into_iter().map(|x| x.uri).collect();
         assert_eq!(from_a, vec!["file:///Paper.pdf"]);
         assert_eq!(from_b, vec!["obsidian://Note"]);
+    }
+
+    #[test]
+    fn link_existing_links_two_captured_resources_without_touching_titles() {
+        let g = LinkGraph::open_in_memory().unwrap();
+        g.upsert_resource(&r("Note", "obsidian://Note")).unwrap();
+        g.upsert_resource(&r("Paper.pdf", "file:///Paper.pdf")).unwrap();
+        g.link_existing("obsidian://Note", "file:///Paper.pdf", Some(1)).unwrap();
+        assert!(g.are_linked("obsidian://Note", "file:///Paper.pdf").unwrap());
+        // bidirectional + idempotent + no self-links + titles preserved
+        g.link_existing("file:///Paper.pdf", "obsidian://Note", Some(2)).unwrap();
+        g.link_existing("obsidian://Note", "obsidian://Note", Some(3)).unwrap(); // self -> no-op
+        assert_eq!(g.link_count().unwrap(), 1);
+        let titles: Vec<String> = g.list_resources().unwrap().into_iter().map(|x| x.name).collect();
+        assert_eq!(titles, vec!["Note", "Paper.pdf"], "linking did not overwrite names");
+    }
+
+    #[test]
+    fn list_resources_returns_every_resource_by_title() {
+        // The link-browser's top level: every captured resource, sorted by title.
+        let mut g = LinkGraph::open_in_memory().unwrap();
+        g.link(&r("Paper.pdf", "file:///Paper.pdf"), &r("Note", "obsidian://Note"), Some(1)).unwrap();
+        g.upsert_resource(&r("Acme", "https://acme.example")).unwrap(); // a standalone, unlinked resource
+        let titles: Vec<String> = g.list_resources().unwrap().into_iter().map(|x| x.name).collect();
+        assert_eq!(titles, vec!["Acme", "Note", "Paper.pdf"], "A->Z by title, includes unlinked");
     }
 
     #[test]

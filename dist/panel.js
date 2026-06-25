@@ -5,6 +5,7 @@
 // docs/RUNBOOK-gui-panel.md. Capture is driven by 'capture-ok'/'capture-err' events
 // the Rust hotkey handler emits — so it links the app you were IN, every time.
 import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
+import { initialBrowse, reduce as browseReduce, selectedItem, breadcrumb, atRoot, markedUri } from './browse-state.mjs';
 
 const invoke = (cmd, args) =>
   window.__TAURI__?.core?.invoke
@@ -15,10 +16,13 @@ const onEvent = (name, cb) =>
 
 const $ = (id) => document.getElementById(id);
 let state = { phase: 'idle' };
+let browse = initialBrowse();
+let view = 'capture'; // 'capture' | 'onboarding' | 'browser' — routes keyboard input
 
 // ── section switching ──
-function showCaptureView() { $('onboarding').hidden = true; $('capture').hidden = false; }
-function showOnboarding() { $('capture').hidden = true; $('onboarding').hidden = false; }
+function showCaptureView() { $('onboarding').hidden = true; $('browser').hidden = true; $('capture').hidden = false; view = 'capture'; }
+function showOnboarding() { $('capture').hidden = true; $('browser').hidden = true; $('onboarding').hidden = false; view = 'onboarding'; }
+function showBrowserView() { $('onboarding').hidden = true; $('capture').hidden = true; $('browser').hidden = false; view = 'browser'; }
 
 // ── capture view rendering ──
 function render() {
@@ -65,6 +69,87 @@ function render() {
 
 function dispatch(event) { state = reduce(state, event); render(); }
 function reportError(e) { showCaptureView(); dispatch({ type: 'failed', message: e?.message ?? String(e) }); }
+
+// ── link-browser (Cmd+Shift+L) ──
+// Renders the current browse view-model. Titles only (never the raw URI); the
+// selection is an aria listbox option so VoiceOver announces it (U4).
+function renderBrowser() {
+  const trail = breadcrumb(browse);
+  $('browser-heading').textContent = atRoot(browse) ? 'Your links' : (trail[trail.length - 1] || 'Links');
+  const trailEl = $('browser-trail');
+  trailEl.hidden = trail.length === 0;
+  trailEl.textContent = trail.length ? `Linked to ${trail.join(' › ')}` : '';
+  $('browser-empty').hidden = browse.items.length !== 0;
+
+  const marked = markedUri(browse);
+  const statusEl = $('browser-status');
+  if (marked) {
+    const m = browse.items.find((x) => x.uri === marked);
+    statusEl.hidden = false;
+    statusEl.textContent = `Linking from “${m ? m.name || m.uri : '…'}” — move to another and press L (Esc cancels)`;
+  } else {
+    statusEl.hidden = true;
+    statusEl.textContent = '';
+  }
+
+  const list = $('browser-list');
+  list.replaceChildren();
+  browse.items.forEach((it, i) => {
+    const li = document.createElement('li');
+    li.id = `browse-item-${i}`;
+    li.setAttribute('role', 'option');
+    const selected = i === browse.selected;
+    li.setAttribute('aria-selected', selected ? 'true' : 'false');
+    if (selected) li.classList.add('sel');
+    if (it.uri === marked) li.classList.add('marked');
+    li.textContent = it.name || it.uri; // title, not the link
+    li.addEventListener('click', () => { browse = browseReduce(browse, { type: 'move', delta: i - browse.selected }); renderBrowser(); });
+    li.addEventListener('dblclick', openSelected);
+    list.appendChild(li);
+  });
+  const has = browse.items.length > 0;
+  list.setAttribute('aria-activedescendant', has ? `browse-item-${browse.selected}` : '');
+  if (has) document.getElementById(`browse-item-${browse.selected}`)?.scrollIntoView({ block: 'nearest' });
+}
+
+/** Link the marked resource to `target`, then reload the list with feedback. */
+async function linkMarkedTo(target) {
+  const a = markedUri(browse);
+  if (!a || a === target.uri) return;
+  const aName = browse.items.find((x) => x.uri === a)?.name ?? a;
+  try {
+    await invoke('link_resources', { aUri: a, bUri: target.uri });
+    const list = await invoke('list_links');
+    browse = browseReduce(initialBrowse(), { type: 'load', items: list ?? [] });
+    renderBrowser();
+    const s = $('browser-status'); // flash confirmation (renderBrowser cleared it)
+    s.hidden = false;
+    s.textContent = `Linked “${aName}” ↔ “${target.name || target.uri}” — press → to see it`;
+  } catch (e) {
+    const s = $('browser-status');
+    s.hidden = false;
+    s.textContent = `Couldn't link: ${e?.message ?? e}`;
+  }
+}
+
+function openSelected() {
+  const it = selectedItem(browse);
+  if (it) invoke('open_link', { uri: it.uri }).catch(reportError);
+}
+async function drillSelected() {
+  const it = selectedItem(browse);
+  if (!it) return;
+  try {
+    const links = await invoke('links_of', { uri: it.uri });
+    browse = browseReduce(browse, { type: 'drill', items: links ?? [] });
+    renderBrowser();
+  } catch { /* stay put; a failed drill leaves the current view intact */ }
+}
+function browseBack() {
+  if (atRoot(browse)) { invoke('dismiss_panel').catch(() => {}); return; } // ← at root dismisses
+  browse = browseReduce(browse, { type: 'back' });
+  renderBrowser();
+}
 
 // ── U1 perf harness (inert unless Rust emits 'perf-mark', i.e. UBILINK_PERF=1) ──
 // Measures hotkey-press → first-paint over many invocations and surfaces p50/p99
@@ -168,9 +253,43 @@ $('setup-done').addEventListener('click', () => refreshPermissions({ resetIdle: 
 $('open-setup').addEventListener('click', openSetup);
 $('copy').addEventListener('click', confirmCopy);
 document.addEventListener('keydown', (e) => {
+  // Link-browser navigation (Cmd+Shift+L view): keyboard-first (U4).
+  if (view === 'browser') {
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); browse = browseReduce(browse, { type: 'move', delta: 1 }); renderBrowser(); return;
+      case 'ArrowUp': e.preventDefault(); browse = browseReduce(browse, { type: 'move', delta: -1 }); renderBrowser(); return;
+      case 'Enter': e.preventDefault(); openSelected(); return;       // open the link
+      case 'ArrowRight': e.preventDefault(); drillSelected(); return; // see what it's linked to
+      case 'ArrowLeft': e.preventDefault(); browseBack(); return;     // back out (or dismiss at root)
+      case 'l': case 'L': {
+        e.preventDefault();
+        const cur = selectedItem(browse);
+        if (!cur) return;
+        const m = markedUri(browse);
+        if (m && m !== cur.uri) linkMarkedTo(cur);                    // second L on a different item -> link
+        else { browse = browseReduce(browse, { type: 'mark' }); renderBrowser(); } // first L (or toggle off)
+        return;
+      }
+      case 'Escape':
+        e.preventDefault();
+        if (markedUri(browse)) { browse = browseReduce(browse, { type: 'unmark' }); renderBrowser(); } // cancel link mode first
+        else invoke('dismiss_panel').catch(() => {});
+        return;
+      default: return;
+    }
+  }
   if (e.key === 'Enter' && canConfirm(state)) { e.preventDefault(); confirmCopy(); }
   if (e.key === 'Escape') invoke('dismiss_panel').catch(() => {});
 });
+
+// Cmd+Shift+L: the Rust handler lists the graph and pushes it here.
+onEvent('browse', (e) => {
+  browse = browseReduce(initialBrowse(), { type: 'load', items: e.payload ?? [] });
+  showBrowserView();
+  renderBrowser();
+  $('browser-list').focus();
+});
+onEvent('browse-err', (e) => { showCaptureView(); dispatch({ type: 'failed', message: e.payload }); });
 
 // Render-first (U1): the hotkey handler fires 'capturing' BEFORE running capture, so
 // the spinner paints immediately. The optional payload is t0 (epoch-ms, UBILINK_PERF

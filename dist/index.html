@@ -65,6 +65,17 @@
 
         <p class="hint" id="hint">Esc to dismiss · Enter to copy · <button type="button" id="open-setup" class="linklike">Permissions</button></p>
       </section>
+
+      <!-- Link-browser (Cmd+Shift+L): all captured links by title; → drills into
+           what a link is connected to, Enter opens it. Keyboard-first (U4). -->
+      <section id="browser" hidden aria-labelledby="browser-heading">
+        <h1 id="browser-heading">Your links</h1>
+        <p id="browser-trail" class="trail" aria-live="polite" hidden></p>
+        <p id="browser-status" class="status-link" role="status" aria-live="polite" hidden></p>
+        <ul id="browser-list" role="listbox" aria-labelledby="browser-heading" tabindex="-1"></ul>
+        <p id="browser-empty" class="muted" hidden>No links captured yet — press ⌘⇧K from a supported app to capture one.</p>
+        <p class="hint">↑↓ move · Enter open · → see links · L link · ← back · Esc dismiss</p>
+      </section>
     </main>
 
     <script type="module" src="panel.js"></script>

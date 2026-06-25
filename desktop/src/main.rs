@@ -14,8 +14,8 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ubilink_core::{
-    AdapterRegistry, CommandRunner, ConfiguredAdapter, UbilinkService, LinkGraph, OsaScriptRunner,
-    PanelBackend, PanelView, PermissionState, Support, FRONTMOST_APP_SCRIPT,
+    AdapterRegistry, CommandRunner, ConfiguredAdapter, LinkGraph, LinkView, OsaScriptRunner,
+    PanelBackend, PanelView, PermissionState, Support, UbilinkService, FRONTMOST_APP_SCRIPT,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -48,6 +48,29 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
 #[tauri::command]
 fn capture_current(state: State<'_, AppState>) -> Result<PanelView, String> {
     capture_now(state.inner())
+}
+
+/// The link-browser top level (Cmd+Shift+L): every captured resource, title+uri.
+#[tauri::command]
+fn list_links(state: State<'_, AppState>) -> Result<Vec<LinkView>, String> {
+    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.list_links()
+}
+
+/// Drill-in (→): everything linked to `uri`.
+#[tauri::command]
+fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<LinkView>, String> {
+    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.links_of(&uri)
+}
+
+/// Link two captured resources (browser "L"). The core has no clock, so the
+/// desktop supplies the timestamp.
+#[tauri::command]
+fn link_resources(state: State<'_, AppState>, a_uri: String, b_uri: String) -> Result<(), String> {
+    let created_at = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64);
+    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.link_resources(&a_uri, &b_uri, created_at)
 }
 
 /// In-app capability disclosure (O2): what linking works where.
@@ -295,6 +318,9 @@ fn main() {
             // re-captures on every press. (Esc dismisses; see panel.js.)
             let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
             let toggle_for_handler = toggle;
+            // Cmd+Shift+L opens the link-browser (K = capture, L = browse).
+            let browse = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyL);
+            let browse_for_handler = browse;
             let plugin = tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
@@ -338,18 +364,49 @@ fn main() {
                                 }
                             });
                         }
+                    } else if shortcut == &browse_for_handler && event.state() == ShortcutState::Pressed {
+                        if let Some(w) = app.get_webview_window("panel") {
+                            // Cmd+Shift+L: open the link-browser. Graph reads are local
+                            // SQLite (fast), so list synchronously, push it, and reveal.
+                            let listed = {
+                                let state = app.state::<AppState>();
+                                let backend = state.backend.lock();
+                                match backend {
+                                    Ok(b) => b.list_links(),
+                                    Err(_) => Err("internal state was poisoned".to_string()),
+                                }
+                            };
+                            match listed {
+                                Ok(list) => {
+                                    let _ = w.emit("browse", list);
+                                }
+                                Err(msg) => {
+                                    let _ = w.emit("browse-err", msg);
+                                }
+                            }
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
                     }
                 })
                 .build();
             if let Err(e) = app.handle().plugin(plugin) {
                 eprintln!("[ubilink] global-shortcut plugin failed to load: {e}");
-            } else if let Err(e) = app.global_shortcut().register(toggle) {
-                eprintln!("[ubilink] couldn't register Cmd+Shift+K (grant Accessibility permission): {e}");
+            } else {
+                if let Err(e) = app.global_shortcut().register(toggle) {
+                    eprintln!("[ubilink] couldn't register Cmd+Shift+K (grant Accessibility permission): {e}");
+                }
+                if let Err(e) = app.global_shortcut().register(browse) {
+                    eprintln!("[ubilink] couldn't register Cmd+Shift+L (browse): {e}");
+                }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             capture_current,
+            list_links,
+            links_of,
+            link_resources,
             capabilities,
             copy_to_clipboard,
             open_link,

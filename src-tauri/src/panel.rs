@@ -66,6 +66,35 @@ impl PanelBackend {
         &mut self.service
     }
 
+    /// The `list_links` command: every captured resource as title+uri, A→Z — the
+    /// link-browser's top level (Cmd+Shift+L). The webview shows the names only.
+    pub fn list_links(&self) -> Result<Vec<LinkView>, String> {
+        Ok(self
+            .service
+            .list_resources()
+            .map_err(|e| e.message())?
+            .into_iter()
+            .map(LinkView::from)
+            .collect())
+    }
+
+    /// The `links_of` command: everything linked to `uri` (drill-in, →). Same
+    /// bidirectional backlinks as the capture view, but for any resource by uri.
+    pub fn links_of(&self, uri: &str) -> Result<Vec<LinkView>, String> {
+        Ok(self
+            .service
+            .backlinks(uri)
+            .map_err(|e| e.message())?
+            .into_iter()
+            .map(LinkView::from)
+            .collect())
+    }
+
+    /// The `link_resources` command (browser "L"): link two captured resources.
+    pub fn link_resources(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> Result<(), String> {
+        self.service.link_existing(a_uri, b_uri, created_at).map_err(|e| e.message())
+    }
+
     /// The `capabilities` command (O2): the supported app/platform/mechanism set,
     /// serialized for the webview to disclose what works where.
     pub fn capabilities(&self) -> Vec<crate::capabilities::Support> {
@@ -83,6 +112,37 @@ mod tests {
         let p = dir.join(name);
         std::fs::write(&p, b"x").unwrap();
         p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn list_links_and_links_of_back_the_browser() {
+        // The link-browser (Cmd+Shift+L): list every resource by title, and drill
+        // into one to see everything linked to it.
+        let dir = std::env::temp_dir().join(format!("ubilink-browse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        let note = svc.capture(&FileAdapter::new(tmp(&dir, "Note.md"))).unwrap();
+        let paper = svc.capture(&FileAdapter::new(tmp(&dir, "Paper.pdf"))).unwrap();
+        let solo = svc.capture(&FileAdapter::new(tmp(&dir, "Solo.txt"))).unwrap(); // captured, never linked
+        svc.link(&note, &paper, Some(1)).unwrap();
+
+        let panel = PanelBackend::new(svc);
+        let all = panel.list_links().unwrap();
+        assert_eq!(all.len(), 3, "every CAPTURED resource is listed, including the unlinked one");
+        // titles are present (the browser shows names, not raw URIs)
+        assert!(all.iter().all(|l| !l.name.is_empty()));
+        // drill into the note -> its one link (paper)
+        let linked = panel.links_of(&note.uri).unwrap();
+        assert_eq!(linked.len(), 1);
+        assert_eq!(linked[0].uri, paper.uri);
+        // the unlinked capture drills into nothing (empty, not an error)
+        assert_eq!(panel.links_of(&solo.uri).unwrap().len(), 0);
+        // browser "L": link solo to the note -> drill-in now surfaces it
+        panel.link_resources(&solo.uri, &note.uri, Some(2)).unwrap();
+        let solo_links = panel.links_of(&solo.uri).unwrap();
+        assert_eq!(solo_links.len(), 1);
+        assert_eq!(solo_links[0].uri, note.uri);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
