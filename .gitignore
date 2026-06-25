@@ -48,3 +48,5 @@ dist-ssr/
 
 # context-hygiene runtime cache
 .context/
+# Added by code-review-graph
+.code-review-graph/
