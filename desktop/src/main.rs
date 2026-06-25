@@ -241,6 +241,14 @@ fn main() {
                 adapters,
             });
 
+            // U1 render-first: run as an Accessory app (overlay-style, like Spotlight/
+            // Raycast). Showing the panel then does NOT make hooky the frontmost
+            // *application*, so the async capture below still sees the app you were in
+            // — which lets us paint the panel BEFORE the slow osascript capture runs.
+            // Trade-off: no Dock icon (summon with the hotkey; Esc dismisses).
+            #[cfg(target_os = "macos")]
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             // Show the panel on launch so there is ALWAYS visible UI. On load the
             // webview checks permissions and shows onboarding if anything's missing.
             if let Some(w) = app.get_webview_window("panel") {
@@ -258,27 +266,44 @@ fn main() {
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
                         if let Some(w) = app.get_webview_window("panel") {
-                            // U1 perf harness (opt-in via HOOKY_PERF): stamp wall-clock
-                            // epoch-ms at the instant of the press, before any work. The
-                            // webview measures Date.now()-t0 at first paint, so the sample
-                            // spans the whole hotkey->visible path (Rust capture + IPC +
-                            // render). Same machine = same wall clock, so the delta is real.
-                            if std::env::var_os("HOOKY_PERF").is_some() {
-                                if let Ok(d) = SystemTime::now().duration_since(UNIX_EPOCH) {
-                                    let _ = w.emit("perf-mark", d.as_millis() as u64);
-                                }
-                            }
-                            let state = app.state::<AppState>();
-                            match capture_now(state.inner()) {
-                                Ok(view) => {
-                                    let _ = w.emit("capture-ok", view);
-                                }
-                                Err(msg) => {
-                                    let _ = w.emit("capture-err", msg);
-                                }
-                            }
+                            // U1 render-first: paint the spinner and reveal the panel NOW,
+                            // before the slow (osascript) capture. The 'capturing' event
+                            // drives the webview into its spinner state; its optional t0
+                            // payload (epoch-ms, opt-in via HOOKY_PERF) lets panel.js measure
+                            // Date.now()-t0 at first paint — i.e. the true hotkey->visible
+                            // latency U1 governs (NOT hotkey->link-ready, which is bounded by
+                            // osascript and can't go sub-200ms). Same machine = same wall clock.
+                            let t0: Option<u64> = if std::env::var_os("HOOKY_PERF").is_some() {
+                                SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
+                            } else {
+                                None
+                            };
+                            let _ = w.emit("capturing", t0);
                             let _ = w.show();
-                            let _ = w.set_focus();
+
+                            // Run the capture OFF the UI path so it never blocks first paint.
+                            // As an Accessory app, show() above didn't steal the frontmost
+                            // application, so capture_now still detects the app you were in.
+                            // When osascript returns, push the result and focus the panel so
+                            // Enter (U2) works.
+                            let app = app.clone();
+                            std::thread::spawn(move || {
+                                let result = {
+                                    let state = app.state::<AppState>();
+                                    capture_now(state.inner())
+                                };
+                                match result {
+                                    Ok(view) => {
+                                        let _ = app.emit("capture-ok", view);
+                                    }
+                                    Err(msg) => {
+                                        let _ = app.emit("capture-err", msg);
+                                    }
+                                }
+                                if let Some(w) = app.get_webview_window("panel") {
+                                    let _ = w.set_focus();
+                                }
+                            });
                         }
                     }
                 })

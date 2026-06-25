@@ -172,15 +172,21 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') invoke('dismiss_panel').catch(() => {});
 });
 
-// U1 perf: the hotkey handler stamps t0 just before capture (HOOKY_PERF only).
-onEvent('perf-mark', (e) => { __perf.t0 = e.payload; });
+// Render-first (U1): the hotkey handler fires 'capturing' BEFORE running capture, so
+// the spinner paints immediately. The optional payload is t0 (epoch-ms, HOOKY_PERF
+// only) — we measure Date.now()-t0 at this first paint, the real hotkey->visible time.
+onEvent('capturing', (e) => {
+  if (e.payload != null) __perf.t0 = e.payload;
+  showCaptureView();
+  dispatch({ type: 'open' }); // -> capturing phase: spinner, no capture data yet
+  __markPaint();
+});
 
 // Capture results pushed by the Rust hotkey handler (captures the app you were IN).
-onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); __markPaint(); });
+onEvent('capture-ok', (e) => { showCaptureView(); dispatch({ type: 'captured', resource: e.payload.resource, backlinks: e.payload.backlinks ?? [] }); });
 onEvent('capture-err', async (e) => {
   showCaptureView();
   dispatch({ type: 'failed', message: e.payload });
-  __markPaint();
   // If the failure is because a permission is missing, route to setup so the user
   // knows what to fix (rather than just seeing an opaque error).
   const report = await checkPermissions();
