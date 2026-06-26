@@ -1,7 +1,7 @@
 # Satisfies: O3 (CI signed builds). On a release tag, this pipeline builds + tests
 # the core, then SIGNS each release integration bundle with the org's ed25519
 # signing key (a CI secret, never a dev laptop) and SELF-VERIFIES the artifact
-# before uploading it. The signing/verify logic is `hooky_core::release`, proven by
+# before uploading it. The signing/verify logic is `ubilink_core::release`, proven by
 # unit tests in src/release.rs; this workflow is the operational wiring O3 needs.
 # Setup (one-time) is in docs/RUNBOOK-ci-signing.md.
 name: release-signed-build
@@ -30,32 +30,32 @@ jobs:
         run: cargo test --locked
 
       - name: Build signer
-        run: cargo build --locked --release --bin hooky-sign
+        run: cargo build --locked --release --bin ubilink-sign
 
       - name: Sign the release bundle
         env:
           # 64-hex ed25519 signing key. Generate once with `openssl rand -hex 32`
           # and store as a repo/org secret — see docs/RUNBOOK-ci-signing.md.
-          HOOKY_SIGNING_KEY: ${{ secrets.HOOKY_SIGNING_KEY }}
+          UBILINK_SIGNING_KEY: ${{ secrets.UBILINK_SIGNING_KEY }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          ./target/release/hooky-sign sign \
+          ./target/release/ubilink-sign sign \
             --manifest ../plugins/examples/benign/manifest.json \
             --source   ../plugins/examples/benign/plugin.mjs \
             --version  "${GITHUB_RUN_NUMBER}" \
             > dist/benign.signed.json
-          echo "Signed by pubkey: $(./target/release/hooky-sign pubkey)"
+          echo "Signed by pubkey: $(./target/release/ubilink-sign pubkey)"
 
       - name: Self-verify the signed artifact (fail the build if it doesn't validate)
         env:
-          HOOKY_SIGNING_KEY: ${{ secrets.HOOKY_SIGNING_KEY }}
+          UBILINK_SIGNING_KEY: ${{ secrets.UBILINK_SIGNING_KEY }}
         run: |
           set -euo pipefail
           # Trust exactly the key we just signed with; a real consumer would pin the
           # published release pubkey here instead.
-          HOOKY_TRUSTED_KEYS="$(./target/release/hooky-sign pubkey)" \
-            ./target/release/hooky-sign verify --bundle dist/benign.signed.json
+          UBILINK_TRUSTED_KEYS="$(./target/release/ubilink-sign pubkey)" \
+            ./target/release/ubilink-sign verify --bundle dist/benign.signed.json
 
       - name: Upload signed bundle
         uses: actions/upload-artifact@v4

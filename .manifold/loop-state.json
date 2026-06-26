@@ -75,7 +75,7 @@
     },
     {
       "round": 6,
-      "cluster": "m6-integrate: HookyService facade (capture->validate->hook->backlinks)",
+      "cluster": "m6-integrate: UbilinkService facade (capture->validate->hook->backlinks)",
       "constraints_closed": [],
       "satisfied_after": 8,
       "tests": 43,
@@ -98,7 +98,7 @@
       "satisfied_after": 8,
       "tests": 60,
       "progress": "env-surface-reduction",
-      "note": "Human-directed. Built hooky_core::release (JSON wire format + hex-keyed sign/verify reusing R3's proven ed25519 core), the hooky-sign CLI, and .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke. No status flip: O3 stays PARTIAL until a live GitHub Actions run with the org HOOKY_SIGNING_KEY secret (escalated, not faked). docs/RUNBOOK-ci-signing.md."
+      "note": "Human-directed. Built ubilink_core::release (JSON wire format + hex-keyed sign/verify reusing R3's proven ed25519 core), the ubilink-sign CLI, and .github/workflows/release.yml (test->sign->self-verify->upload). 7 unit tests + end-to-end CLI smoke. No status flip: O3 stays PARTIAL until a live GitHub Actions run with the org UBILINK_SIGNING_KEY secret (escalated, not faked). docs/RUNBOOK-ci-signing.md."
     },
     {
       "round": 9,
@@ -108,7 +108,7 @@
       "tests": 65,
       "node_tests": 8,
       "progress": "env-surface-reduction",
-      "note": "Human-directed. No-build vanilla panel in dist/ (zero npm deps -> S2-safe) + Rust PanelBackend command contract over HookyService. Render-first U1 state machine, <=2-action U2 flow, U4 a11y markup/CSS, U5 backlinks, U3 explained errors -- all contract-tested (65 cargo + 8 node). U1/U2/U4 upgraded MISSING->PARTIAL. No SATISFIED flip: p99 timing, VoiceOver/contrast, hotkey + Tauri command wiring need a real display (docs/RUNBOOK-gui-panel.md). Escalated, not faked."
+      "note": "Human-directed. No-build vanilla panel in dist/ (zero npm deps -> S2-safe) + Rust PanelBackend command contract over UbilinkService. Render-first U1 state machine, <=2-action U2 flow, U4 a11y markup/CSS, U5 backlinks, U3 explained errors -- all contract-tested (65 cargo + 8 node). U1/U2/U4 upgraded MISSING->PARTIAL. No SATISFIED flip: p99 timing, VoiceOver/contrast, hotkey + Tauri command wiring need a real display (docs/RUNBOOK-gui-panel.md). Escalated, not faked."
     },
     {
       "round": 10,
@@ -121,7 +121,7 @@
       "tests": 69,
       "node_tests": 8,
       "progress": true,
-      "note": "Human-directed. B3 -> SATISFIED: docs/AUTHORING-INTEGRATIONS.md + `hooky-sign validate` (Manifest::validate, unit-tested) + sign + R3 install + sandbox run \u2014 adding an app touches ZERO core files. B3 is a structural claim with no ENV residual, so it flips honestly (first satisfied-count increase since R5). O2: docs/CAPABILITIES.md generated from the matrix + drift-guarded; in-app data command tested; render stays GUI-ENV-blocked."
+      "note": "Human-directed. B3 -> SATISFIED: docs/AUTHORING-INTEGRATIONS.md + `ubilink-sign validate` (Manifest::validate, unit-tested) + sign + R3 install + sandbox run \u2014 adding an app touches ZERO core files. B3 is a structural claim with no ENV residual, so it flips honestly (first satisfied-count increase since R5). O2: docs/CAPABILITIES.md generated from the matrix + drift-guarded; in-app data command tested; render stays GUI-ENV-blocked."
     },
     {
       "round": 11,
@@ -132,7 +132,7 @@
       "registry_tests": 6,
       "node_tests": 8,
       "progress": "env-surface-reduction",
-      "note": "Human-directed. Built registry/ as a SEPARATE crate (a server can't live in hooky-core under S2; separation keeps the core's no_network_deps guard true). std-only HTTP (zero added deps), reuses hooky-core ed25519 verify + monotonicity. Functional-core/imperative-shell: RegistryIndex + pure handle_request + handle_stream, 6 tests, plus a real-socket smoke (publish/list/search/fetch/untrusted-reject/404). Review process = trusted-key gate, documented in RUNBOOK-registry.md. O4 MISSING->PARTIAL; hosting a governed public instance is the ENV residual, not faked."
+      "note": "Human-directed. Built registry/ as a SEPARATE crate (a server can't live in ubilink-core under S2; separation keeps the core's no_network_deps guard true). std-only HTTP (zero added deps), reuses ubilink-core ed25519 verify + monotonicity. Functional-core/imperative-shell: RegistryIndex + pure handle_request + handle_stream, 6 tests, plus a real-socket smoke (publish/list/search/fetch/untrusted-reject/404). Review process = trusted-key gate, documented in RUNBOOK-registry.md. O4 MISSING->PARTIAL; hosting a governed public instance is the ENV residual, not faked."
     },
     {
       "round": 12,
@@ -144,7 +144,7 @@
       "node_tests": 8,
       "desktop_compiles": true,
       "progress": "env-surface-reduction",
-      "note": "Human-directed. Built desktop/ Tauri crate (separate from hooky-core so the core's S2 no_network_deps guard stays true). #[tauri::command] wrappers over PanelBackend (capture_current routes via frontmost-app detection -> live adapter; capabilities; copy via pbcopy; open; dismiss) + a Cmd/Ctrl+Shift+K global shortcut toggling the panel. COMPILES + links against Tauri v2 + global-shortcut plugin (strong headless verification: the wiring type-checks). T1's 'not wired into Tauri commands' gap is closed in code. Running needs a display (ENV-blocked); make run launches it. satisfied_count stays 9 (no runtime verification)."
+      "note": "Human-directed. Built desktop/ Tauri crate (separate from ubilink-core so the core's S2 no_network_deps guard stays true). #[tauri::command] wrappers over PanelBackend (capture_current routes via frontmost-app detection -> live adapter; capabilities; copy via pbcopy; open; dismiss) + a Cmd/Ctrl+Shift+K global shortcut toggling the panel. COMPILES + links against Tauri v2 + global-shortcut plugin (strong headless verification: the wiring type-checks). T1's 'not wired into Tauri commands' gap is closed in code. Running needs a display (ENV-blocked); make run launches it. satisfied_count stays 9 (no runtime verification)."
     },
     {
       "round": 13,
@@ -155,7 +155,7 @@
       "node_tests": 9,
       "desktop_compiles": true,
       "progress": "env-surface-reduction",
-      "note": "Human-directed, from running the app. Fixed two real bugs running surfaced: panel captured ITSELF (frontmost=hooky once focused) and captured only once at load. Inverted the trigger: Rust hotkey handler captures the previously-frontmost app, emits capture-ok/err to the webview, then shows the panel; re-captures each press. Added S4 onboarding: AXIsProcessTrusted FFI + automation probe -> permission_status command, open_settings (jumps to the privacy pane), a checklist UI with \u2713/\u2717 + Re-check. permissionsComplete() node-tested; onboarding markup Rust-tested; all compiles. Running/granting still needs a Mac (ENV)."
+      "note": "Human-directed, from running the app. Fixed two real bugs running surfaced: panel captured ITSELF (frontmost=ubilink once focused) and captured only once at load. Inverted the trigger: Rust hotkey handler captures the previously-frontmost app, emits capture-ok/err to the webview, then shows the panel; re-captures each press. Added S4 onboarding: AXIsProcessTrusted FFI + automation probe -> permission_status command, open_settings (jumps to the privacy pane), a checklist UI with \u2713/\u2717 + Re-check. permissionsComplete() node-tested; onboarding markup Rust-tested; all compiles. Running/granting still needs a Mac (ENV)."
     },
     {
       "round": 14,
@@ -166,7 +166,7 @@
       "node_tests": 9,
       "desktop_compiles": true,
       "progress": "architecture",
-      "note": "Human-directed, from running + the Linking Manifesto app list. Made live-capture adapters DECLARATIVE: AdapterSpec (app match + osascript + fields + uri/name/path templates with urlencode/basename transforms) + AdapterRegistry (embedded defaults + user adapters.json override). Replaced hardcoded MacAppAdapter/AppKind/app_kind_for. Seeds 10 apps (Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the ~80-app Hookmark list is now reachable as config, no recompile (B3 deepened to the addressing layer). Engine fully unit-tested incl. a guard that every shipped spec's templates render. Per-app live verification still needs a Mac."
+      "note": "Human-directed, from running + the Linking Manifesto app list. Made live-capture adapters DECLARATIVE: AdapterSpec (app match + osascript + fields + uri/name/path templates with urlencode/basename transforms) + AdapterRegistry (embedded defaults + user adapters.json override). Replaced hardcoded MacAppAdapter/AppKind/app_kind_for. Seeds 10 apps (Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Finder, Bear, Things3); the ~80-app list of linking-capable apps is now reachable as config, no recompile (B3 deepened to the addressing layer). Engine fully unit-tested incl. a guard that every shipped spec's templates render. Per-app live verification still needs a Mac."
     },
     {
       "round": 15,
@@ -176,7 +176,7 @@
       "tests": 79,
       "node_tests": 9,
       "progress": "bugfix",
-      "note": "From running: a captured bear:// link was rejected by the S5 scheme allowlist. Fix: AdapterRegistry::declared_schemes() extracts literal scheme prefixes from uri templates; HookyService::allow_schemes feeds them to LinkApi::allow. Adapter schemes are template literals (safe by construction); browser {url} templates still ride the base http/https set, so a javascript: tab is still blocked. S5 stays an allowlist."
+      "note": "From running: a captured bear:// link was rejected by the S5 scheme allowlist. Fix: AdapterRegistry::declared_schemes() extracts literal scheme prefixes from uri templates; UbilinkService::allow_schemes feeds them to LinkApi::allow. Adapter schemes are template literals (safe by construction); browser {url} templates still ride the base http/https set, so a javascript: tab is still blocked. S5 stays an allowlist."
     },
     {
       "round": 16,

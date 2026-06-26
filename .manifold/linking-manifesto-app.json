@@ -973,7 +973,7 @@
       "number": 1,
       "phase": "constrain",
       "timestamp": "2026-06-17T07:23:08Z",
-      "result": "Discovered 23 constraints across 5 categories after reading the Linking Manifesto, confirming the app is an open-source cross-platform Hook.app-style ubiquitous-linking tool, and running a pre-mortem (3 confirmed failure stories).",
+      "result": "Discovered 23 constraints across 5 categories after reading the Linking Manifesto, confirming the app is an open-source cross-platform ubiquitous-linking tool, and running a pre-mortem (3 confirmed failure stories).",
       "constraints_added": 23,
       "by_category": {
         "business": 4,

@@ -14,7 +14,7 @@ the resources a user works with:
 1. **UI** — let users conveniently obtain a link to the currently open or selected resource.
 2. **API** — provide an API to obtain or construct a link to that resource (its address and name).
 
-The reference implementation of this manifesto is the commercial **Hook.app**. `hooky`
+`ubilink`
 is an open-source, cross-platform, extensible realization of the same idea: a hotkey-invoked
 tool that captures a robust link to whatever resource is active in *any* app, stores a
 **bidirectional** graph of links between resources, lets users navigate that graph, and is
