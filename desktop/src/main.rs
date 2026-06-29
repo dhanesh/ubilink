@@ -286,6 +286,20 @@ fn main() {
             #[cfg(target_os = "macos")]
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // Aurora material: a native NSVisualEffectView (HUD vibrancy) behind the
+            // transparent webview, rounded to the panel radius (17px). The CSS panel
+            // surface (--ui-bg, a translucent tint) sits on top of this real blur.
+            #[cfg(target_os = "macos")]
+            if let Some(w) = app.get_webview_window("panel") {
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                let _ = apply_vibrancy(
+                    &w,
+                    NSVisualEffectMaterial::HudWindow,
+                    Some(NSVisualEffectState::Active),
+                    Some(17.0),
+                );
+            }
+
             // With no Dock icon, the menu-bar tray is the always-reachable home for the
             // app: Show (summon the panel) + Quit (the affordance the Dock used to give).
             let show_i = MenuItem::with_id(app, "show", "Show ubilink", true, Some("Cmd+Shift+K"))?;

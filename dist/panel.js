@@ -5,7 +5,7 @@
 // docs/RUNBOOK-gui-panel.md. Capture is driven by 'capture-ok'/'capture-err' events
 // the Rust hotkey handler emits — so it links the app you were IN, every time.
 import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
-import { initialBrowse, reduce as browseReduce, selectedItem, breadcrumb, atRoot, markedUri } from './browse-state.mjs';
+import { initialBrowse, reduce as browseReduce, selectedItem, breadcrumb, atRoot, markedUri, visibleItems } from './browse-state.mjs';
 
 const invoke = (cmd, args) =>
   window.__TAURI__?.core?.invoke
@@ -32,11 +32,11 @@ let __lastFitH = 0;
 function desiredHeight() {
   const padding = 36; // #panel vertical padding
   if (!$('browser').hidden) {
-    const n = Math.max(browse.items.length, 1);
+    const n = Math.max(visibleItems(browse).length, 1);
     const listH = Math.min(n, BROWSER_ROWS) * ROW_H + 8;
-    const trail = $('browser-trail').hidden ? 0 : 24;
+    const search = 42; // the filter input
     const status = $('browser-status').hidden ? 0 : 24;
-    return padding + 34 /*heading*/ + 26 /*hint*/ + 30 /*gaps*/ + trail + status + listH;
+    return padding + 34 /*heading*/ + search + 26 /*hint*/ + 34 /*gaps*/ + status + listH;
   }
   const v = !$('capture').hidden ? $('capture') : $('onboarding');
   return v.scrollHeight + padding; // static views aren't scroll containers — reliable
@@ -111,22 +111,22 @@ function renderBrowser() {
   heading.textContent = atRoot(browse) ? 'Your links' : `Linked to ${trail.join(' › ')}`;
   heading.title = heading.textContent; // full text on hover; the view truncates to one line
   $('browser-trail').hidden = true; // folded into the heading (was redundant + wrapped)
-  $('browser-empty').hidden = browse.items.length !== 0;
 
   const marked = markedUri(browse);
   const statusEl = $('browser-status');
   if (marked) {
     const m = browse.items.find((x) => x.uri === marked);
     statusEl.hidden = false;
-    statusEl.textContent = `Linking from “${m ? m.name || m.uri : '…'}” — move to another and press L (Esc cancels)`;
+    statusEl.textContent = `Linking from “${m ? m.name || m.uri : '…'}” — move to another and press ⌘L (Esc cancels)`;
   } else {
     statusEl.hidden = true;
     statusEl.textContent = '';
   }
 
+  const vis = visibleItems(browse);
   const list = $('browser-list');
   list.replaceChildren();
-  browse.items.forEach((it, i) => {
+  vis.forEach((it, i) => {
     const li = document.createElement('li');
     li.id = `browse-item-${i}`;
     li.setAttribute('role', 'option');
@@ -136,10 +136,12 @@ function renderBrowser() {
     if (selected) li.classList.add('sel');
     if (isMarked) li.classList.add('marked');
 
-    // Alfred-style row: scheme dot · title over dim uri · trailing affordance.
+    // Aurora row: source-icon tile · title over dim uri · trailing affordance.
     const dot = document.createElement('span');
     dot.className = 'dot';
-    dot.style.background = schemeColor(it.uri);
+    const ic = schemeIcon(it.uri);
+    dot.style.background = ic.color;
+    dot.innerHTML = ic.glyph;
 
     const main = document.createElement('span');
     main.className = 'row-main';
@@ -173,8 +175,12 @@ function renderBrowser() {
     li.addEventListener('dblclick', openSelected);
     list.appendChild(li);
   });
-  const has = browse.items.length > 0;
+  const has = vis.length > 0;
   list.setAttribute('aria-activedescendant', has ? `browse-item-${browse.selected}` : '');
+  // empty state: distinguish "no captures yet" from "no filter matches"
+  const empty = $('browser-empty');
+  empty.hidden = has;
+  if (!has) empty.textContent = browse.filter ? 'No links match your filter.' : 'No links captured yet — press ⌘⇧K from a supported app to capture one.';
   fitWindow(); // size the window to the list before scrolling the selection into view
   if (has) document.getElementById(`browse-item-${browse.selected}`)?.scrollIntoView({ block: 'nearest' });
 }
@@ -199,10 +205,27 @@ async function linkMarkedTo(target) {
   }
 }
 
-/** A scheme-keyed accent dot, so rows read at a glance (Alfred's icon column). */
-function schemeColor(uri) {
+// Source-icon tiles (Aurora): a coloured rounded square + a white glyph per source,
+// keyed by URI scheme — Bear=book, Things=check, web=globe, Finder=folder.
+const SRC_GLYPH = {
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a1 1 0 0 1 1 1v15H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1z"/><path d="M17 4l2 1v14l-2-1"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.4l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 14.5l5-5"/><path d="M11.5 6.5l1.3-1.3a3.7 3.7 0 0 1 5.3 5.3L16.8 12"/><path d="M12.5 17.5l-1.3 1.3a3.7 3.7 0 0 1-5.3-5.3L7.2 12"/></svg>',
+};
+function schemeIcon(uri) {
   const s = String(uri).split(':', 1)[0].toLowerCase();
-  return ({ bear: '#e0564f', file: '#9aa0aa', http: '#6ea8fe', https: '#6ea8fe', things: '#5b8def', obsidian: '#a986e0', mailto: '#e0a14f' })[s] || 'var(--accent)';
+  const map = {
+    bear: { color: 'var(--src-bear)', glyph: SRC_GLYPH.book },
+    things: { color: 'var(--src-things)', glyph: SRC_GLYPH.check },
+    file: { color: 'var(--src-finder)', glyph: SRC_GLYPH.folder },
+    http: { color: 'var(--src-web)', glyph: SRC_GLYPH.globe },
+    https: { color: 'var(--src-web)', glyph: SRC_GLYPH.globe },
+    obsidian: { color: '#7c5cff', glyph: SRC_GLYPH.book },
+    mailto: { color: 'var(--src-web)', glyph: SRC_GLYPH.globe },
+  };
+  return map[s] || { color: 'var(--accent)', glyph: SRC_GLYPH.link };
 }
 
 function openSelected() {
@@ -327,30 +350,39 @@ $('recheck').addEventListener('click', () => refreshPermissions({ resetIdle: tru
 $('setup-done').addEventListener('click', () => refreshPermissions({ resetIdle: true }));
 $('open-setup').addEventListener('click', openSetup);
 $('copy').addEventListener('click', confirmCopy);
+$('browser-search').addEventListener('input', (e) => {
+  browse = browseReduce(browse, { type: 'filter', text: e.target.value });
+  renderBrowser();
+});
 document.addEventListener('keydown', (e) => {
   // Link-browser navigation (Cmd+Shift+L view): keyboard-first (U4).
   if (view === 'browser') {
+    const mod = e.metaKey || e.ctrlKey;
     switch (e.key) {
       case 'ArrowDown': e.preventDefault(); browse = browseReduce(browse, { type: 'move', delta: 1 }); renderBrowser(); return;
       case 'ArrowUp': e.preventDefault(); browse = browseReduce(browse, { type: 'move', delta: -1 }); renderBrowser(); return;
       case 'Enter': e.preventDefault(); openSelected(); return;       // open the link
       case 'ArrowRight': e.preventDefault(); drillSelected(); return; // see what it's linked to
-      case 'ArrowLeft': e.preventDefault(); browseBack(); return;     // back out (or dismiss at root)
+      case 'ArrowLeft':
+        if (browse.filter) return;        // editing the filter — let ← move the cursor
+        e.preventDefault(); browseBack(); return;
       case 'l': case 'L': {
+        if (!mod) return;                 // plain 'l' types into the filter; ⌘L links
         e.preventDefault();
         const cur = selectedItem(browse);
         if (!cur) return;
         const m = markedUri(browse);
-        if (m && m !== cur.uri) linkMarkedTo(cur);                    // second L on a different item -> link
-        else { browse = browseReduce(browse, { type: 'mark' }); renderBrowser(); } // first L (or toggle off)
+        if (m && m !== cur.uri) linkMarkedTo(cur);
+        else { browse = browseReduce(browse, { type: 'mark' }); renderBrowser(); }
         return;
       }
       case 'Escape':
         e.preventDefault();
-        if (markedUri(browse)) { browse = browseReduce(browse, { type: 'unmark' }); renderBrowser(); } // cancel link mode first
+        if (markedUri(browse)) { browse = browseReduce(browse, { type: 'unmark' }); renderBrowser(); }       // cancel link mode
+        else if (browse.filter) { $('browser-search').value = ''; browse = browseReduce(browse, { type: 'filter', text: '' }); renderBrowser(); } // clear filter
         else invoke('dismiss_panel').catch(() => {});
         return;
-      default: return;
+      default: return; // printable keys fall through to the focused filter input
     }
   }
   if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C') && canConfirm(state)) { e.preventDefault(); confirmCopy(); } // ⌘C copies
@@ -362,8 +394,9 @@ document.addEventListener('keydown', (e) => {
 onEvent('browse', (e) => {
   browse = browseReduce(initialBrowse(), { type: 'load', items: e.payload ?? [] });
   showBrowserView();
+  $('browser-search').value = '';
   renderBrowser();
-  $('browser-list').focus();
+  $('browser-search').focus(); // type-to-filter; arrows/enter still navigate
 });
 onEvent('browse-err', (e) => { showCaptureView(); dispatch({ type: 'failed', message: e.payload }); });
 

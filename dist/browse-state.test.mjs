@@ -2,7 +2,7 @@
 // node --test — same discipline as panel-state.test.mjs (keeps S2 honest).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { initialBrowse, reduce, selectedItem, breadcrumb, atRoot, markedUri } from './browse-state.mjs';
+import { initialBrowse, reduce, selectedItem, breadcrumb, atRoot, markedUri, visibleItems } from './browse-state.mjs';
 
 const items = (...names) => names.map((n) => ({ name: n, uri: `x://${n}` }));
 
@@ -117,6 +117,36 @@ test('navigation (load/drill/back) clears any pending mark', () => {
   s = reduce(s, { type: 'mark' });
   s = reduce(s, { type: 'load', items: items('A') });
   assert.equal(markedUri(s), null, 'load clears the mark');
+});
+
+test('filter narrows the visible list and selection indexes the filtered view', () => {
+  let s = reduce(initialBrowse(), { type: 'load', items: items('Apple', 'Banana', 'Apricot') });
+  s = reduce(s, { type: 'filter', text: 'ap' }); // matches Apple, Apricot
+  assert.equal(visibleItems(s).length, 2);
+  assert.equal(selectedItem(s).name, 'Apple'); // reset to top of filtered
+  s = reduce(s, { type: 'move', delta: 1 });
+  assert.equal(selectedItem(s).name, 'Apricot');
+  s = reduce(s, { type: 'move', delta: 1 }); // clamped to filtered length
+  assert.equal(selectedItem(s).name, 'Apricot');
+});
+
+test('filter matches uri too, and clears on navigation', () => {
+  let s = reduce(initialBrowse(), { type: 'load', items: items('Note', 'Paper') });
+  s = reduce(s, { type: 'filter', text: 'x://pap' }); // uri match
+  assert.equal(visibleItems(s).length, 1);
+  assert.equal(selectedItem(s).name, 'Paper');
+  s = reduce(s, { type: 'load', items: items('A', 'B') }); // load clears filter
+  assert.equal(s.filter, '');
+  assert.equal(visibleItems(s).length, 2);
+});
+
+test('drilling from a filtered list back-restores the right full-list item', () => {
+  let s = reduce(initialBrowse(), { type: 'load', items: items('Note', 'Paper', 'Photo') });
+  s = reduce(s, { type: 'filter', text: 'photo' }); // only Photo visible, selected
+  s = reduce(s, { type: 'drill', items: items('Note') });
+  s = reduce(s, { type: 'back' });
+  assert.equal(s.filter, '', 'back clears filter');
+  assert.equal(selectedItem(s).name, 'Photo', 'restores the item we drilled from, in the full list');
 });
 
 test('unknown events leave state unchanged', () => {

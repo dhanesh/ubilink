@@ -11,6 +11,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ubilink</title>
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
@@ -70,11 +71,13 @@
            what a link is connected to, Enter opens it. Keyboard-first (U4). -->
       <section id="browser" hidden aria-labelledby="browser-heading">
         <h1 id="browser-heading">Your links</h1>
+        <input id="browser-search" type="text" placeholder="Filter links…"
+               autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter links" />
         <p id="browser-trail" class="trail" aria-live="polite" hidden></p>
         <p id="browser-status" class="status-link" role="status" aria-live="polite" hidden></p>
         <ul id="browser-list" role="listbox" aria-labelledby="browser-heading" tabindex="-1"></ul>
         <p id="browser-empty" class="muted" hidden>No links captured yet — press ⌘⇧K from a supported app to capture one.</p>
-        <p class="hint">↑↓ move · Enter open · → see links · L link · ← back · Esc dismiss</p>
+        <p class="hint">type to filter · ↑↓ move · ↵ open · → links · ⌘L link · ← back · esc</p>
       </section>
     </main>
 

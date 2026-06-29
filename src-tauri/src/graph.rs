@@ -166,10 +166,12 @@ impl LinkGraph {
     /// Every captured resource with its link count — the browser shows the count
     /// on the right so you can see at a glance what's connected and how richly.
     pub fn list_resources_with_counts(&self) -> rusqlite::Result<Vec<(ResourceIdentity, i64)>> {
+        // Newest capture first: rowid increments on first insert and is preserved by
+        // the upsert (ON CONFLICT keeps it), so DESC ≈ most-recently-captured on top.
         let mut stmt = self.conn.prepare(
             "SELECT r.id, r.name, r.uri, r.path, r.content_hash,
                     (SELECT COUNT(*) FROM links l WHERE l.lo_id = r.id OR l.hi_id = r.id)
-             FROM resources r ORDER BY r.name COLLATE NOCASE, r.uri",
+             FROM resources r ORDER BY r.rowid DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((

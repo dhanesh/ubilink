@@ -1,170 +1,176 @@
-/* Satisfies: U1 (no web fonts / no remote assets / no layout thrash so first paint
-   is immediate), U4 (visible focus ring, AA-contrast text on the panel surface,
-   reduced-motion respected). Local-only — no @import, no remote url() (S2). */
-
-:root {
-  --bg: #1b1d22;
-  --fg: #f2f3f5;        /* ~13:1 on --bg — exceeds WCAG AA for body text (U4) */
-  --muted: #b9bec7;     /* ~6.7:1 on --bg — passes AA (U4) */
-  --accent: #6ea8fe;
-  --focus: #ffd166;     /* high-contrast focus ring, distinct from --accent (U4) */
-  --error: #ff8f8f;
-}
+/* Ubilink — Aurora. Consumes design tokens from tokens.css (loaded first).
+   Material = native macOS vibrancy (apply_vibrancy in Rust) behind a translucent
+   --ui-bg surface; light/dark follow the system via tokens.css. Local-only (S2). */
 
 * { box-sizing: border-box; }
-/* `hidden` must always win — id-level `display` rules (e.g. #browser) would
-   otherwise override the UA [hidden]{display:none} and leak both views at once. */
+/* `hidden` must always win over id-level `display` rules (e.g. #browser/#capture). */
 [hidden] { display: none !important; }
 
 html, body {
   margin: 0;
-  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; /* system fonts: zero network */
-  color: var(--fg);
-  background: transparent; /* the window is transparent; #panel paints the surface */
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: 1.45;
+  color: var(--text-1);
+  background: transparent; /* the native NSVisualEffectView shows through */
+  -webkit-font-smoothing: antialiased;
 }
 
-/* The surface: an opaque rounded card filling the transparent window, so the app
-   itself reads as a rounded panel (macOS-style) rather than a square box. */
+/* The HUD surface: a translucent tint over the native blur, soft 17px corners. */
 #panel {
-  padding: 18px 20px;
-  height: 100vh; /* fills the window; the window is sized to the content (see fitWindow) */
+  padding: var(--s-5);
+  height: 100vh; /* fills the content-sized window (see fitWindow) */
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  background: var(--bg);
-  border-radius: 12px;
+  gap: var(--s-4);
+  background: var(--ui-bg);
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border);
+  border-radius: var(--r-panel);
   overflow: hidden;
 }
 
-#resource-name { margin: 0; font-size: 1.15rem; }
-.uri { margin: 0; color: var(--muted); font-size: 0.85rem; word-break: break-all; }
-
-/* The copy action is keyboard-first (⌘C / ↵). The button stays for discoverability
-   + screen readers, but as a quiet secondary chip — not a dominating blue CTA. */
-#copy {
-  align-self: flex-start;
-  padding: 5px 12px;
-  font-size: 0.88rem;
-  color: var(--fg);
-  background: #2a2d35;
-  border: 1px solid #3a3e48;
-  border-radius: 7px;
-  cursor: pointer;
-}
-#copy:disabled { opacity: 0.4; cursor: default; }
-
-/* U4: an unmistakable focus indicator for keyboard users on every interactive element. */
 button:focus-visible,
-a:focus-visible {
-  outline: 3px solid var(--focus);
+a:focus-visible,
+#browser-list:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* ── Onboarding (S4 permission setup) ── */
-#onboarding h1 { margin: 0 0 4px; font-size: 1.2rem; }
-.sub { margin: 0 0 16px; color: var(--muted); }
+/* ── Capture view ── */
+#resource-name { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-semibold); color: var(--text-1); line-height: 1.25; }
+.uri { margin: 0; color: var(--text-3); font-size: var(--fs-meta); font-family: var(--font-mono); word-break: break-all; }
+#status-line { margin: 0; color: var(--text-2); font-size: var(--fs-body); }
+
+/* Aurora primary: system-blue Copy capsule (keyboard ⌘C/↵ also work). */
+#copy {
+  align-self: flex-start;
+  padding: 7px 16px;
+  font-family: var(--font-ui); font-size: var(--fs-body); font-weight: var(--fw-medium);
+  color: #fff; background: var(--accent);
+  border: 0; border-radius: var(--r-control); cursor: pointer;
+}
+#copy:disabled { background: var(--ctrl-bg); color: var(--text-3); cursor: default; }
+
+#error { margin: 0; color: var(--danger); font-size: var(--fs-body); }
+
+#backlinks { margin-top: 4px; }
+#backlinks-heading { margin: 0 0 6px; font-size: var(--fs-meta); font-weight: var(--fw-medium); color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+#backlinks ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#backlinks li { display: flex; }
+#backlinks a {
+  display: block; width: 100%;
+  color: var(--text-1); text-decoration: none; font-size: var(--fs-body);
+  padding: 5px 8px; border-radius: var(--r-row); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#backlinks a:hover { background: var(--row-hover); }
+
+/* hints + keycaps */
+.hint { margin-top: auto; color: var(--text-3); font-size: var(--fs-meta); }
+.linklike { background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent); font: inherit; }
+kbd {
+  display: inline-block; min-width: 1.3em; text-align: center;
+  background: var(--kbd-bg); border: 1px solid var(--kbd-border); color: var(--kbd-text);
+  border-radius: var(--r-kbd); padding: 1px 5px;
+  font-family: var(--font-ui); font-size: var(--fs-meta); line-height: 1.5;
+}
+
+/* ── Onboarding (S4) ── */
+#onboarding h1 { margin: 0 0 4px; font-size: var(--fs-title); font-weight: var(--fw-semibold); color: var(--text-1); }
+.sub { margin: 0 0 16px; color: var(--text-2); font-size: var(--fs-body); }
 #perm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .perm { display: flex; gap: 12px; align-items: flex-start; }
 .perm-body { flex: 1; }
-.perm-body p { margin: 2px 0 8px; color: var(--muted); font-size: 0.9rem; }
-.perm-body strong { font-size: 1rem; }
-kbd {
-  background: #2a2d35; border: 1px solid #3a3e48; border-radius: 4px;
-  padding: 0 5px; font: inherit; font-size: 0.85em;
-}
-/* Status pill: ? unknown, ✗ missing, ✓ granted (set via data-state in panel.js). */
+.perm-body p { margin: 2px 0 8px; color: var(--text-2); font-size: var(--fs-body); }
+.perm-body strong { font-size: var(--fs-body); color: var(--text-1); }
 .perm-status {
   flex: 0 0 1.6em; height: 1.6em; line-height: 1.6em; text-align: center;
-  border-radius: 50%; font-size: 0.9rem; background: #2a2d35; color: var(--muted);
+  border-radius: var(--r-pill); font-size: var(--fs-body); background: var(--ctrl-bg); color: var(--text-2);
 }
-.perm-status[data-state="ok"] { background: #1f3d2a; color: #7fdd9f; }
-.perm-status[data-state="missing"] { background: #4a2330; color: var(--error); }
-.perm[data-perm] button.open-settings {
-  padding: 5px 12px; font-size: 0.85rem; color: var(--fg);
-  background: #2a2d35; border: 1px solid #3a3e48; border-radius: 6px; cursor: pointer;
+.perm-status[data-state="ok"] { background: rgba(48, 209, 88, 0.18); color: var(--green); }
+.perm-status[data-state="missing"] { background: rgba(255, 69, 58, 0.18); color: var(--danger); }
+button.open-settings, #setup-done {
+  padding: 6px 14px; font-size: var(--fs-body); border-radius: var(--r-control); cursor: pointer;
+  color: var(--text-1); background: var(--ctrl-bg); border: 1px solid var(--ctrl-border);
+}
+#grant-accessibility, #recheck {
+  padding: 6px 14px; font-size: var(--fs-body); border-radius: var(--r-control); cursor: pointer;
+  color: #fff; background: var(--accent); border: 0;
 }
 .onboarding-actions { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
-#recheck {
-  padding: 8px 16px; color: #10131a; background: var(--accent);
-  border: 0; border-radius: 8px; cursor: pointer; font-size: 0.95rem;
-}
-#onboarding-hint { color: var(--muted); font-size: 0.85rem; }
+#onboarding-hint { color: var(--text-2); font-size: var(--fs-meta); }
 
-#error { margin: 0; color: var(--error); }
-
-#backlinks ul { margin: 6px 0 0; padding-left: 18px; }
-#backlinks a { color: var(--accent); }
-
-.hint { margin-top: auto; color: var(--muted); font-size: 0.8rem; }
-.linklike {
-  background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--accent); font: inherit; text-decoration: underline;
-}
-
-/* Spinner — pure CSS, honours reduced-motion (U4 / accessibility). */
+/* Spinner */
 #status-line[data-phase="capturing"]::before {
-  content: "";
-  display: inline-block;
-  width: 0.8em; height: 0.8em;
-  margin-right: 8px;
-  border: 2px solid var(--muted);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  vertical-align: -1px;
-  animation: spin 0.7s linear infinite;
+  content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 8px;
+  border: 2px solid var(--text-3); border-top-color: var(--accent); border-radius: 50%;
+  vertical-align: -1px; animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  #status-line[data-phase="capturing"]::before { animation: none; }
-}
+@media (prefers-reduced-motion: reduce) { #status-line[data-phase="capturing"]::before { animation: none; } }
 
-/* ── Link-browser (Cmd+Shift+L) ── */
-#browser { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+/* ── Link-browser (⌘⇧L) ── */
+#browser { display: flex; flex-direction: column; gap: var(--s-3); flex: 1; min-height: 0; }
 #browser-heading {
-  margin: 0; font-size: 1.2rem;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* one line, no wrap */
+  margin: 0; font-size: var(--fs-title); font-weight: var(--fw-semibold); color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.trail { margin: 0; color: var(--muted); font-size: 0.85rem; }
-.muted { color: var(--muted); }
+.trail { margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.muted { color: var(--text-3); font-size: var(--fs-body); }
+.status-link { margin: 0; color: var(--accent); font-size: var(--fs-meta); }
+
+/* Spotlight-style filter field */
+#browser-search {
+  width: 100%; margin: 0; box-sizing: border-box;
+  padding: 8px 12px;
+  font-family: var(--font-ui); font-size: var(--fs-row); color: var(--text-1);
+  background: var(--ctrl-bg); border: 1px solid var(--ctrl-border);
+  border-radius: var(--r-control); outline: none;
+}
+#browser-search::placeholder { color: var(--text-3); }
+#browser-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
 #browser-list {
-  list-style: none; margin: 0; padding: 4px; overflow-y: auto;
-  flex: 1; min-height: 0; /* scrolls within #browser; the WINDOW caps it at ~10 rows */
-  display: flex; flex-direction: column; gap: 2px;
+  list-style: none; margin: 0; padding: 2px; overflow-y: auto;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px;
 }
-#browser-list li { flex: 0 0 auto; } /* never let rows compress to fit */
-/* the blue selection bar is the focus indicator — no outline ring on the list */
-#browser-list:focus, #browser-list:focus-visible { outline: none; }
-/* Alfred-style two-line rows: scheme dot · title over dim uri · trailing key */
+#browser-list:focus { outline: none; }
 #browser-list li {
-  display: flex; align-items: center; gap: 11px;
-  padding: 8px 12px; border-radius: 9px; cursor: pointer;
+  flex: 0 0 auto; display: flex; align-items: center; gap: 11px;
+  padding: 7px 10px; border-radius: var(--r-row); cursor: pointer;
 }
-#browser-list li .dot { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; }
+#browser-list li:hover { background: var(--row-hover); }
+/* source-icon tile: a colored rounded square with a white glyph (app-icon feel) */
+#browser-list li .dot {
+  flex: 0 0 24px; width: 24px; height: 24px; border-radius: var(--r-tile);
+  display: grid; place-items: center; color: #fff;
+}
+#browser-list li .dot svg { width: 15px; height: 15px; display: block; }
 #browser-list li .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 #browser-list li .row-title {
-  font-size: 1.02rem; line-height: 1.3;
+  font-size: var(--fs-row); font-weight: var(--fw-medium); color: var(--text-1); line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #browser-list li .row-sub {
-  font-size: 0.78rem; color: var(--muted);
+  font-size: var(--fs-meta); color: var(--text-3); font-family: var(--font-mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#browser-list li .row-key { flex: 0 0 auto; color: var(--muted); font-size: 0.92rem; }
-/* link-count chip at the extreme right */
+#browser-list li .row-key { flex: 0 0 auto; color: var(--text-3); font-size: var(--fs-body); }
 #browser-list li .row-count {
   flex: 0 0 auto; min-width: 1.5em; text-align: center;
-  padding: 1px 7px; border-radius: 10px; font-size: 0.8rem;
-  background: #2a2d35; color: var(--muted);
+  padding: 1px 7px; border-radius: var(--r-pill); font-size: var(--fs-meta);
+  background: var(--ctrl-bg); color: var(--text-2);
 }
-#browser-list li .row-count.zero { background: transparent; color: #4d525c; } /* unlinked: faint */
-#browser-list li.sel .row-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
-#browser-list li.sel .row-count.zero { background: transparent; color: rgba(255, 255, 255, 0.5); }
-/* Alfred-style solid selection (white on --select ≈ 6.9:1, sub ≈ 5.2:1 — AA) */
-#browser-list li.sel { background: var(--select); }
-#browser-list li.sel .row-title { color: #fff; font-weight: 600; }
-#browser-list li.sel .row-sub { color: rgba(255, 255, 255, 0.82); }
-#browser-list li.sel .row-key { color: rgba(255, 255, 255, 0.92); }
-/* picked up for linking (L): the dot goes focus-yellow with a halo */
-#browser-list li.marked .dot { background: var(--focus) !important; box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.25); }
-#browser-list li.marked .row-key { color: var(--focus); }
-.status-link { margin: 0; color: var(--focus); font-size: 0.85rem; }
+#browser-list li .row-count.zero { background: transparent; color: var(--text-3); }
+/* Aurora selection: translucent blue capsule fill; text stays high-contrast */
+#browser-list li.sel { background: var(--row-selected); }
+#browser-list li.sel .row-title { color: var(--text-1); font-weight: var(--fw-semibold); }
+#browser-list li.sel .row-sub { color: var(--text-2); }
+#browser-list li.sel .row-key { color: var(--text-1); }
+#browser-list li.sel .row-count { background: var(--accent-soft); color: var(--text-1); }
+/* link source (L): an accent ring */
+#browser-list li.marked { box-shadow: inset 0 0 0 1px var(--accent); }
+#browser-list li.marked .dot { box-shadow: 0 0 0 3px var(--accent-soft); }
+#browser-list li.marked .row-key { color: var(--accent); }

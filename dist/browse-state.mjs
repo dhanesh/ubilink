@@ -1,59 +1,70 @@
 // The link-browser view-state: a pure, zero-dep reducer (same discipline as
-// panel-state.mjs) so the whole browse/drill/keyboard model is testable headlessly.
-// browse.js (in panel.js) is the thin DOM/Tauri shell over this.
+// panel-state.mjs) so the whole browse/drill/filter/keyboard model is testable
+// headlessly. browse.js (in panel.js) is the thin DOM/Tauri shell over this.
 //
 // Surfaces the captured link graph (Cmd+Shift+L): a list of resources shown by
-// TITLE (never the raw URI), keyboard navigable (move), with Enter to open and
-// → to drill into "everything linked to this resource". A breadcrumb trail makes
+// TITLE, keyboard navigable, with Enter to open, → to drill into "everything
+// linked to this", and a live FILTER (type to narrow). A breadcrumb trail makes
 // the drill reversible (back).
 //
-// State shape: { items: [{name, uri}], selected: int, trail: [frame], marked: uri|null }
-//   frame = { items, selected, title } — a saved view to restore on `back`.
-//   marked = the uri "picked up" for link-creation (L), or null. Reset on any nav.
-// Events:
-//   {type:'load',  items}  -> fresh list at the top, trail+mark cleared (the L hotkey)
-//   {type:'move',  delta}  -> move the selection, clamped to the list
-//   {type:'drill', items}  -> push the current view, show `items` (links of selection)
-//   {type:'back'}          -> pop the trail, restoring the prior view exactly
-//   {type:'mark'}          -> toggle the selected resource as the link source (L)
+// State: { items:[{name,uri}], selected:int, trail:[frame], marked:uri|null, filter:str }
+//   selected indexes the VISIBLE (filtered) items, not the raw items.
+//   frame = { items, selected(full-index), title } — saved view to restore on `back`.
+// Events: load · move · drill · back · mark · unmark · filter
 
-export const initialBrowse = () => ({ items: [], selected: 0, trail: [], marked: null });
+export const initialBrowse = () => ({ items: [], selected: 0, trail: [], marked: null, filter: '' });
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+/** Items matching the current filter (case-insensitive over title + uri). */
+export function visibleItems(state) {
+  const f = state.filter.trim().toLowerCase();
+  if (!f) return state.items;
+  return state.items.filter((it) => `${it.name} ${it.uri}`.toLowerCase().includes(f));
+}
 
 export function reduce(state, event) {
   switch (event.type) {
     case 'load':
-      return { items: Array.isArray(event.items) ? event.items : [], selected: 0, trail: [], marked: null };
+      return { items: Array.isArray(event.items) ? event.items : [], selected: 0, trail: [], marked: null, filter: '' };
 
     case 'move': {
-      if (state.items.length === 0) return state;
-      const selected = clamp(state.selected + (event.delta | 0), 0, state.items.length - 1);
+      const v = visibleItems(state);
+      if (v.length === 0) return state;
+      const selected = clamp(state.selected + (event.delta | 0), 0, v.length - 1);
       return selected === state.selected ? state : { ...state, selected };
     }
 
+    case 'filter': {
+      const filter = String(event.text ?? '');
+      return filter === state.filter ? state : { ...state, filter, selected: 0 };
+    }
+
     case 'drill': {
-      const current = selectedItem(state);
-      if (!current) return state; // nothing selected -> nothing to drill into
-      const frame = { items: state.items, selected: state.selected, title: current.name };
+      const current = selectedItem(state); // the visible-selected resource
+      if (!current) return state;
+      // store the FULL-items index so `back` restores correctly (filter is cleared)
+      const fullIdx = state.items.findIndex((it) => it.uri === current.uri);
+      const frame = { items: state.items, selected: fullIdx >= 0 ? fullIdx : 0, title: current.name };
       return {
         items: Array.isArray(event.items) ? event.items : [],
         selected: 0,
         trail: [...state.trail, frame],
-        marked: null, // marking is root-scoped; drilling clears it
+        marked: null,
+        filter: '',
       };
     }
 
     case 'back': {
       if (state.trail.length === 0) return state;
       const prev = state.trail[state.trail.length - 1];
-      return { items: prev.items, selected: prev.selected, trail: state.trail.slice(0, -1), marked: null };
+      return { items: prev.items, selected: prev.selected, trail: state.trail.slice(0, -1), marked: null, filter: '' };
     }
 
     case 'mark': {
       const cur = selectedItem(state);
-      if (!cur) return state; // nothing to pick up
-      return { ...state, marked: state.marked === cur.uri ? null : cur.uri }; // toggle
+      if (!cur) return state;
+      return { ...state, marked: state.marked === cur.uri ? null : cur.uri };
     }
 
     case 'unmark':
@@ -64,9 +75,10 @@ export function reduce(state, event) {
   }
 }
 
-/** The currently highlighted resource, or null when the list is empty. */
+/** The currently highlighted (visible) resource, or null. */
 export function selectedItem(state) {
-  return state.items.length ? state.items[state.selected] : null;
+  const v = visibleItems(state);
+  return v.length ? v[state.selected] : null;
 }
 
 /** Titles of the resources we've drilled through, outermost first. */
