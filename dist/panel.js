@@ -38,8 +38,9 @@ function desiredHeight() {
     const status = $('browser-status').hidden ? 0 : 24;
     return padding + 34 /*heading*/ + search + 26 /*hint*/ + 34 /*gaps*/ + status + listH;
   }
-  const v = !$('capture').hidden ? $('capture') : $('onboarding');
-  return v.scrollHeight + padding; // static views aren't scroll containers — reliable
+  // static views (capture / onboarding / settings) aren't scroll containers — measure directly
+  const v = !$('capture').hidden ? $('capture') : !$('settings').hidden ? $('settings') : $('onboarding');
+  return v.scrollHeight + padding;
 }
 function fitWindow() {
   const h = Math.max(96, Math.ceil(desiredHeight()));
@@ -51,9 +52,12 @@ function fitWindow() {
 }
 
 // ── section switching ──
-function showCaptureView() { $('onboarding').hidden = true; $('browser').hidden = true; $('capture').hidden = false; view = 'capture'; }
-function showOnboarding() { $('capture').hidden = true; $('browser').hidden = true; $('onboarding').hidden = false; view = 'onboarding'; }
-function showBrowserView() { $('onboarding').hidden = true; $('capture').hidden = true; $('browser').hidden = false; view = 'browser'; }
+const VIEWS = ['onboarding', 'capture', 'browser', 'settings'];
+function showOnly(id) { for (const v of VIEWS) $(v).hidden = v !== id; }
+function showCaptureView() { showOnly('capture'); view = 'capture'; }
+function showOnboarding() { showOnly('onboarding'); view = 'onboarding'; }
+function showBrowserView() { showOnly('browser'); view = 'browser'; }
+function showSettingsView() { showOnly('settings'); view = 'settings'; }
 
 // ── capture view rendering ──
 function render() {
@@ -228,6 +232,55 @@ function schemeIcon(uri) {
   return map[s] || { color: 'var(--accent)', glyph: SRC_GLYPH.link };
 }
 
+// ── Settings (⌘⇧,) ──
+function renderSettingsStats(stats) {
+  const el = $('set-stats');
+  if (stats && typeof stats.resources === 'number') {
+    el.textContent = `${stats.resources} link${stats.resources === 1 ? '' : 's'} · ${stats.links} connection${stats.links === 1 ? '' : 's'}`;
+  } else {
+    el.textContent = '—';
+  }
+}
+async function openSettings(stats) {
+  showSettingsView();
+  // permission pills
+  const report = await checkPermissions();
+  const setPill = (id, ok) => { const p = $(id); p.dataset.state = ok ? 'ok' : 'missing'; p.textContent = ok ? 'Granted' : 'Not granted'; };
+  if (report) { setPill('set-acc', report.accessibility === true); setPill('set-auto', report.automation === 'granted'); }
+  // stats (use the pushed payload, else fetch)
+  renderSettingsStats(stats ?? (await invoke('graph_stats').catch(() => null)));
+  $('set-reset-confirm').hidden = true;
+  $('set-feedback').hidden = true;
+  fitWindow();
+}
+async function settingsExport() {
+  try {
+    const path = await invoke('export_graph');
+    const fb = $('set-feedback'); fb.hidden = false; fb.textContent = `Exported to ${path}`;
+  } catch (e) { const fb = $('set-feedback'); fb.hidden = false; fb.textContent = `Export failed: ${e?.message ?? e}`; }
+}
+function settingsImportPick() { $('set-import-file').click(); }
+async function settingsImportFile(file) {
+  const fb = $('set-feedback'); fb.hidden = false;
+  if (!file) return;
+  try {
+    const json = await file.text();
+    const summary = await invoke('import_graph', { json });
+    renderSettingsStats(await invoke('graph_stats').catch(() => null));
+    fb.textContent = summary; // e.g. "Imported 12 links · 5 connections"
+    fitWindow();
+  } catch (e) { fb.textContent = `Import failed: ${e?.message ?? e}`; }
+}
+async function settingsReset() {
+  try {
+    const removed = await invoke('reset_graph');
+    $('set-reset-confirm').hidden = true;
+    renderSettingsStats(await invoke('graph_stats').catch(() => null));
+    const fb = $('set-feedback'); fb.hidden = false; fb.textContent = `Deleted ${removed} link${removed === 1 ? '' : 's'}.`;
+    fitWindow();
+  } catch (e) { const fb = $('set-feedback'); fb.hidden = false; fb.textContent = `Reset failed: ${e?.message ?? e}`; }
+}
+
 function openSelected() {
   const it = selectedItem(browse);
   if (it) invoke('open_link', { uri: it.uri }).catch(reportError);
@@ -354,7 +407,20 @@ $('browser-search').addEventListener('input', (e) => {
   browse = browseReduce(browse, { type: 'filter', text: e.target.value });
   renderBrowser();
 });
+// Settings actions
+$('set-open-perms').addEventListener('click', openSetup);
+$('set-export').addEventListener('click', settingsExport);
+$('set-import').addEventListener('click', settingsImportPick);
+$('set-import-file').addEventListener('change', (e) => { settingsImportFile(e.target.files?.[0]); e.target.value = ''; });
+$('set-reset').addEventListener('click', () => { $('set-reset-confirm').hidden = false; $('set-feedback').hidden = true; fitWindow(); });
+$('set-reset-no').addEventListener('click', () => { $('set-reset-confirm').hidden = true; fitWindow(); });
+$('set-reset-yes').addEventListener('click', settingsReset);
 document.addEventListener('keydown', (e) => {
+  // Settings: Esc closes (back to capture).
+  if (view === 'settings') {
+    if (e.key === 'Escape') { e.preventDefault(); if (!$('set-reset-confirm').hidden) { $('set-reset-confirm').hidden = true; fitWindow(); } else invoke('dismiss_panel').catch(() => {}); }
+    return;
+  }
   // Link-browser navigation (Cmd+Shift+L view): keyboard-first (U4).
   if (view === 'browser') {
     const mod = e.metaKey || e.ctrlKey;
@@ -399,6 +465,9 @@ onEvent('browse', (e) => {
   $('browser-search').focus(); // type-to-filter; arrows/enter still navigate
 });
 onEvent('browse-err', (e) => { showCaptureView(); dispatch({ type: 'failed', message: e.payload }); });
+
+// Cmd+Shift+, : open Settings (payload = current graph stats, or null).
+onEvent('settings', (e) => { openSettings(e.payload); });
 
 // Render-first (U1): the hotkey handler fires 'capturing' BEFORE running capture, so
 // the spinner paints immediately. The optional payload is t0 (epoch-ms, UBILINK_PERF

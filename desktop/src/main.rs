@@ -41,8 +41,9 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
         .for_app(&frontmost)
         .ok_or_else(|| format!("Linking from \u{201c}{}\u{201d} isn't supported yet.", frontmost.trim()))?;
     let adapter = ConfiguredAdapter::new(spec.clone(), OsaScriptRunner);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     let mut b = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
-    b.capture_current(&adapter)
+    b.capture_current(&adapter, now)
 }
 
 #[tauri::command]
@@ -71,6 +72,51 @@ fn link_resources(state: State<'_, AppState>, a_uri: String, b_uri: String) -> R
     let created_at = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64);
     let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     backend.link_resources(&a_uri, &b_uri, created_at)
+}
+
+/// Settings: resource + link counts.
+#[tauri::command]
+fn graph_stats(state: State<'_, AppState>) -> Result<ubilink_core::GraphStats, String> {
+    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.graph_stats()
+}
+
+/// Settings: wipe the graph (destructive — the webview confirms first). Returns
+/// the number of resources removed.
+#[tauri::command]
+fn reset_graph(state: State<'_, AppState>) -> Result<i64, String> {
+    let mut backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.reset_graph()
+}
+
+/// Settings: export the graph as JSON to ~/Downloads, returning the written path.
+#[tauri::command]
+fn export_graph(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let json = {
+        let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+        backend.export_graph()?
+    };
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .map_err(|e| format!("couldn't resolve a save directory: {e}"))?;
+    // No clock in core; stamp the filename from the OS time here.
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let path = dir.join(format!("ubilink-export-{stamp}.json"));
+    std::fs::write(&path, json).map_err(|e| format!("couldn't write export: {e}"))?;
+    let p = path.to_string_lossy().to_string();
+    // Reveal it in Finder so the user sees where it went.
+    let _ = std::process::Command::new("open").arg("-R").arg(&p).spawn();
+    Ok(p)
+}
+
+/// Settings: import a graph-export JSON (read by the webview's file input).
+/// Merges into the current graph; returns a human summary.
+#[tauri::command]
+fn import_graph(state: State<'_, AppState>, json: String) -> Result<String, String> {
+    let mut backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    backend.import_graph(&json)
 }
 
 /// In-app capability disclosure (O2): what linking works where.
@@ -347,6 +393,9 @@ fn main() {
             // Cmd+Shift+L opens the link-browser (K = capture, L = browse).
             let browse = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyL);
             let browse_for_handler = browse;
+            // Cmd+Shift+Comma opens Settings (⌘, is reserved by macOS for the menu).
+            let settings = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Comma);
+            let settings_for_handler = settings;
             let plugin = tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_for_handler && event.state() == ShortcutState::Pressed {
@@ -413,6 +462,21 @@ fn main() {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
+                    } else if shortcut == &settings_for_handler && event.state() == ShortcutState::Pressed {
+                        if let Some(w) = app.get_webview_window("panel") {
+                            // Cmd+Shift+, : open Settings. Push the current graph stats.
+                            let stats = {
+                                let state = app.state::<AppState>();
+                                let backend = state.backend.lock();
+                                match backend {
+                                    Ok(b) => b.graph_stats().ok(),
+                                    Err(_) => None,
+                                }
+                            };
+                            let _ = w.emit("settings", stats);
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
                     }
                 })
                 .build();
@@ -425,6 +489,9 @@ fn main() {
                 if let Err(e) = app.global_shortcut().register(browse) {
                     eprintln!("[ubilink] couldn't register Cmd+Shift+L (browse): {e}");
                 }
+                if let Err(e) = app.global_shortcut().register(settings) {
+                    eprintln!("[ubilink] couldn't register Cmd+Shift+, (settings): {e}");
+                }
             }
             Ok(())
         })
@@ -434,6 +501,10 @@ fn main() {
             links_of,
             link_resources,
             resize_panel,
+            graph_stats,
+            reset_graph,
+            export_graph,
+            import_graph,
             capabilities,
             copy_to_clipboard,
             open_link,

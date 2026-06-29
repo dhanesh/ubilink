@@ -26,6 +26,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # S3/RT-10: asymmetric signatures for integration bundles (publishers sign,
 # app verifies with the publisher's public key — the model for an open registry).
 ed25519-dalek = "2"
+# Universally-unique stable ids for resources (RT-1 alias used by export/import).
+# v4 = random; getrandom is already in the tree via ed25519-dalek. Not a network dep.
+uuid = { version = "1", features = ["v4"] }
 
 [[test]]
 name = "sandbox"

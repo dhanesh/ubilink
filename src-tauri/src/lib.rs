@@ -51,7 +51,7 @@ pub use integrations::{Installer, InstallError, SignedBundle, sign_bundle};
 pub use live_capture::{CommandRunner, OsaScriptRunner, probe_automation_permission, FRONTMOST_APP_SCRIPT};
 pub use adapters_config::{AdapterRegistry, AdapterSpec, ConfiguredAdapter};
 pub use release::{public_hex, sign_to_json, signing_key_from_hex, verify_json, SignError, WireBundle};
-pub use panel::{BrowseEntry, LinkView, PanelBackend, PanelView};
+pub use panel::{BrowseEntry, GraphStats, LinkView, PanelBackend, PanelView};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
 pub use graph::LinkGraph;
 pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};

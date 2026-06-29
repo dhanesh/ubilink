@@ -79,6 +79,45 @@
         <p id="browser-empty" class="muted" hidden>No links captured yet — press ⌘⇧K from a supported app to capture one.</p>
         <p class="hint">type to filter · ↑↓ move · ↵ open · → links · ⌘L link · ← back · esc</p>
       </section>
+
+      <!-- Settings (Cmd+Shift+,): permissions, data export, and reset. -->
+      <section id="settings" hidden aria-labelledby="settings-heading">
+        <h1 id="settings-heading">Settings</h1>
+
+        <div class="set-group">
+          <h2 class="set-label">Permissions</h2>
+          <div class="set-row">
+            <div class="set-text"><strong>Accessibility</strong><span class="set-sub">Script app menus (e.g. Bear).</span></div>
+            <span class="set-pill" id="set-acc" data-state="unknown">…</span>
+          </div>
+          <div class="set-row">
+            <div class="set-text"><strong>Automation</strong><span class="set-sub">Read the active app's link.</span></div>
+            <span class="set-pill" id="set-auto" data-state="unknown">…</span>
+          </div>
+          <button type="button" id="set-open-perms" class="set-btn">Open permission setup…</button>
+        </div>
+
+        <div class="set-group">
+          <h2 class="set-label">Database</h2>
+          <p class="set-stat" id="set-stats">—</p>
+          <div class="set-actions">
+            <button type="button" id="set-export" class="set-btn">Export…</button>
+            <button type="button" id="set-import" class="set-btn">Import…</button>
+            <button type="button" id="set-reset" class="set-btn danger">Reset…</button>
+            <input type="file" id="set-import-file" accept="application/json,.json" hidden />
+          </div>
+          <p class="set-confirm" id="set-reset-confirm" hidden>
+            Delete all captured links and connections? <strong>This cannot be undone.</strong>
+            <span class="set-actions">
+              <button type="button" id="set-reset-yes" class="set-btn danger">Delete everything</button>
+              <button type="button" id="set-reset-no" class="set-btn">Cancel</button>
+            </span>
+          </p>
+          <p class="set-feedback" id="set-feedback" role="status" aria-live="polite" hidden></p>
+        </div>
+
+        <p class="hint">esc to close</p>
+      </section>
     </main>
 
     <script type="module" src="panel.js"></script>

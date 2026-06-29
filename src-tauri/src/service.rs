@@ -76,7 +76,9 @@ impl UbilinkService {
 
     /// Capture a link to the resource an adapter is bound to: permission gate
     /// (S4/TN7) -> bounded API validation (S5). The single "get a link" path.
-    pub fn capture(&mut self, adapter: &dyn ResourceAdapter) -> Result<ResourceIdentity, ServiceError> {
+    /// `now` (ms, caller-supplied — core has no clock) stamps the capture time so
+    /// re-capturing a resource resurfaces it to the top of the list.
+    pub fn capture(&mut self, adapter: &dyn ResourceAdapter, now: i64) -> Result<ResourceIdentity, ServiceError> {
         let raw = capture_active(adapter, self.permission).map_err(ServiceError::Capture)?;
         // Re-validate the adapter's output through the bounded API (defense in depth:
         // even a trusted adapter's URI is size/scheme-checked, S5/SC-1).
@@ -92,9 +94,8 @@ impl UbilinkService {
             })
             .map_err(ServiceError::Validation)?;
         // Persist the capture so the link-browser (Cmd+Shift+L) can list every link
-        // you've grabbed — not just ones that happen to be linked to something.
-        // Idempotent upsert keyed by URI, so re-capturing the same resource is a no-op.
-        self.graph.upsert_resource(&id).map_err(|e| ServiceError::Store(e.to_string()))?;
+        // you've grabbed. Upsert keyed by URI — re-capturing bumps updated_at.
+        self.graph.upsert_resource(&id, now).map_err(|e| ServiceError::Store(e.to_string()))?;
         Ok(id)
     }
 
@@ -111,8 +112,9 @@ impl UbilinkService {
         target: &dyn ResourceAdapter,
         created_at: Option<i64>,
     ) -> Result<Link, ServiceError> {
-        let a = self.capture(active)?;
-        let b = self.capture(target)?;
+        let now = created_at.unwrap_or(0);
+        let a = self.capture(active, now)?;
+        let b = self.capture(target, now)?;
         self.link(&a, &b, created_at)
     }
 
@@ -129,6 +131,22 @@ impl UbilinkService {
     /// Link two already-captured resources by uri (the browser's "L" action).
     pub fn link_existing(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> Result<(), ServiceError> {
         self.graph.link_existing(a_uri, b_uri, created_at).map_err(|e| ServiceError::Store(e.to_string()))
+    }
+
+    /// Settings: counts, destructive reset, and JSON export of the whole graph.
+    pub fn stats(&self) -> Result<(i64, i64), ServiceError> {
+        let r = self.graph.resource_count().map_err(|e| ServiceError::Store(e.to_string()))?;
+        let l = self.graph.link_count().map_err(|e| ServiceError::Store(e.to_string()))?;
+        Ok((r, l))
+    }
+    pub fn reset(&mut self) -> Result<i64, ServiceError> {
+        self.graph.clear().map_err(|e| ServiceError::Store(e.to_string()))
+    }
+    pub fn export(&self) -> Result<String, ServiceError> {
+        self.graph.export_json().map_err(|e| ServiceError::Store(e.to_string()))
+    }
+    pub fn import(&mut self, json: &str) -> Result<(usize, usize), ServiceError> {
+        self.graph.import_json(json).map_err(ServiceError::Store)
     }
 
     /// Every captured resource with its link count (browser list).
@@ -206,7 +224,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let f = FileAdapter::new(tmp_file(&dir, "x.md", b"abc"));
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
-        let id = svc.capture(&f).unwrap();
+        let id = svc.capture(&f, 1).unwrap();
         assert!(id.content_hash.is_some(), "content hash lost through validation");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -228,7 +246,7 @@ mod tests {
         }
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
             .with_permission(PermissionState::Denied);
-        let err = svc.capture(&LiveAdapter).unwrap_err();
+        let err = svc.capture(&LiveAdapter, 1).unwrap_err();
         assert!(!err.message().trim().is_empty(), "U3: empty error message");
     }
 

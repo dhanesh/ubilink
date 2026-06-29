@@ -50,6 +50,13 @@ impl From<(ResourceIdentity, i64)> for BrowseEntry {
     }
 }
 
+/// Graph counts for the Settings panel.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct GraphStats {
+    pub resources: i64,
+    pub links: i64,
+}
+
 /// Backs the Tauri command layer. Wraps the integrated service so the panel's logic
 /// is testable headlessly.
 pub struct PanelBackend {
@@ -64,8 +71,8 @@ impl PanelBackend {
     /// The `capture_current` command: capture the active resource (permission-gated,
     /// S4) and surface its existing backlinks (U5). On any failure, return the
     /// user-facing explanation (U3) as `Err` — the webview shows it, never silence.
-    pub fn capture_current(&mut self, adapter: &dyn ResourceAdapter) -> Result<PanelView, String> {
-        let id = self.service.capture(adapter).map_err(|e| e.message())?;
+    pub fn capture_current(&mut self, adapter: &dyn ResourceAdapter, now: i64) -> Result<PanelView, String> {
+        let id = self.service.capture(adapter, now).map_err(|e| e.message())?;
         let backlinks = self
             .service
             .backlinks(&id.uri)
@@ -110,6 +117,29 @@ impl PanelBackend {
         self.service.link_existing(a_uri, b_uri, created_at).map_err(|e| e.message())
     }
 
+    /// Settings (`graph_stats`): resource + link counts for the Settings panel.
+    pub fn graph_stats(&self) -> Result<GraphStats, String> {
+        let (resources, links) = self.service.stats().map_err(|e| e.message())?;
+        Ok(GraphStats { resources, links })
+    }
+
+    /// Settings (`reset_graph`): wipe the whole graph. Returns resources removed.
+    pub fn reset_graph(&mut self) -> Result<i64, String> {
+        self.service.reset().map_err(|e| e.message())
+    }
+
+    /// Settings (`export_graph`): the whole graph as a JSON string.
+    pub fn export_graph(&self) -> Result<String, String> {
+        self.service.export().map_err(|e| e.message())
+    }
+
+    /// Settings (`import_graph`): merge a graph-export JSON in. Returns a short
+    /// human summary of what was imported.
+    pub fn import_graph(&mut self, json: &str) -> Result<String, String> {
+        let (r, l) = self.service.import(json).map_err(|e| e.message())?;
+        Ok(format!("Imported {r} link{} · {l} connection{}", if r == 1 { "" } else { "s" }, if l == 1 { "" } else { "s" }))
+    }
+
     /// The `capabilities` command (O2): the supported app/platform/mechanism set,
     /// serialized for the webview to disclose what works where.
     pub fn capabilities(&self) -> Vec<crate::capabilities::Support> {
@@ -130,15 +160,44 @@ mod tests {
     }
 
     #[test]
+    fn settings_stats_export_and_reset() {
+        let dir = std::env::temp_dir().join(format!("ubilink-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        let a = svc.capture(&FileAdapter::new(tmp(&dir, "A.md")), 1).unwrap();
+        let b = svc.capture(&FileAdapter::new(tmp(&dir, "B.md")), 1).unwrap();
+        svc.link(&a, &b, Some(1)).unwrap();
+        let mut panel = PanelBackend::new(svc);
+
+        let stats = panel.graph_stats().unwrap();
+        assert_eq!(stats.resources, 2);
+        assert_eq!(stats.links, 1);
+
+        let json = panel.export_graph().unwrap();
+        assert!(json.contains("ubilink.graph.v3") && json.contains("\"uri\":"));
+
+        let removed = panel.reset_graph().unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(panel.graph_stats().unwrap(), GraphStats { resources: 0, links: 0 });
+        assert!(panel.list_links().unwrap().is_empty());
+
+        // import the earlier export back into the now-empty graph
+        let summary = panel.import_graph(&json).unwrap();
+        assert!(summary.contains("Imported 2 links"), "summary: {summary}");
+        assert_eq!(panel.graph_stats().unwrap(), GraphStats { resources: 2, links: 1 });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn list_links_and_links_of_back_the_browser() {
         // The link-browser (Cmd+Shift+L): list every resource by title, and drill
         // into one to see everything linked to it.
         let dir = std::env::temp_dir().join(format!("ubilink-browse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
-        let note = svc.capture(&FileAdapter::new(tmp(&dir, "Note.md"))).unwrap();
-        let paper = svc.capture(&FileAdapter::new(tmp(&dir, "Paper.pdf"))).unwrap();
-        let solo = svc.capture(&FileAdapter::new(tmp(&dir, "Solo.txt"))).unwrap(); // captured, never linked
+        let note = svc.capture(&FileAdapter::new(tmp(&dir, "Note.md")), 1).unwrap();
+        let paper = svc.capture(&FileAdapter::new(tmp(&dir, "Paper.pdf")), 1).unwrap();
+        let solo = svc.capture(&FileAdapter::new(tmp(&dir, "Solo.txt")), 1).unwrap(); // captured, never linked
         svc.link(&note, &paper, Some(1)).unwrap();
 
         let panel = PanelBackend::new(svc);
@@ -172,12 +231,12 @@ mod tests {
         let paper = FileAdapter::new(tmp(&dir, "Paper.pdf"));
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         // pre-link note <-> paper
-        let a = svc.capture(&note).unwrap();
-        let b = svc.capture(&paper).unwrap();
+        let a = svc.capture(&note, 1).unwrap();
+        let b = svc.capture(&paper, 1).unwrap();
         svc.link(&a, &b, Some(1)).unwrap();
 
         let mut panel = PanelBackend::new(svc);
-        let view = panel.capture_current(&note).unwrap();
+        let view = panel.capture_current(&note, 1).unwrap();
         assert_eq!(view.resource.uri, a.uri);
         assert_eq!(view.backlinks.len(), 1, "U5: the note must surface its backlink");
         assert_eq!(view.backlinks[0].uri, b.uri);
@@ -200,7 +259,7 @@ mod tests {
         let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
             .with_permission(PermissionState::Denied);
         let mut panel = PanelBackend::new(svc);
-        let err = panel.capture_current(&LiveAdapter).unwrap_err();
+        let err = panel.capture_current(&LiveAdapter, 1).unwrap_err();
         assert!(!err.trim().is_empty(), "U3: empty explanation");
     }
 

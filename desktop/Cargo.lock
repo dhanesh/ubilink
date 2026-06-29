@@ -3818,6 +3818,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -3829,6 +3830,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "ubilink-core",
+ "window-vibrancy",
 ]
 
 [[package]]
