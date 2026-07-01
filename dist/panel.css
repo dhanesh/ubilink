@@ -6,6 +6,13 @@
 /* `hidden` must always win over id-level `display` rules (e.g. #browser/#capture). */
 [hidden] { display: none !important; }
 
+/* Static views must NOT shrink inside the flex #panel: under the initial small
+   window they'd be flex-compressed and report a too-small scrollHeight, so
+   fitWindow would never grow the window (onboarding/settings get chopped). With
+   flex:0 0 auto they render at natural height → scrollHeight is truthful.
+   (#browser is intentionally flex:1 — its list scrolls.) */
+#capture, #onboarding, #settings { flex: 0 0 auto; }
+
 html, body {
   margin: 0;
   font-family: var(--font-ui);
@@ -188,6 +195,11 @@ button.open-settings, #setup-done {
   flex: 0 0 auto; padding: 2px 10px; border-radius: var(--r-pill); font-size: var(--fs-meta); font-weight: var(--fw-medium);
   background: var(--ctrl-bg); color: var(--text-2);
 }
+/* Plugin manager: reuse the .set-row look for each app toggle. */
+.set-plugins { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.set-plugin { display: flex; align-items: center; gap: var(--s-3); padding: 6px 8px; border-radius: var(--r-row); background: var(--ctrl-bg); }
+.set-toggle { flex: 0 0 auto; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.set-toggle:disabled { cursor: default; opacity: 0.5; }
 .set-pill[data-state="ok"] { background: rgba(48, 209, 88, 0.18); color: var(--green); }
 .set-pill[data-state="missing"] { background: rgba(255, 69, 58, 0.18); color: var(--danger); }
 .set-stat { margin: 0; color: var(--text-2); font-size: var(--fs-body); }

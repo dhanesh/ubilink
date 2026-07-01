@@ -27,5 +27,7 @@ ubilink-core = { path = "../src-tauri" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
+# plugins-state.json (which third-party plugins the user turned off) — tiny std-only JSON.
+serde_json = "1"
 # Aurora material: native macOS NSVisualEffectView vibrancy behind the panel.
 window-vibrancy = "0.6"

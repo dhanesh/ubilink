@@ -45,6 +45,11 @@ pub struct AdapterSpec {
     /// Whether capturing needs OS automation permission (live apps do).
     #[serde(default = "default_true")]
     pub needs_permission: bool,
+    /// Built-in = a default-macOS app (Safari, Finder) shipped as core, always on
+    /// and not removable. Everything else is a third-party "plugin": listed in the
+    /// plugin manager, toggleable on/off, and (future) installable.
+    #[serde(default)]
+    pub builtin: bool,
 }
 
 fn default_true() -> bool {
@@ -238,6 +243,11 @@ impl AdapterRegistry {
         self.specs.iter().map(|s| s.app.as_str()).collect()
     }
 
+    /// All adapter specs (the plugin manager lists these: app + builtin flag).
+    pub fn specs(&self) -> &[AdapterSpec] {
+        &self.specs
+    }
+
     /// The literal URI schemes the adapters declare (e.g. `bear`, `things`, `file`).
     /// Only templates that BEGIN with a literal scheme count — a `{url}` template
     /// has a dynamic scheme (http/https), which the bounded API already trusts. The
@@ -363,7 +373,7 @@ mod tests {
             name: "{title}".into(),
             path: None,
             schemes: vec![],
-            needs_permission: true,
+            needs_permission: true, builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("https://example.com/x\tExample\n".into())));
         let id = a.capture().unwrap();
@@ -382,7 +392,7 @@ mod tests {
             name: "{path|basename}".into(),
             path: Some("{path}".into()),
             schemes: vec![],
-            needs_permission: true,
+            needs_permission: true, builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("/Users/me/Docs/Report.pdf".into())));
         let id = a.capture().unwrap();
@@ -402,7 +412,7 @@ mod tests {
             name: "{title}".into(),
             path: None,
             schemes: vec![],
-            needs_permission: true,
+            needs_permission: true, builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("My Note: ideas".into())));
         let id = a.capture().unwrap();
@@ -415,7 +425,7 @@ mod tests {
         let spec = AdapterSpec {
             app: "Safari".into(), script: "…".into(), delimiter: Some("\t".into()),
             fields: vec!["url".into(), "title".into()], uri: "{url}".into(), name: "{title}".into(),
-            path: None, schemes: vec![], needs_permission: true,
+            path: None, schemes: vec![], needs_permission: true, builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("   \n".into())));
         match a.capture().unwrap_err() {

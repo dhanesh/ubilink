@@ -26,6 +26,42 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 struct AppState {
     backend: Mutex<PanelBackend>,
     adapters: AdapterRegistry,
+    /// App names (lowercased) of third-party plugins the user has turned OFF.
+    /// Built-in adapters can't be disabled, so they never appear here.
+    disabled: Mutex<std::collections::HashSet<String>>,
+    /// Where plugins-state.json lives (so toggles persist across launches).
+    data_dir: std::path::PathBuf,
+}
+
+/// One row in the plugin manager: a supported app, whether it's a built-in
+/// default-macOS adapter or a third-party plugin, and whether it's enabled.
+#[derive(serde::Serialize, Clone)]
+struct PluginView {
+    app: String,
+    builtin: bool,
+    enabled: bool,
+    scheme: Option<String>,
+}
+
+/// Read the persisted set of disabled plugin app-names (lowercased). Missing/garbled
+/// file → empty (everything enabled). Tiny std-only JSON via serde_json.
+fn load_disabled(data_dir: &std::path::Path) -> std::collections::HashSet<String> {
+    let path = data_dir.join("plugins-state.json");
+    let Ok(text) = std::fs::read_to_string(path) else { return Default::default() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Default::default() };
+    v.get("disabled")
+        .and_then(|d| d.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).map(|s| s.to_ascii_lowercase()).collect())
+        .unwrap_or_default()
+}
+
+/// Persist the disabled set. Best-effort (a failed write just means the toggle
+/// won't survive a restart — surfaced as the command's error).
+fn save_disabled(data_dir: &std::path::Path, disabled: &std::collections::HashSet<String>) -> Result<(), String> {
+    let mut list: Vec<&String> = disabled.iter().collect();
+    list.sort();
+    let body = serde_json::json!({ "disabled": list });
+    std::fs::write(data_dir.join("plugins-state.json"), body.to_string()).map_err(|e| e.to_string())
 }
 
 /// Capture the resource of whatever app is frontmost RIGHT NOW: detect it, look up
@@ -40,6 +76,14 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
         .adapters
         .for_app(&frontmost)
         .ok_or_else(|| format!("Linking from \u{201c}{}\u{201d} isn't supported yet.", frontmost.trim()))?;
+    // Honor the plugin manager: a third-party plugin the user turned OFF behaves as
+    // unsupported (built-ins can't be disabled, so they always pass).
+    if !spec.builtin {
+        let disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+        if disabled.contains(&spec.app.to_ascii_lowercase()) {
+            return Err(format!("Linking from \u{201c}{}\u{201d} is turned off in Settings.", spec.app));
+        }
+    }
     let adapter = ConfiguredAdapter::new(spec.clone(), OsaScriptRunner);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     let mut b = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
@@ -124,6 +168,49 @@ fn import_graph(state: State<'_, AppState>, json: String) -> Result<String, Stri
 fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
     let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
     Ok(backend.capabilities())
+}
+
+/// Settings › Plugins: every adapter as a toggle row (built-in vs third-party,
+/// enabled/disabled). Sorted case-insensitively by app name for a stable list.
+#[tauri::command]
+fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
+    let disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let mut rows: Vec<PluginView> = state
+        .adapters
+        .specs()
+        .iter()
+        .map(|s| PluginView {
+            app: s.app.clone(),
+            builtin: s.builtin,
+            // Built-ins are always on; a third-party plugin is on unless the user disabled it.
+            enabled: s.builtin || !disabled.contains(&s.app.to_ascii_lowercase()),
+            scheme: s.schemes.first().cloned(),
+        })
+        .collect();
+    rows.sort_by(|a, b| a.app.to_ascii_lowercase().cmp(&b.app.to_ascii_lowercase()));
+    Ok(rows)
+}
+
+/// Settings › Plugins: toggle a third-party plugin on/off and persist it. Built-in
+/// adapters (core macOS apps ubilink ships with) can't be disabled.
+#[tauri::command]
+fn set_plugin_enabled(state: State<'_, AppState>, app: String, enabled: bool) -> Result<(), String> {
+    let is_builtin = state
+        .adapters
+        .specs()
+        .iter()
+        .any(|s| s.app.eq_ignore_ascii_case(&app) && s.builtin);
+    if is_builtin && !enabled {
+        return Err(format!("{app} is a built-in adapter and can't be disabled."));
+    }
+    let key = app.to_ascii_lowercase();
+    let mut disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    if enabled {
+        disabled.remove(&key);
+    } else {
+        disabled.insert(key);
+    }
+    save_disabled(&state.data_dir, &disabled)
 }
 
 /// U2: put the link on the clipboard (macOS `pbcopy`, no extra plugin/dep).
@@ -317,11 +404,15 @@ fn main() {
             // The bounded API (S5) must trust the schemes the adapters declare
             // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
             let schemes = adapters.declared_schemes();
+            // Which third-party plugins has the user turned off? Persisted across launches.
+            let disabled = load_disabled(&data_dir);
             app.manage(AppState {
                 backend: Mutex::new(PanelBackend::new(
                     UbilinkService::new(graph).with_permission(permission).allow_schemes(schemes),
                 )),
                 adapters,
+                disabled: Mutex::new(disabled),
+                data_dir,
             });
 
             // U1 render-first: run as an Accessory app (overlay-style, like Spotlight/
@@ -506,6 +597,8 @@ fn main() {
             export_graph,
             import_graph,
             capabilities,
+            list_plugins,
+            set_plugin_enabled,
             copy_to_clipboard,
             open_link,
             dismiss_panel,
@@ -515,4 +608,46 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ubilink desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_disabled, save_disabled};
+    use std::collections::HashSet;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        // Unique per test (name + pid) so parallel test threads don't clobber each other.
+        let d = std::env::temp_dir().join(format!("ubilink-plugins-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn disabled_set_round_trips() {
+        let dir = tmp_dir("roundtrip");
+        let mut set = HashSet::new();
+        set.insert("bear".to_string());
+        set.insert("things3".to_string());
+        save_disabled(&dir, &set).unwrap();
+        let back = load_disabled(&dir);
+        assert_eq!(back, set);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_file_is_empty() {
+        // A never-written data dir → nothing disabled (everything enabled).
+        let dir = std::env::temp_dir().join("ubilink-plugins-nonexistent-xyz");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(load_disabled(&dir).is_empty());
+    }
+
+    #[test]
+    fn garbled_file_is_empty() {
+        // A corrupt plugins-state.json must not panic — degrade to "all enabled".
+        let dir = tmp_dir("garbled");
+        std::fs::write(dir.join("plugins-state.json"), b"{ not json").unwrap();
+        assert!(load_disabled(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -247,11 +247,55 @@ async function openSettings(stats) {
   const report = await checkPermissions();
   const setPill = (id, ok) => { const p = $(id); p.dataset.state = ok ? 'ok' : 'missing'; p.textContent = ok ? 'Granted' : 'Not granted'; };
   if (report) { setPill('set-acc', report.accessibility === true); setPill('set-auto', report.automation === 'granted'); }
+  // plugin toggles (Settings › Plugins)
+  await renderPlugins();
   // stats (use the pushed payload, else fetch)
   renderSettingsStats(stats ?? (await invoke('graph_stats').catch(() => null)));
   $('set-reset-confirm').hidden = true;
   $('set-feedback').hidden = true;
   fitWindow();
+}
+
+// Render the plugin manager: one toggle row per adapter. Built-ins are shown but
+// locked on; third-party plugins toggle set_plugin_enabled (persisted in Rust).
+async function renderPlugins() {
+  const ul = $('set-plugins');
+  if (!ul) return;
+  let plugins = [];
+  try { plugins = (await invoke('list_plugins')) ?? []; } catch { plugins = []; }
+  ul.innerHTML = '';
+  for (const p of plugins) {
+    const li = document.createElement('li');
+    li.className = 'set-plugin';
+
+    const label = document.createElement('div');
+    label.className = 'set-text';
+    const name = document.createElement('strong');
+    name.textContent = p.app;
+    const sub = document.createElement('span');
+    sub.className = 'set-sub';
+    sub.textContent = p.builtin ? 'Built-in' : (p.scheme ? `${p.scheme}: link` : 'Third-party');
+    label.append(name, sub);
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.className = 'set-toggle';
+    toggle.checked = p.enabled;
+    toggle.disabled = p.builtin; // built-ins are always on
+    toggle.setAttribute('aria-label', `Enable ${p.app}`);
+    toggle.addEventListener('change', async () => {
+      try {
+        await invoke('set_plugin_enabled', { app: p.app, enabled: toggle.checked });
+      } catch (e) {
+        toggle.checked = !toggle.checked; // revert on failure
+        const fb = $('set-feedback'); fb.hidden = false;
+        fb.textContent = `Couldn't update ${p.app}: ${e?.message ?? e}`;
+      }
+    });
+
+    li.append(label, toggle);
+    ul.appendChild(li);
+  }
 }
 async function settingsExport() {
   try {

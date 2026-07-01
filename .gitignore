@@ -50,3 +50,18 @@ dist-ssr/
 .context/
 # Added by code-review-graph
 .code-review-graph/
+
+.world-model/
+
+# ── AI coding-agent scaffolding (local/per-user, not shared) ──
+.claude/
+.cursor/
+.cursorrules
+.kiro/
+.mcp.json
+.opencode.json
+.serena/
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+GEMINI.md

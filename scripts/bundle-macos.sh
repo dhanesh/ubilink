@@ -65,9 +65,53 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Validate the plist, then ad-hoc sign (stable identity by path -> TCC grant sticks).
+# Validate the plist, then sign with a STABLE self-signed identity so macOS TCC
+# (Accessibility/Automation) keeps the grant across rebuilds. Ad-hoc signing
+# (`--sign -`) gives a fresh code-hash each rebuild with no stable "designated
+# requirement", so TCC drops the grant whenever the binary changes. A self-signed
+# cert — created once in the login keychain, reused forever — gives the app a
+# consistent identity, so you grant permissions ONCE and they persist.
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
-codesign --force --sign - "$APP"
+
+SIGN_IDENTITY="Ubilink Self-Signed"
+if ! security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
+  echo "[bundle] creating a one-time self-signed code-signing identity ($SIGN_IDENTITY)…"
+  # Build a code-signing cert non-interactively and import it into the login keychain.
+  TMP="$(mktemp -d)"
+  cat > "$TMP/req.cnf" <<CNF
+[ req ]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3
+[ dn ]
+CN = $SIGN_IDENTITY
+[ v3 ]
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+basicConstraints = critical, CA:false
+CNF
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/req.cnf" >/dev/null 2>&1
+  # -legacy + a transport password: Apple's `security` can't verify the PKCS12 MAC
+  # that OpenSSL 3.x writes by default, and rejects an empty-password p12. A legacy
+  # MAC with a throwaway password imports cleanly (the password only protects the
+  # temp file, never stored).
+  openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+    -name "$SIGN_IDENTITY" -out "$TMP/id.p12" -passout pass:ubilink-bundle >/dev/null 2>&1
+  # -T /usr/bin/codesign pre-authorizes codesign to use the key (first sign may show
+  # a one-time keychain prompt — click "Always Allow").
+  security import "$TMP/id.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
+    -P "ubilink-bundle" -T /usr/bin/codesign >/dev/null 2>&1
+  rm -rf "$TMP"
+fi
+
+if security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
+  codesign --force --sign "$SIGN_IDENTITY" "$APP"
+  echo "[bundle] signed with stable identity '$SIGN_IDENTITY' — TCC grants persist across rebuilds."
+else
+  echo "[bundle] WARNING: self-signed identity unavailable; falling back to ad-hoc (grants reset on rebuild)."
+  codesign --force --sign - "$APP"
+fi
 
 echo "[bundle] done: $APP"
 echo "[bundle] grant Accessibility + Automation to THIS app once (drag it into the"

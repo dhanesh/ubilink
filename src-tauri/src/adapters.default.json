@@ -3,81 +3,122 @@
     "app": "Safari",
     "script": "tell application \"Safari\" to return (URL of current tab of front window) & \"\\t\" & (name of current tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": true
   },
   {
     "app": "Google Chrome",
     "script": "tell application \"Google Chrome\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Arc",
     "script": "tell application \"Arc\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Brave Browser",
     "script": "tell application \"Brave Browser\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Microsoft Edge",
     "script": "tell application \"Microsoft Edge\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Vivaldi",
     "script": "tell application \"Vivaldi\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Opera",
     "script": "tell application \"Opera\" to return (URL of active tab of front window) & \"\\t\" & (title of active tab of front window)",
     "delimiter": "\t",
-    "fields": ["url", "title"],
+    "fields": [
+      "url",
+      "title"
+    ],
     "uri": "{url}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   },
   {
     "app": "Finder",
     "script": "tell application \"Finder\" to return POSIX path of (target of front window as alias)",
-    "fields": ["path"],
+    "fields": [
+      "path"
+    ],
     "uri": "file://{path}",
     "name": "{path|basename}",
-    "path": "{path}"
+    "path": "{path}",
+    "builtin": true
   },
   {
     "app": "Bear",
     "script": "tell application \"System Events\" to tell process \"Bear\"\n\tset frontmost to true\n\tclick menu item \"Copy Link\" of menu \"Note\" of menu bar 1\nend tell\ndelay 0.2\nset theLink to (the clipboard as text)\nset AppleScript's text item delimiters to \"id=\"\nset idPart to last text item of theLink\nset AppleScript's text item delimiters to \"&\"\nset noteId to first text item of idPart\nset AppleScript's text item delimiters to \"\"\nset dbPath to (POSIX path of (path to home folder)) & \"Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear/Application Data/database.sqlite\"\nset theTitle to \"\"\ntry\n\tset theTitle to do shell script \"sqlite3 -readonly \" & quoted form of dbPath & \" \" & quoted form of (\"SELECT ZTITLE FROM ZSFNOTE WHERE ZUNIQUEIDENTIFIER='\" & noteId & \"' LIMIT 1;\")\nend try\nreturn theTitle & tab & theLink",
     "delimiter": "\t",
-    "fields": ["title", "link"],
+    "fields": [
+      "title",
+      "link"
+    ],
     "uri": "{link|mdurl}",
     "name": "{title}",
-    "schemes": ["bear"]
+    "schemes": [
+      "bear"
+    ],
+    "builtin": false
   },
   {
     "app": "Things3",
     "script": "tell application \"Things3\" to return (id of item 1 of (selected to dos)) & \"\\t\" & (name of item 1 of (selected to dos))",
     "delimiter": "\t",
-    "fields": ["id", "title"],
+    "fields": [
+      "id",
+      "title"
+    ],
     "uri": "things:///show?id={id}",
-    "name": "{title}"
+    "name": "{title}",
+    "builtin": false
   }
 ]
