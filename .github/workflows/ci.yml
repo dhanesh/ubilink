@@ -1,0 +1,54 @@
+# R2 (agent-ready-rails): green-CI ground truth. Runs the SAME verifier as
+# `make verify` on every PR and every push to main, so an ordinary change can't
+# land unverified. macOS runner because the product is macOS-only — the desktop
+# crate uses osascript, TCC/ApplicationServices FFI, window-vibrancy, and the
+# sandbox-exec net jail, none of which build/run on Linux. LOCKED=--locked pins
+# the committed lockfiles for reproducibility.
+#
+# (release.yml stays separate: it signs + publishes on version tags. This is the
+# per-change gate; that is the release pipeline.)
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (save CI minutes on rapid pushes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) + rustfmt + clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Cache the (heavy) Tauri dependency tree so desktop builds don't cold-start.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            registry
+            desktop
+
+      - name: Set up Node (test-js + the sandbox tests spawn `node --permission`)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # One command, the same one developers run locally. LOCKED enforces the
+      # committed Cargo.lock files; manifold isn't installed on CI, so verify-spec
+      # skips cleanly (by design — it's not a failure).
+      - name: make verify
+        run: make verify LOCKED=--locked

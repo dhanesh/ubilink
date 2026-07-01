@@ -7,13 +7,16 @@
 #                   out of the core)
 #   • dist/       — the panel UI (hand-authored ES modules; no bundler)
 #
-# NOTE on `run`: the full macOS desktop app needs the Tauri shell wired up
-# (the `tauri` crate + #[tauri::command] wrappers + a global shortcut). That step
-# is ENV-blocked and documented in docs/RUNBOOK-gui-panel.md — it is NOT built yet.
-# Until then `make run` serves the panel UI for preview, and `make run-registry`
-# runs the registry service. Both are real, runnable artifacts.
+# The macOS desktop app IS wired up (desktop/ — the Tauri shell, #[tauri::command]
+# wrappers, global hotkey). `make run` builds and launches it (needs a desktop
+# session + Accessibility/Automation grants — see docs/RUNBOOK-gui-panel.md).
+# `make run-ui` serves the panel UI in a plain browser for quick preview, and
+# `make run-registry` runs the registry service.
 
 CARGO    ?= cargo
+# CI sets LOCKED=--locked so build/test/clippy pin to the committed lockfiles
+# (reproducible, no silent dep drift). Empty locally for dev ergonomics.
+LOCKED   ?=
 NODE     ?= node
 PYTHON   ?= python3
 CORE     := src-tauri/Cargo.toml
@@ -23,7 +26,8 @@ UI_DIR   := dist
 UI_PORT  ?= 1420
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-release build-desktop bundle test test-rust test-js validate check \
+.PHONY: help build build-release build-desktop bundle test test-rust test-js test-desktop \
+        validate verify verify-fmt verify-clippy verify-spec check \
         run run-desktop run-ui run-registry fmt clean
 
 help: ## Show available targets
@@ -31,32 +35,59 @@ help: ## Show available targets
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
 
 build: ## Build all crates (debug): core lib, ubilink-sign, ubilink-registry
-	$(CARGO) build --manifest-path $(CORE)
-	$(CARGO) build --manifest-path $(REGISTRY)
+	$(CARGO) build $(LOCKED) --manifest-path $(CORE)
+	$(CARGO) build $(LOCKED) --manifest-path $(REGISTRY)
 
 build-release: ## Build all crates optimized (release)
-	$(CARGO) build --release --manifest-path $(CORE)
-	$(CARGO) build --release --manifest-path $(REGISTRY)
+	$(CARGO) build $(LOCKED) --release --manifest-path $(CORE)
+	$(CARGO) build $(LOCKED) --release --manifest-path $(REGISTRY)
 
 build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
-	$(CARGO) build --manifest-path $(DESKTOP)
+	$(CARGO) build $(LOCKED) --manifest-path $(DESKTOP)
 
 bundle: ## Build a signed macOS ubilink.app (stable path so TCC grants persist)
 	bash scripts/bundle-macos.sh
 
-test: test-rust test-js ## Run every test suite (Rust core + registry, then JS panel)
+test: test-rust test-js ## Run the fast suites (Rust core + registry, then JS panel)
 
 test-rust: ## cargo test for the core and registry crates
-	$(CARGO) test --manifest-path $(CORE)
-	$(CARGO) test --manifest-path $(REGISTRY)
+	$(CARGO) test $(LOCKED) --manifest-path $(CORE)
+	$(CARGO) test $(LOCKED) --manifest-path $(REGISTRY)
 
 test-js: ## node --test for the panel view-state reducer (zero deps)
 	$(NODE) --test '$(UI_DIR)/*.test.mjs'
 
+test-desktop: ## cargo test for the Tauri desktop crate (heavy: pulls the Tauri dep tree)
+	$(CARGO) test $(LOCKED) --manifest-path $(DESKTOP)
+
 validate: ## Validate the Manifold spec (needs the `manifold` CLI)
 	manifold validate linking-manifesto-app
 
-check: build test validate ## Full local verification: build + all tests + spec validate
+# ── The verifier (R1): ONE command that proves a change is sound. fmt-check +
+# clippy(-D warnings) + all tests across EVERY crate (core, registry, desktop) and
+# the JS panel + optional spec validation. This is the merge gate — CI runs the
+# SAME target (with LOCKED=--locked), so "green locally" means "green in CI".
+verify: verify-fmt verify-clippy test test-desktop verify-spec ## Full agent/CI gate: fmt+lint+test all crates + JS + spec
+	@echo "[verify] all checks passed ✓"
+
+verify-fmt: ## Fail if any crate is unformatted (non-mutating; run 'make fmt' to fix)
+	$(CARGO) fmt --manifest-path $(CORE) --check
+	$(CARGO) fmt --manifest-path $(REGISTRY) --check
+	$(CARGO) fmt --manifest-path $(DESKTOP) --check
+
+verify-clippy: ## Lint every crate; warnings are errors
+	$(CARGO) clippy $(LOCKED) --manifest-path $(CORE) --all-targets -- -D warnings
+	$(CARGO) clippy $(LOCKED) --manifest-path $(REGISTRY) --all-targets -- -D warnings
+	$(CARGO) clippy $(LOCKED) --manifest-path $(DESKTOP) --all-targets -- -D warnings
+
+verify-spec: ## Validate the Manifold spec IF the CLI is present (skips cleanly in a bare env)
+	@if command -v manifold >/dev/null 2>&1; then \
+	  manifold validate linking-manifesto-app; \
+	else \
+	  echo "[verify] manifold CLI not found — skipping spec validation (not a failure)"; \
+	fi
+
+check: verify ## Alias for 'verify' (the full gate)
 
 run: run-desktop ## Run the local OS app (the Tauri desktop panel; needs a desktop session)
 
