@@ -70,15 +70,47 @@ impl CapabilityMatrix {
         use LinkMechanism::*;
         use Platform::*;
         CapabilityMatrix::new(vec![
-            Support { app: "Finder".into(), platform: MacOS, mechanism: FilePath },
-            Support { app: "Safari".into(), platform: MacOS, mechanism: AppleScript },
-            Support { app: "Obsidian".into(), platform: MacOS, mechanism: UrlScheme },
-            Support { app: "Obsidian".into(), platform: Windows, mechanism: UrlScheme },
-            Support { app: "Obsidian".into(), platform: Linux, mechanism: UrlScheme },
+            Support {
+                app: "Finder".into(),
+                platform: MacOS,
+                mechanism: FilePath,
+            },
+            Support {
+                app: "Safari".into(),
+                platform: MacOS,
+                mechanism: AppleScript,
+            },
+            Support {
+                app: "Obsidian".into(),
+                platform: MacOS,
+                mechanism: UrlScheme,
+            },
+            Support {
+                app: "Obsidian".into(),
+                platform: Windows,
+                mechanism: UrlScheme,
+            },
+            Support {
+                app: "Obsidian".into(),
+                platform: Linux,
+                mechanism: UrlScheme,
+            },
             // Files are linkable everywhere via path — the universal floor.
-            Support { app: "Files".into(), platform: MacOS, mechanism: FilePath },
-            Support { app: "Files".into(), platform: Windows, mechanism: FilePath },
-            Support { app: "Files".into(), platform: Linux, mechanism: FilePath },
+            Support {
+                app: "Files".into(),
+                platform: MacOS,
+                mechanism: FilePath,
+            },
+            Support {
+                app: "Files".into(),
+                platform: Windows,
+                mechanism: FilePath,
+            },
+            Support {
+                app: "Files".into(),
+                platform: Linux,
+                mechanism: FilePath,
+            },
         ])
     }
 
@@ -114,7 +146,10 @@ impl CapabilityMatrix {
                 fallback_note(&fallback),
             ),
         };
-        Capability::Unsupported { explanation, fallback }
+        Capability::Unsupported {
+            explanation,
+            fallback,
+        }
     }
 
     /// Every supported (app, platform) pair — for the published matrix (O2).
@@ -176,7 +211,9 @@ pub fn mechanism_name(m: LinkMechanism) -> &'static str {
 
 fn fallback_note(fallback: &Option<LinkMechanism>) -> String {
     match fallback {
-        Some(LinkMechanism::FilePath) => "If the resource is a file, you can still link it by path.".into(),
+        Some(LinkMechanism::FilePath) => {
+            "If the resource is a file, you can still link it by path.".into()
+        }
         Some(m) => format!("A fallback is available via {m:?}."),
         None => "No fallback is available for this resource.".into(),
     }
@@ -205,8 +242,14 @@ mod tests {
         let m = CapabilityMatrix::baseline();
         let cap = m.capability("SomeRandomApp", Platform::MacOS);
         match cap {
-            Capability::Unsupported { explanation, fallback } => {
-                assert!(!explanation.trim().is_empty(), "U3 violated: empty explanation");
+            Capability::Unsupported {
+                explanation,
+                fallback,
+            } => {
+                assert!(
+                    !explanation.trim().is_empty(),
+                    "U3 violated: empty explanation"
+                );
                 assert!(explanation.contains("SomeRandomApp"));
                 // macOS has a FilePath row, so a file fallback is offered.
                 assert_eq!(fallback, Some(LinkMechanism::FilePath));
@@ -223,7 +266,10 @@ mod tests {
         let cap = m.capability("Safari", Platform::Windows);
         match cap {
             Capability::Unsupported { explanation, .. } => {
-                assert!(explanation.contains("MacOS"), "should name where it DOES work: {explanation}");
+                assert!(
+                    explanation.contains("MacOS"),
+                    "should name where it DOES work: {explanation}"
+                );
             }
             other => panic!("expected Unsupported, got {other:?}"),
         }
@@ -234,7 +280,10 @@ mod tests {
         // B1's universal floor: a file is linkable everywhere.
         let m = CapabilityMatrix::baseline();
         for p in [Platform::MacOS, Platform::Windows, Platform::Linux] {
-            assert_eq!(m.capability("Files", p), Capability::Supported(LinkMechanism::FilePath));
+            assert_eq!(
+                m.capability("Files", p),
+                Capability::Supported(LinkMechanism::FilePath)
+            );
         }
     }
 
@@ -248,12 +297,16 @@ mod tests {
         assert!(md.contains("| Obsidian | macOS | URL scheme |"));
         assert!(md.contains("| Files | Windows | File path |"));
         // one body row per supported pair (exclude the header + the `---` separator).
-        let is_data = |l: &&str| l.starts_with("| ") && !l.starts_with("| App ") && !l.contains("---");
+        let is_data =
+            |l: &&str| l.starts_with("| ") && !l.starts_with("| App ") && !l.contains("---");
         let body_rows = md.lines().filter(is_data).count();
         assert_eq!(body_rows, CapabilityMatrix::baseline().supported().len());
         // sorted: Files < Finder < Obsidian < Safari (case-insensitive) — Files first.
         let first = md.lines().find(is_data).unwrap();
-        assert!(first.contains("Files"), "rows must be sorted by app: {first}");
+        assert!(
+            first.contains("Files"),
+            "rows must be sorted by app: {first}"
+        );
     }
 
     #[test]
@@ -273,8 +326,10 @@ mod tests {
         // matrix changes without regenerating, this fails — the published disclosure
         // can never silently diverge from the code that enforces it.
         let generated = CapabilityMatrix::baseline().to_markdown();
-        let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/CAPABILITIES.md");
-        let committed = std::fs::read_to_string(&doc_path).unwrap_or_else(|e| panic!("read {}: {e}", doc_path.display()));
+        let doc_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/CAPABILITIES.md");
+        let committed = std::fs::read_to_string(&doc_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", doc_path.display()));
         assert_eq!(
             committed, generated,
             "docs/CAPABILITIES.md is stale — regenerate it from CapabilityMatrix::to_markdown()"

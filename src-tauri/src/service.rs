@@ -78,7 +78,11 @@ impl UbilinkService {
     /// (S4/TN7) -> bounded API validation (S5). The single "get a link" path.
     /// `now` (ms, caller-supplied — core has no clock) stamps the capture time so
     /// re-capturing a resource resurfaces it to the top of the list.
-    pub fn capture(&mut self, adapter: &dyn ResourceAdapter, now: i64) -> Result<ResourceIdentity, ServiceError> {
+    pub fn capture(
+        &mut self,
+        adapter: &dyn ResourceAdapter,
+        now: i64,
+    ) -> Result<ResourceIdentity, ServiceError> {
         let raw = capture_active(adapter, self.permission).map_err(ServiceError::Capture)?;
         // Re-validate the adapter's output through the bounded API (defense in depth:
         // even a trusted adapter's URI is size/scheme-checked, S5/SC-1).
@@ -95,14 +99,23 @@ impl UbilinkService {
             .map_err(ServiceError::Validation)?;
         // Persist the capture so the link-browser (Cmd+Shift+L) can list every link
         // you've grabbed. Upsert keyed by URI — re-capturing bumps updated_at.
-        self.graph.upsert_resource(&id, now).map_err(|e| ServiceError::Store(e.to_string()))?;
+        self.graph
+            .upsert_resource(&id, now)
+            .map_err(|e| ServiceError::Store(e.to_string()))?;
         Ok(id)
     }
 
     /// Link two captured resources bidirectionally (RT-4). `created_at` supplied by
     /// the caller (the core has no clock).
-    pub fn link(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> Result<Link, ServiceError> {
-        self.graph.link(a, b, created_at).map_err(|e| ServiceError::Store(e.to_string()))
+    pub fn link(
+        &mut self,
+        a: &ResourceIdentity,
+        b: &ResourceIdentity,
+        created_at: Option<i64>,
+    ) -> Result<Link, ServiceError> {
+        self.graph
+            .link(a, b, created_at)
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// The full flow: capture both ends via their adapters, then link them.
@@ -120,30 +133,51 @@ impl UbilinkService {
 
     /// Backlinks of a resource — from EITHER endpoint (U5).
     pub fn backlinks(&self, uri: &str) -> Result<Vec<ResourceIdentity>, ServiceError> {
-        self.graph.backlinks(uri).map_err(|e| ServiceError::Store(e.to_string()))
+        self.graph
+            .backlinks(uri)
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Every captured resource (the link-browser's top level, Cmd+Shift+L).
     pub fn list_resources(&self) -> Result<Vec<ResourceIdentity>, ServiceError> {
-        self.graph.list_resources().map_err(|e| ServiceError::Store(e.to_string()))
+        self.graph
+            .list_resources()
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Link two already-captured resources by uri (the browser's "L" action).
-    pub fn link_existing(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> Result<(), ServiceError> {
-        self.graph.link_existing(a_uri, b_uri, created_at).map_err(|e| ServiceError::Store(e.to_string()))
+    pub fn link_existing(
+        &self,
+        a_uri: &str,
+        b_uri: &str,
+        created_at: Option<i64>,
+    ) -> Result<(), ServiceError> {
+        self.graph
+            .link_existing(a_uri, b_uri, created_at)
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Settings: counts, destructive reset, and JSON export of the whole graph.
     pub fn stats(&self) -> Result<(i64, i64), ServiceError> {
-        let r = self.graph.resource_count().map_err(|e| ServiceError::Store(e.to_string()))?;
-        let l = self.graph.link_count().map_err(|e| ServiceError::Store(e.to_string()))?;
+        let r = self
+            .graph
+            .resource_count()
+            .map_err(|e| ServiceError::Store(e.to_string()))?;
+        let l = self
+            .graph
+            .link_count()
+            .map_err(|e| ServiceError::Store(e.to_string()))?;
         Ok((r, l))
     }
     pub fn reset(&mut self) -> Result<i64, ServiceError> {
-        self.graph.clear().map_err(|e| ServiceError::Store(e.to_string()))
+        self.graph
+            .clear()
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
     pub fn export(&self) -> Result<String, ServiceError> {
-        self.graph.export_json().map_err(|e| ServiceError::Store(e.to_string()))
+        self.graph
+            .export_json()
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
     pub fn import(&mut self, json: &str) -> Result<(usize, usize), ServiceError> {
         self.graph.import_json(json).map_err(ServiceError::Store)
@@ -151,12 +185,19 @@ impl UbilinkService {
 
     /// Every captured resource with its link count (browser list).
     pub fn list_resources_with_counts(&self) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
-        self.graph.list_resources_with_counts().map_err(|e| ServiceError::Store(e.to_string()))
+        self.graph
+            .list_resources_with_counts()
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Backlinks of `uri`, each with its own link count (browser drill-in).
-    pub fn linked_with_counts(&self, uri: &str) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
-        self.graph.linked_with_counts(uri).map_err(|e| ServiceError::Store(e.to_string()))
+    pub fn linked_with_counts(
+        &self,
+        uri: &str,
+    ) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
+        self.graph
+            .linked_with_counts(uri)
+            .map_err(|e| ServiceError::Store(e.to_string()))
     }
 
     /// Capability for an app on the current platform (RT-7 / U3): drives whether
@@ -209,8 +250,18 @@ mod tests {
 
         let note_uri = format!("file://{}", dir.join("Note.md").to_string_lossy());
         let paper_uri = format!("file://{}", dir.join("Paper.pdf").to_string_lossy());
-        let from_note: Vec<String> = svc.backlinks(&note_uri).unwrap().into_iter().map(|r| r.uri).collect();
-        let from_paper: Vec<String> = svc.backlinks(&paper_uri).unwrap().into_iter().map(|r| r.uri).collect();
+        let from_note: Vec<String> = svc
+            .backlinks(&note_uri)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.uri)
+            .collect();
+        let from_paper: Vec<String> = svc
+            .backlinks(&paper_uri)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.uri)
+            .collect();
         assert_eq!(from_note, vec![paper_uri.clone()]);
         assert_eq!(from_paper, vec![note_uri.clone()]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -225,7 +276,10 @@ mod tests {
         let f = FileAdapter::new(tmp_file(&dir, "x.md", b"abc"));
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         let id = svc.capture(&f, 1).unwrap();
-        assert!(id.content_hash.is_some(), "content hash lost through validation");
+        assert!(
+            id.content_hash.is_some(),
+            "content hash lost through validation"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -235,13 +289,20 @@ mod tests {
         // user-facing ServiceError, never a silent failure or panic.
         struct LiveAdapter;
         impl ResourceAdapter for LiveAdapter {
-            fn id(&self) -> &str { "safari.macos" }
-            fn needs_permission(&self) -> bool { true }
+            fn id(&self) -> &str {
+                "safari.macos"
+            }
+            fn needs_permission(&self) -> bool {
+                true
+            }
             fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
                 unreachable!("gate must block before capture")
             }
             fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
-                OpenPlan { program: "open".into(), args: vec![r.uri.clone()] }
+                OpenPlan {
+                    program: "open".into(),
+                    args: vec![r.uri.clone()],
+                }
             }
         }
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
@@ -255,7 +316,9 @@ mod tests {
         // RT-7 / U3: capability query for an unknown app returns an explanation.
         let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         match svc.capability("TotallyUnknownApp") {
-            Capability::Unsupported { explanation, .. } => assert!(explanation.contains("TotallyUnknownApp")),
+            Capability::Unsupported { explanation, .. } => {
+                assert!(explanation.contains("TotallyUnknownApp"))
+            }
             other => panic!("expected Unsupported, got {other:?}"),
         }
     }

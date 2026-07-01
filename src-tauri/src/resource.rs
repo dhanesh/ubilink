@@ -120,7 +120,10 @@ pub enum ResolutionAction {
 
 /// Re-resolve a stored identity against a candidate resource (T3). Returns the
 /// match confidence and the gated action TN5 mandates.
-pub fn reresolve(stored: &ResourceIdentity, candidate: &ResourceIdentity) -> (MatchConfidence, ResolutionAction) {
+pub fn reresolve(
+    stored: &ResourceIdentity,
+    candidate: &ResourceIdentity,
+) -> (MatchConfidence, ResolutionAction) {
     let confidence = match_confidence(stored, candidate);
     let action = match confidence {
         MatchConfidence::Exact => ResolutionAction::AutoResolve,
@@ -172,7 +175,10 @@ mod tests {
         let moved = ResourceIdentity::new("Renamed.md", "file:///new/Renamed.md")
             .with_path("/new/Renamed.md")
             .with_content(b"the same bytes");
-        assert_eq!(reresolve(&stored, &moved), (MatchConfidence::Exact, ResolutionAction::AutoResolve));
+        assert_eq!(
+            reresolve(&stored, &moved),
+            (MatchConfidence::Exact, ResolutionAction::AutoResolve)
+        );
     }
 
     #[test]
@@ -190,14 +196,20 @@ mod tests {
             .with_content(b"version one");
         let candidate = ResourceIdentity::new("Report.md", "file:///other/Report.md")
             .with_content(b"a totally different document");
-        assert_eq!(reresolve(&stored, &candidate), (MatchConfidence::Fuzzy, ResolutionAction::Confirm));
+        assert_eq!(
+            reresolve(&stored, &candidate),
+            (MatchConfidence::Fuzzy, ResolutionAction::Confirm)
+        );
     }
 
     #[test]
     fn no_match_fails_rather_than_guessing() {
         let stored = ResourceIdentity::new("A.md", "file:///a/A.md").with_content(b"aaa");
         let unrelated = ResourceIdentity::new("Z.md", "file:///z/Z.md").with_content(b"zzz");
-        assert_eq!(reresolve(&stored, &unrelated), (MatchConfidence::None, ResolutionAction::Fail));
+        assert_eq!(
+            reresolve(&stored, &unrelated),
+            (MatchConfidence::None, ResolutionAction::Fail)
+        );
     }
 
     #[test]

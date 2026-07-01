@@ -51,7 +51,10 @@ pub struct RegistryIndex {
 
 impl RegistryIndex {
     pub fn new(trusted_pub_hex: Vec<String>) -> RegistryIndex {
-        RegistryIndex { trusted_pub_hex, by_id: HashMap::new() }
+        RegistryIndex {
+            trusted_pub_hex,
+            by_id: HashMap::new(),
+        }
     }
 
     /// Publish a signed bundle (the JSON `ubilink-sign sign` produces). Accepted iff it
@@ -94,7 +97,12 @@ impl RegistryIndex {
         let mut items: Vec<ListItem> = self
             .by_id
             .iter()
-            .map(|(id, e)| ListItem { id: id.clone(), version: e.version, name: e.name.clone(), app: e.app.clone() })
+            .map(|(id, e)| ListItem {
+                id: id.clone(),
+                version: e.version,
+                name: e.name.clone(),
+                app: e.app.clone(),
+            })
             .collect();
         items.sort_by(|a, b| a.id.cmp(&b.id));
         items
@@ -123,10 +131,24 @@ pub struct Resp {
 }
 
 impl Resp {
-    fn ok(body: String) -> Resp { Resp { status: 200, body } }
-    fn created(body: String) -> Resp { Resp { status: 201, body } }
-    fn bad(msg: &str) -> Resp { Resp { status: 400, body: error_json(msg) } }
-    fn not_found(msg: &str) -> Resp { Resp { status: 404, body: error_json(msg) } }
+    fn ok(body: String) -> Resp {
+        Resp { status: 200, body }
+    }
+    fn created(body: String) -> Resp {
+        Resp { status: 201, body }
+    }
+    fn bad(msg: &str) -> Resp {
+        Resp {
+            status: 400,
+            body: error_json(msg),
+        }
+    }
+    fn not_found(msg: &str) -> Resp {
+        Resp {
+            status: 404,
+            body: error_json(msg),
+        }
+    }
 }
 
 /// Pure request router (no I/O). The whole API surface, testable without sockets.
@@ -169,7 +191,7 @@ pub fn handle_stream<S: std::io::Read + std::io::Write>(
     stream: &mut S,
     idx: &mut RegistryIndex,
 ) -> std::io::Result<()> {
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Read};
     let mut reader = BufReader::new(&mut *stream);
 
     // request line
@@ -183,9 +205,13 @@ pub fn handle_stream<S: std::io::Read + std::io::Write>(
     let mut content_length = 0usize;
     loop {
         let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 { break; }
+        if reader.read_line(&mut line)? == 0 {
+            break;
+        }
         let line = line.trim_end();
-        if line.is_empty() { break; }
+        if line.is_empty() {
+            break;
+        }
         if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             content_length = v.trim().parse().unwrap_or(0);
         }
@@ -193,7 +219,9 @@ pub fn handle_stream<S: std::io::Read + std::io::Write>(
 
     // body (exactly Content-Length bytes)
     let mut body = vec![0u8; content_length];
-    if content_length > 0 { reader.read_exact(&mut body)?; }
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
+    }
     let body = String::from_utf8_lossy(&body).into_owned();
 
     let resp = handle_request(&method, &path, &body, idx);
@@ -205,7 +233,7 @@ pub fn handle_stream<S: std::io::Read + std::io::Write>(
     };
     let out = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        resp.status, reason, resp.body.as_bytes().len(), resp.body
+        resp.status, reason, resp.body.len(), resp.body
     );
     stream.write_all(out.as_bytes())?;
     stream.flush()
@@ -228,7 +256,9 @@ fn json_str(s: &str) -> String {
     out.push('"');
     out
 }
-fn error_json(msg: &str) -> String { format!(r#"{{"error":{}}}"#, json_str(msg)) }
+fn error_json(msg: &str) -> String {
+    format!(r#"{{"error":{}}}"#, json_str(msg))
+}
 
 fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
@@ -244,7 +274,10 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(h), Some(l)) = ((bytes[i + 1] as char).to_digit(16), (bytes[i + 2] as char).to_digit(16)) {
+            if let (Some(h), Some(l)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
                 out.push(((h << 4) | l) as u8);
                 i += 3;
                 continue;
@@ -266,11 +299,24 @@ mod tests {
         (0..32).map(|_| format!("{seed:02x}")).collect()
     }
     fn manifest(id: &str, app: &str, name: &str) -> Manifest {
-        Manifest { id: id.into(), name: name.into(), app: app.into(), version: "1".into(), needs: vec![], signature: None }
+        Manifest {
+            id: id.into(),
+            name: name.into(),
+            app: app.into(),
+            version: "1".into(),
+            needs: vec![],
+            signature: None,
+        }
     }
     fn signed(seed: u8, id: &str, app: &str, name: &str, version: u32) -> String {
         let key = signing_key_from_hex(&key_hex(seed)).unwrap();
-        sign_to_json(&key, manifest(id, app, name), "export function run(){}".into(), version).unwrap()
+        sign_to_json(
+            &key,
+            manifest(id, app, name),
+            "export function run(){}".into(),
+            version,
+        )
+        .unwrap()
     }
     fn index_trusting(seed: u8) -> RegistryIndex {
         let pubk = public_hex(&signing_key_from_hex(&key_hex(seed)).unwrap());
@@ -280,7 +326,14 @@ mod tests {
     #[test]
     fn publish_then_get_and_list() {
         let mut idx = index_trusting(7);
-        idx.publish(&signed(7, "com.x.obsidian", "Obsidian", "Obsidian Linker", 1)).unwrap();
+        idx.publish(&signed(
+            7,
+            "com.x.obsidian",
+            "Obsidian",
+            "Obsidian Linker",
+            1,
+        ))
+        .unwrap();
         assert!(idx.get("com.x.obsidian").is_some());
         let list = idx.list();
         assert_eq!(list.len(), 1);
@@ -300,23 +353,31 @@ mod tests {
     #[test]
     fn publish_enforces_version_monotonicity() {
         let mut idx = index_trusting(7);
-        idx.publish(&signed(7, "com.x.app", "App", "App", 2)).unwrap();
+        idx.publish(&signed(7, "com.x.app", "App", "App", 2))
+            .unwrap();
         // re-publishing an older/equal version is refused (no silent downgrade).
-        assert!(idx.publish(&signed(7, "com.x.app", "App", "App", 2)).is_err());
-        assert!(idx.publish(&signed(7, "com.x.app", "App", "App", 1)).is_err());
+        assert!(idx
+            .publish(&signed(7, "com.x.app", "App", "App", 2))
+            .is_err());
+        assert!(idx
+            .publish(&signed(7, "com.x.app", "App", "App", 1))
+            .is_err());
         // a newer version replaces it.
-        idx.publish(&signed(7, "com.x.app", "App", "App", 3)).unwrap();
+        idx.publish(&signed(7, "com.x.app", "App", "App", 3))
+            .unwrap();
         assert_eq!(idx.list()[0].version, 3);
     }
 
     #[test]
     fn search_matches_id_name_and_app_case_insensitively() {
         let mut idx = index_trusting(7);
-        idx.publish(&signed(7, "com.x.obsidian", "Obsidian", "Note Linker", 1)).unwrap();
-        idx.publish(&signed(7, "com.x.finder", "Finder", "File Indexer", 1)).unwrap();
+        idx.publish(&signed(7, "com.x.obsidian", "Obsidian", "Note Linker", 1))
+            .unwrap();
+        idx.publish(&signed(7, "com.x.finder", "Finder", "File Indexer", 1))
+            .unwrap();
         assert_eq!(idx.search("obsidian").len(), 1);
         assert_eq!(idx.search("LINKER").len(), 1); // matches name "Note Linker"
-        assert_eq!(idx.search("com.x").len(), 2);   // both ids
+        assert_eq!(idx.search("com.x").len(), 2); // both ids
         assert_eq!(idx.search("nothing").len(), 0);
     }
 
@@ -326,11 +387,18 @@ mod tests {
         output: Vec<u8>,
     }
     impl std::io::Read for MockStream {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> { self.input.read(buf) }
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.input.read(buf)
+        }
     }
     impl std::io::Write for MockStream {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> { self.output.extend_from_slice(buf); Ok(buf.len()) }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.output.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -342,14 +410,24 @@ mod tests {
 
         let post = format!(
             "POST /publish HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-            bundle.as_bytes().len(), bundle
+            bundle.len(),
+            bundle
         );
-        let mut s = MockStream { input: std::io::Cursor::new(post.into_bytes()), output: Vec::new() };
+        let mut s = MockStream {
+            input: std::io::Cursor::new(post.into_bytes()),
+            output: Vec::new(),
+        };
         handle_stream(&mut s, &mut idx).unwrap();
         let resp = String::from_utf8(s.output).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 201 Created"), "publish response: {resp}");
+        assert!(
+            resp.starts_with("HTTP/1.1 201 Created"),
+            "publish response: {resp}"
+        );
 
-        let mut s = MockStream { input: std::io::Cursor::new(b"GET /integrations HTTP/1.1\r\n\r\n".to_vec()), output: Vec::new() };
+        let mut s = MockStream {
+            input: std::io::Cursor::new(b"GET /integrations HTTP/1.1\r\n\r\n".to_vec()),
+            output: Vec::new(),
+        };
         handle_stream(&mut s, &mut idx).unwrap();
         let resp = String::from_utf8(s.output).unwrap();
         assert!(resp.starts_with("HTTP/1.1 200 OK"));
@@ -381,12 +459,18 @@ mod tests {
         assert!(r.body.contains("signature_hex"));
 
         // unknown id -> 404
-        assert_eq!(handle_request("GET", "/integrations/nope", "", &mut idx).status, 404);
+        assert_eq!(
+            handle_request("GET", "/integrations/nope", "", &mut idx).status,
+            404
+        );
         // bad publish -> 400 with an error body
         let r = handle_request("POST", "/publish", "not json", &mut idx);
         assert_eq!(r.status, 400);
         assert!(r.body.contains("error"));
         // unknown route -> 404
-        assert_eq!(handle_request("DELETE", "/whatever", "", &mut idx).status, 404);
+        assert_eq!(
+            handle_request("DELETE", "/whatever", "", &mut idx).status,
+            404
+        );
     }
 }

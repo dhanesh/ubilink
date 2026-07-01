@@ -34,7 +34,12 @@ pub fn canonical_message(manifest_id: &str, version: u32, source: &str) -> Vec<u
 }
 
 /// Sign a bundle with a publisher key (used by publishers / in tests).
-pub fn sign_bundle(key: &SigningKey, manifest: Manifest, source: String, version: u32) -> SignedBundle {
+pub fn sign_bundle(
+    key: &SigningKey,
+    manifest: Manifest,
+    source: String,
+    version: u32,
+) -> SignedBundle {
     let msg = canonical_message(&manifest.id, version, &source);
     let sig: Signature = key.sign(&msg);
     SignedBundle {
@@ -65,9 +70,15 @@ impl InstallError {
     pub fn message(&self) -> String {
         match self {
             InstallError::Unsigned => "This integration is unsigned and was refused.".into(),
-            InstallError::UntrustedSigner => "This integration is signed by an untrusted publisher.".into(),
-            InstallError::BadSignature => "This integration's signature is invalid (it may have been tampered with).".into(),
-            InstallError::Downgrade { current, attempted } => format!("Refused: integration version {attempted} is older than the installed {current}."),
+            InstallError::UntrustedSigner => {
+                "This integration is signed by an untrusted publisher.".into()
+            }
+            InstallError::BadSignature => {
+                "This integration's signature is invalid (it may have been tampered with).".into()
+            }
+            InstallError::Downgrade { current, attempted } => format!(
+                "Refused: integration version {attempted} is older than the installed {current}."
+            ),
             InstallError::Malformed(e) => format!("Malformed integration bundle: {e}"),
         }
     }
@@ -81,7 +92,10 @@ pub struct Installer {
 
 impl Installer {
     pub fn new(trusted_keys: Vec<VerifyingKey>) -> Installer {
-        Installer { trusted: trusted_keys, installed: HashMap::new() }
+        Installer {
+            trusted: trusted_keys,
+            installed: HashMap::new(),
+        }
     }
 
     /// Verify a bundle WITHOUT installing (S3 attack matrix). Returns Ok iff the
@@ -98,7 +112,11 @@ impl Installer {
         let signer = VerifyingKey::from_bytes(&signer_bytes)
             .map_err(|e| InstallError::Malformed(e.to_string()))?;
         // Trusted-publisher check (constant-time-ish set membership on the key bytes).
-        if !self.trusted.iter().any(|k| k.to_bytes() == signer.to_bytes()) {
+        if !self
+            .trusted
+            .iter()
+            .any(|k| k.to_bytes() == signer.to_bytes())
+        {
             return Err(InstallError::UntrustedSigner);
         }
         let sig_bytes: [u8; 64] = bundle
@@ -108,11 +126,16 @@ impl Installer {
             .map_err(|_| InstallError::Malformed("signature must be 64 bytes".into()))?;
         let sig = Signature::from_bytes(&sig_bytes);
         let msg = canonical_message(&bundle.manifest.id, bundle.version, &bundle.source);
-        signer.verify(&msg, &sig).map_err(|_| InstallError::BadSignature)?;
+        signer
+            .verify(&msg, &sig)
+            .map_err(|_| InstallError::BadSignature)?;
         // Downgrade protection (T4/O1).
         if let Some(&current) = self.installed.get(&bundle.manifest.id) {
             if bundle.version < current {
-                return Err(InstallError::Downgrade { current, attempted: bundle.version });
+                return Err(InstallError::Downgrade {
+                    current,
+                    attempted: bundle.version,
+                });
             }
         }
         Ok(())
@@ -121,7 +144,8 @@ impl Installer {
     /// Verify then record the installed version. Independent of core (O1).
     pub fn install(&mut self, bundle: &SignedBundle) -> Result<(), InstallError> {
         self.verify(bundle)?;
-        self.installed.insert(bundle.manifest.id.clone(), bundle.version);
+        self.installed
+            .insert(bundle.manifest.id.clone(), bundle.version);
         Ok(())
     }
 
@@ -138,7 +162,14 @@ mod tests {
         SigningKey::from_bytes(&[seed; 32])
     }
     fn manifest(id: &str) -> Manifest {
-        Manifest { id: id.into(), name: "X".into(), app: "Obsidian".into(), version: "1".into(), needs: vec![], signature: None }
+        Manifest {
+            id: id.into(),
+            name: "X".into(),
+            app: "Obsidian".into(),
+            version: "1".into(),
+            needs: vec![],
+            signature: None,
+        }
     }
 
     #[test]
@@ -185,10 +216,17 @@ mod tests {
         // T4/O1: versions move forward independently of core; never backward.
         let k = key(1);
         let mut inst = Installer::new(vec![k.verifying_key()]);
-        inst.install(&sign_bundle(&k, manifest("a.b"), "v2".into(), 2)).unwrap();
+        inst.install(&sign_bundle(&k, manifest("a.b"), "v2".into(), 2))
+            .unwrap();
         // downgrade to v1 refused
         let v1 = sign_bundle(&k, manifest("a.b"), "v1".into(), 1);
-        assert_eq!(inst.verify(&v1), Err(InstallError::Downgrade { current: 2, attempted: 1 }));
+        assert_eq!(
+            inst.verify(&v1),
+            Err(InstallError::Downgrade {
+                current: 2,
+                attempted: 1
+            })
+        );
         // upgrade to v3 allowed
         let v3 = sign_bundle(&k, manifest("a.b"), "v3".into(), 3);
         assert!(inst.install(&v3).is_ok());

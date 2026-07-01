@@ -30,7 +30,10 @@ pub const FRONTMOST_APP_SCRIPT: &str =
 pub fn probe_automation_permission<R: CommandRunner>(runner: &R) -> PermissionState {
     match runner.run(
         "osascript",
-        &["-e", "tell application \"System Events\" to return name of first process"],
+        &[
+            "-e",
+            "tell application \"System Events\" to return name of first process",
+        ],
     ) {
         Ok(_) => PermissionState::Granted,
         Err(e) => {

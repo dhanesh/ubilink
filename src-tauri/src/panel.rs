@@ -24,7 +24,10 @@ pub struct LinkView {
 
 impl From<ResourceIdentity> for LinkView {
     fn from(r: ResourceIdentity) -> LinkView {
-        LinkView { name: r.name, uri: r.uri }
+        LinkView {
+            name: r.name,
+            uri: r.uri,
+        }
     }
 }
 
@@ -46,7 +49,11 @@ pub struct BrowseEntry {
 
 impl From<(ResourceIdentity, i64)> for BrowseEntry {
     fn from((r, links): (ResourceIdentity, i64)) -> BrowseEntry {
-        BrowseEntry { name: r.name, uri: r.uri, links }
+        BrowseEntry {
+            name: r.name,
+            uri: r.uri,
+            links,
+        }
     }
 }
 
@@ -71,8 +78,15 @@ impl PanelBackend {
     /// The `capture_current` command: capture the active resource (permission-gated,
     /// S4) and surface its existing backlinks (U5). On any failure, return the
     /// user-facing explanation (U3) as `Err` — the webview shows it, never silence.
-    pub fn capture_current(&mut self, adapter: &dyn ResourceAdapter, now: i64) -> Result<PanelView, String> {
-        let id = self.service.capture(adapter, now).map_err(|e| e.message())?;
+    pub fn capture_current(
+        &mut self,
+        adapter: &dyn ResourceAdapter,
+        now: i64,
+    ) -> Result<PanelView, String> {
+        let id = self
+            .service
+            .capture(adapter, now)
+            .map_err(|e| e.message())?;
         let backlinks = self
             .service
             .backlinks(&id.uri)
@@ -80,7 +94,10 @@ impl PanelBackend {
             .into_iter()
             .map(LinkView::from)
             .collect();
-        Ok(PanelView { resource: id.into(), backlinks })
+        Ok(PanelView {
+            resource: id.into(),
+            backlinks,
+        })
     }
 
     /// Expose the service for commands that link/open (kept thin on purpose).
@@ -113,8 +130,15 @@ impl PanelBackend {
     }
 
     /// The `link_resources` command (browser "L"): link two captured resources.
-    pub fn link_resources(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> Result<(), String> {
-        self.service.link_existing(a_uri, b_uri, created_at).map_err(|e| e.message())
+    pub fn link_resources(
+        &self,
+        a_uri: &str,
+        b_uri: &str,
+        created_at: Option<i64>,
+    ) -> Result<(), String> {
+        self.service
+            .link_existing(a_uri, b_uri, created_at)
+            .map_err(|e| e.message())
     }
 
     /// Settings (`graph_stats`): resource + link counts for the Settings panel.
@@ -137,7 +161,11 @@ impl PanelBackend {
     /// human summary of what was imported.
     pub fn import_graph(&mut self, json: &str) -> Result<String, String> {
         let (r, l) = self.service.import(json).map_err(|e| e.message())?;
-        Ok(format!("Imported {r} link{} · {l} connection{}", if r == 1 { "" } else { "s" }, if l == 1 { "" } else { "s" }))
+        Ok(format!(
+            "Imported {r} link{} · {l} connection{}",
+            if r == 1 { "" } else { "s" },
+            if l == 1 { "" } else { "s" }
+        ))
     }
 
     /// The `capabilities` command (O2): the supported app/platform/mechanism set,
@@ -164,8 +192,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ubilink-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
-        let a = svc.capture(&FileAdapter::new(tmp(&dir, "A.md")), 1).unwrap();
-        let b = svc.capture(&FileAdapter::new(tmp(&dir, "B.md")), 1).unwrap();
+        let a = svc
+            .capture(&FileAdapter::new(tmp(&dir, "A.md")), 1)
+            .unwrap();
+        let b = svc
+            .capture(&FileAdapter::new(tmp(&dir, "B.md")), 1)
+            .unwrap();
         svc.link(&a, &b, Some(1)).unwrap();
         let mut panel = PanelBackend::new(svc);
 
@@ -178,13 +210,25 @@ mod tests {
 
         let removed = panel.reset_graph().unwrap();
         assert_eq!(removed, 2);
-        assert_eq!(panel.graph_stats().unwrap(), GraphStats { resources: 0, links: 0 });
+        assert_eq!(
+            panel.graph_stats().unwrap(),
+            GraphStats {
+                resources: 0,
+                links: 0
+            }
+        );
         assert!(panel.list_links().unwrap().is_empty());
 
         // import the earlier export back into the now-empty graph
         let summary = panel.import_graph(&json).unwrap();
         assert!(summary.contains("Imported 2 links"), "summary: {summary}");
-        assert_eq!(panel.graph_stats().unwrap(), GraphStats { resources: 2, links: 1 });
+        assert_eq!(
+            panel.graph_stats().unwrap(),
+            GraphStats {
+                resources: 2,
+                links: 1
+            }
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -195,14 +239,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ubilink-browse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
-        let note = svc.capture(&FileAdapter::new(tmp(&dir, "Note.md")), 1).unwrap();
-        let paper = svc.capture(&FileAdapter::new(tmp(&dir, "Paper.pdf")), 1).unwrap();
-        let solo = svc.capture(&FileAdapter::new(tmp(&dir, "Solo.txt")), 1).unwrap(); // captured, never linked
+        let note = svc
+            .capture(&FileAdapter::new(tmp(&dir, "Note.md")), 1)
+            .unwrap();
+        let paper = svc
+            .capture(&FileAdapter::new(tmp(&dir, "Paper.pdf")), 1)
+            .unwrap();
+        let solo = svc
+            .capture(&FileAdapter::new(tmp(&dir, "Solo.txt")), 1)
+            .unwrap(); // captured, never linked
         svc.link(&note, &paper, Some(1)).unwrap();
 
         let panel = PanelBackend::new(svc);
         let all = panel.list_links().unwrap();
-        assert_eq!(all.len(), 3, "every CAPTURED resource is listed, including the unlinked one");
+        assert_eq!(
+            all.len(),
+            3,
+            "every CAPTURED resource is listed, including the unlinked one"
+        );
         // titles are present (the browser shows names, not raw URIs)
         assert!(all.iter().all(|l| !l.name.is_empty()));
         // link counts drive the right-hand indicator: note↔paper = 1 each, solo = 0
@@ -238,7 +292,11 @@ mod tests {
         let mut panel = PanelBackend::new(svc);
         let view = panel.capture_current(&note, 1).unwrap();
         assert_eq!(view.resource.uri, a.uri);
-        assert_eq!(view.backlinks.len(), 1, "U5: the note must surface its backlink");
+        assert_eq!(
+            view.backlinks.len(),
+            1,
+            "U5: the note must surface its backlink"
+        );
         assert_eq!(view.backlinks[0].uri, b.uri);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -249,11 +307,20 @@ mod tests {
         // the webview can show — never an empty/silent failure.
         struct LiveAdapter;
         impl ResourceAdapter for LiveAdapter {
-            fn id(&self) -> &str { "safari.macos" }
-            fn needs_permission(&self) -> bool { true }
-            fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> { unreachable!() }
+            fn id(&self) -> &str {
+                "safari.macos"
+            }
+            fn needs_permission(&self) -> bool {
+                true
+            }
+            fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
+                unreachable!()
+            }
             fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
-                OpenPlan { program: "open".into(), args: vec![r.uri.clone()] }
+                OpenPlan {
+                    program: "open".into(),
+                    args: vec![r.uri.clone()],
+                }
             }
         }
         let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
@@ -269,15 +336,23 @@ mod tests {
         let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
         let panel = PanelBackend::new(svc);
         let caps = panel.capabilities();
-        assert!(!caps.is_empty(), "O2: in-app capability disclosure must be non-empty");
-        assert!(caps.iter().any(|s| s.app == "Safari"), "expected the baseline matrix");
+        assert!(
+            !caps.is_empty(),
+            "O2: in-app capability disclosure must be non-empty"
+        );
+        assert!(
+            caps.iter().any(|s| s.app == "Safari"),
+            "expected the baseline matrix"
+        );
         // serializable for the webview (the disclosure crosses the IPC boundary).
         assert!(serde_json::to_string(&caps).is_ok());
     }
 
     // ── Static markup contract (U1/U2/U3/U4) — proven without a GUI ──
     fn read_dist(name: &str) -> String {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist").join(name);
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../dist")
+            .join(name);
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
     }
 
@@ -285,11 +360,26 @@ mod tests {
     fn panel_html_meets_the_accessibility_contract() {
         // U4: the panel must be announced and operable by assistive tech.
         let html = read_dist("index.html");
-        assert!(html.contains("role=\"dialog\""), "U4: panel needs a dialog role");
-        assert!(html.contains("aria-label"), "U4: panel needs an accessible name");
-        assert!(html.contains("aria-live"), "U4/U1: status must be a live region");
-        assert!(html.contains("role=\"alert\""), "U3: errors must be announced");
-        assert!(html.contains("lang=\"en\""), "U4: document language declared");
+        assert!(
+            html.contains("role=\"dialog\""),
+            "U4: panel needs a dialog role"
+        );
+        assert!(
+            html.contains("aria-label"),
+            "U4: panel needs an accessible name"
+        );
+        assert!(
+            html.contains("aria-live"),
+            "U4/U1: status must be a live region"
+        );
+        assert!(
+            html.contains("role=\"alert\""),
+            "U3: errors must be announced"
+        );
+        assert!(
+            html.contains("lang=\"en\""),
+            "U4: document language declared"
+        );
     }
 
     #[test]
@@ -298,28 +388,62 @@ mod tests {
         // adds its own buttons, so we assert the Copy action is unique, not that the
         // page has exactly one button.)
         let html = read_dist("index.html");
-        assert_eq!(html.matches("id=\"copy\"").count(), 1, "U2: exactly one primary Copy action");
-        assert!(html.contains("aria-keyshortcuts=\"Enter\""), "U4/U2: Enter triggers copy");
+        assert_eq!(
+            html.matches("id=\"copy\"").count(),
+            1,
+            "U2: exactly one primary Copy action"
+        );
+        assert!(
+            html.contains("aria-keyshortcuts=\"Enter\""),
+            "U4/U2: Enter triggers copy"
+        );
     }
 
     #[test]
     fn panel_html_has_a_permission_onboarding_screen() {
         // S4/U3: the user is guided to grant the macOS permissions, not left guessing.
         let html = read_dist("index.html");
-        assert!(html.contains("id=\"onboarding\""), "S4: onboarding screen must exist");
-        assert!(html.contains("data-perm=\"accessibility\""), "must surface the Accessibility permission");
-        assert!(html.contains("data-perm=\"automation\""), "must surface the Automation permission");
-        assert!(html.contains("id=\"recheck\""), "must offer a re-check action");
-        assert!(html.contains("data-pane=\"accessibility\""), "must offer to open the Accessibility pane");
-        assert!(html.contains("id=\"grant-accessibility\""), "must offer a native Accessibility prompt");
-        assert!(html.contains("id=\"open-setup\""), "permissions must be reachable from the capture view");
+        assert!(
+            html.contains("id=\"onboarding\""),
+            "S4: onboarding screen must exist"
+        );
+        assert!(
+            html.contains("data-perm=\"accessibility\""),
+            "must surface the Accessibility permission"
+        );
+        assert!(
+            html.contains("data-perm=\"automation\""),
+            "must surface the Automation permission"
+        );
+        assert!(
+            html.contains("id=\"recheck\""),
+            "must offer a re-check action"
+        );
+        assert!(
+            html.contains("data-pane=\"accessibility\""),
+            "must offer to open the Accessibility pane"
+        );
+        assert!(
+            html.contains("id=\"grant-accessibility\""),
+            "must offer a native Accessibility prompt"
+        );
+        assert!(
+            html.contains("id=\"open-setup\""),
+            "permissions must be reachable from the capture view"
+        );
     }
 
     #[test]
     fn panel_css_provides_a_visible_focus_indicator() {
         // U4: keyboard users must see where focus is.
         let css = read_dist("panel.css");
-        assert!(css.contains(":focus-visible"), "U4: needs a visible focus style");
-        assert!(css.contains("prefers-reduced-motion"), "U4: spinner must honour reduced motion");
+        assert!(
+            css.contains(":focus-visible"),
+            "U4: needs a visible focus style"
+        );
+        assert!(
+            css.contains("prefers-reduced-motion"),
+            "U4: spinner must honour reduced motion"
+        );
     }
 }

@@ -31,12 +31,12 @@
 // provably denied, and the broker denies every ungranted capability.
 
 pub mod adapter;
+pub mod adapters_config;
 pub mod api;
 pub mod broker;
 pub mod capabilities;
 pub mod graph;
 pub mod integrations;
-pub mod adapters_config;
 pub mod live_capture;
 pub mod panel;
 pub mod release;
@@ -44,16 +44,22 @@ pub mod resource;
 pub mod sandbox;
 pub mod service;
 
-pub use adapter::{capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter};
+pub use adapter::{
+    capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter,
+};
+pub use adapters_config::{AdapterRegistry, AdapterSpec, ConfiguredAdapter};
 pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
-pub use integrations::{Installer, InstallError, SignedBundle, sign_bundle};
-pub use live_capture::{CommandRunner, OsaScriptRunner, probe_automation_permission, FRONTMOST_APP_SCRIPT};
-pub use adapters_config::{AdapterRegistry, AdapterSpec, ConfiguredAdapter};
-pub use release::{public_hex, sign_to_json, signing_key_from_hex, verify_json, SignError, WireBundle};
-pub use panel::{BrowseEntry, GraphStats, LinkView, PanelBackend, PanelView};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
 pub use graph::LinkGraph;
-pub use resource::{Link, MatchConfidence, ResolutionAction, ResourceIdentity, reresolve};
-pub use sandbox::{Session, EscapeAttempt};
-pub use service::{UbilinkService, ServiceError};
+pub use integrations::{sign_bundle, InstallError, Installer, SignedBundle};
+pub use live_capture::{
+    probe_automation_permission, CommandRunner, OsaScriptRunner, FRONTMOST_APP_SCRIPT,
+};
+pub use panel::{BrowseEntry, GraphStats, LinkView, PanelBackend, PanelView};
+pub use release::{
+    public_hex, sign_to_json, signing_key_from_hex, verify_json, SignError, WireBundle,
+};
+pub use resource::{reresolve, Link, MatchConfidence, ResolutionAction, ResourceIdentity};
+pub use sandbox::{EscapeAttempt, Session};
+pub use service::{ServiceError, UbilinkService};

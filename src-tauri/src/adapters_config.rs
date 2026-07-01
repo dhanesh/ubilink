@@ -94,7 +94,9 @@ fn urlencode(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => o.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                o.push(b as char)
+            }
             _ => o.push_str(&format!("%{b:02X}")),
         }
     }
@@ -103,7 +105,11 @@ fn urlencode(s: &str) -> String {
 
 /// The final path component (Finder paths -> a display name).
 fn basename(s: &str) -> String {
-    s.trim_end_matches('/').rsplit('/').next().unwrap_or(s).to_string()
+    s.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(s)
+        .to_string()
 }
 
 /// The URL out of a markdown link `[text](url)`, or the input unchanged if it isn't one.
@@ -153,20 +159,30 @@ impl<R: CommandRunner> ConfiguredAdapter<R> {
         let mut fields: HashMap<String, String> = HashMap::new();
         match &self.spec.delimiter {
             Some(delim) => {
-                let parts: Vec<&str> = line.splitn(self.spec.fields.len(), delim.as_str()).collect();
+                let parts: Vec<&str> = line
+                    .splitn(self.spec.fields.len(), delim.as_str())
+                    .collect();
                 if parts.len() < self.spec.fields.len() {
-                    return Err(fail(format!("{} returned an unexpected response.", self.spec.app)));
+                    return Err(fail(format!(
+                        "{} returned an unexpected response.",
+                        self.spec.app
+                    )));
                 }
                 for (name, val) in self.spec.fields.iter().zip(parts) {
                     fields.insert(name.clone(), val.trim().to_string());
                 }
             }
             None => {
-                let name = self.spec.fields.first().ok_or_else(|| fail("adapter has no fields".into()))?;
+                let name = self
+                    .spec
+                    .fields
+                    .first()
+                    .ok_or_else(|| fail("adapter has no fields".into()))?;
                 fields.insert(name.clone(), line.trim().to_string());
             }
         }
-        let render_field = |tpl: &str| render(tpl, &fields).map_err(|e| fail(format!("{}: {e}", self.spec.app)));
+        let render_field =
+            |tpl: &str| render(tpl, &fields).map_err(|e| fail(format!("{}: {e}", self.spec.app)));
         let uri = render_field(&self.spec.uri)?;
         if uri.trim().is_empty() {
             return Err(fail(format!("{} produced an empty link.", self.spec.app)));
@@ -194,12 +210,18 @@ impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
         match self.runner.run("osascript", &["-e", &self.spec.script]) {
             Ok(out) => self.parse(&out),
             Err(e) => Err(CaptureFailure::AdapterError {
-                explanation: format!("Couldn't read the active resource from {}: {e}", self.spec.app),
+                explanation: format!(
+                    "Couldn't read the active resource from {}: {e}",
+                    self.spec.app
+                ),
             }),
         }
     }
     fn open_plan(&self, resource: &ResourceIdentity) -> OpenPlan {
-        OpenPlan { program: "open".into(), args: vec![resource.uri.clone()] }
+        OpenPlan {
+            program: "open".into(),
+            args: vec![resource.uri.clone()],
+        }
     }
 }
 
@@ -226,7 +248,8 @@ impl AdapterRegistry {
         let user: Vec<AdapterSpec> = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let n = user.len();
         for spec in user {
-            self.specs.retain(|s| !s.app.eq_ignore_ascii_case(&spec.app));
+            self.specs
+                .retain(|s| !s.app.eq_ignore_ascii_case(&spec.app));
             self.specs.insert(0, spec);
         }
         Ok(n)
@@ -279,7 +302,10 @@ fn literal_scheme(uri_template: &str) -> Option<String> {
     if before.is_empty() || before.contains('{') || before.contains('/') {
         return None; // dynamic scheme (e.g. "{url}") or not a scheme prefix
     }
-    if before.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) {
+    if before
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    {
         Some(before.to_ascii_lowercase())
     } else {
         None
@@ -297,28 +323,53 @@ mod tests {
         }
     }
     fn fields(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
     fn render_plain_and_transforms() {
-        let f = fields(&[("url", "https://x/y"), ("title", "A B & C"), ("path", "/Users/me/My Doc.pdf")]);
+        let f = fields(&[
+            ("url", "https://x/y"),
+            ("title", "A B & C"),
+            ("path", "/Users/me/My Doc.pdf"),
+        ]);
         assert_eq!(render("{url}", &f).unwrap(), "https://x/y");
-        assert_eq!(render("t={title|urlencode}", &f).unwrap(), "t=A%20B%20%26%20C");
+        assert_eq!(
+            render("t={title|urlencode}", &f).unwrap(),
+            "t=A%20B%20%26%20C"
+        );
         assert_eq!(render("{path|basename}", &f).unwrap(), "My Doc.pdf");
-        assert_eq!(render("file://{path}", &f).unwrap(), "file:///Users/me/My Doc.pdf");
+        assert_eq!(
+            render("file://{path}", &f).unwrap(),
+            "file:///Users/me/My Doc.pdf"
+        );
     }
 
     #[test]
     fn markdown_transforms_handle_both_link_and_plain() {
         // A markdown link splits into url/text…
-        let md = fields(&[("link", "[Daily Memories](bear://x-callback-url/open-note?id=ABC)")]);
-        assert_eq!(render("{link|mdurl}", &md).unwrap(), "bear://x-callback-url/open-note?id=ABC");
+        let md = fields(&[(
+            "link",
+            "[Daily Memories](bear://x-callback-url/open-note?id=ABC)",
+        )]);
+        assert_eq!(
+            render("{link|mdurl}", &md).unwrap(),
+            "bear://x-callback-url/open-note?id=ABC"
+        );
         assert_eq!(render("{link|mdtext}", &md).unwrap(), "Daily Memories");
         // …a plain URL passes through unchanged (graceful fallback).
         let plain = fields(&[("link", "bear://x-callback-url/open-note?id=ABC")]);
-        assert_eq!(render("{link|mdurl}", &plain).unwrap(), "bear://x-callback-url/open-note?id=ABC");
-        assert_eq!(render("{link|mdtext}", &plain).unwrap(), "bear://x-callback-url/open-note?id=ABC");
+        assert_eq!(
+            render("{link|mdurl}", &plain).unwrap(),
+            "bear://x-callback-url/open-note?id=ABC"
+        );
+        assert_eq!(
+            render("{link|mdtext}", &plain).unwrap(),
+            "bear://x-callback-url/open-note?id=ABC"
+        );
     }
 
     #[test]
@@ -357,8 +408,12 @@ mod tests {
     #[test]
     fn render_errors_are_explained() {
         let f = fields(&[("a", "1")]);
-        assert!(render("{missing}", &f).unwrap_err().contains("unknown field"));
-        assert!(render("{a|nope}", &f).unwrap_err().contains("unknown template transform"));
+        assert!(render("{missing}", &f)
+            .unwrap_err()
+            .contains("unknown field"));
+        assert!(render("{a|nope}", &f)
+            .unwrap_err()
+            .contains("unknown template transform"));
         assert!(render("{a", &f).unwrap_err().contains("unclosed"));
     }
 
@@ -373,9 +428,13 @@ mod tests {
             name: "{title}".into(),
             path: None,
             schemes: vec![],
-            needs_permission: true, builtin: false,
+            needs_permission: true,
+            builtin: false,
         };
-        let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("https://example.com/x\tExample\n".into())));
+        let a = ConfiguredAdapter::new(
+            spec,
+            FakeRunner(Ok("https://example.com/x\tExample\n".into())),
+        );
         let id = a.capture().unwrap();
         assert_eq!(id.uri, "https://example.com/x");
         assert_eq!(id.name, "Example");
@@ -392,7 +451,8 @@ mod tests {
             name: "{path|basename}".into(),
             path: Some("{path}".into()),
             schemes: vec![],
-            needs_permission: true, builtin: false,
+            needs_permission: true,
+            builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("/Users/me/Docs/Report.pdf".into())));
         let id = a.capture().unwrap();
@@ -412,20 +472,31 @@ mod tests {
             name: "{title}".into(),
             path: None,
             schemes: vec![],
-            needs_permission: true, builtin: false,
+            needs_permission: true,
+            builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("My Note: ideas".into())));
         let id = a.capture().unwrap();
-        assert_eq!(id.uri, "bear://x-callback-url/open-note?title=My%20Note%3A%20ideas");
+        assert_eq!(
+            id.uri,
+            "bear://x-callback-url/open-note?title=My%20Note%3A%20ideas"
+        );
         assert_eq!(id.name, "My Note: ideas");
     }
 
     #[test]
     fn empty_output_degrades_with_explanation() {
         let spec = AdapterSpec {
-            app: "Safari".into(), script: "…".into(), delimiter: Some("\t".into()),
-            fields: vec!["url".into(), "title".into()], uri: "{url}".into(), name: "{title}".into(),
-            path: None, schemes: vec![], needs_permission: true, builtin: false,
+            app: "Safari".into(),
+            script: "…".into(),
+            delimiter: Some("\t".into()),
+            fields: vec!["url".into(), "title".into()],
+            uri: "{url}".into(),
+            name: "{title}".into(),
+            path: None,
+            schemes: vec![],
+            needs_permission: true,
+            builtin: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("   \n".into())));
         match a.capture().unwrap_err() {
@@ -439,7 +510,10 @@ mod tests {
         let reg = AdapterRegistry::defaults();
         let apps = reg.apps();
         for expected in ["Safari", "Google Chrome", "Finder", "Bear"] {
-            assert!(apps.contains(&expected), "default adapters must include {expected}; got {apps:?}");
+            assert!(
+                apps.contains(&expected),
+                "default adapters must include {expected}; got {apps:?}"
+            );
         }
         // case-insensitive match; unknown app -> None (U3 degradation upstream).
         assert!(reg.for_app("safari").is_some());
@@ -452,10 +526,14 @@ mod tests {
         // fields and known transforms (so a typo can't ship a broken adapter).
         let reg = AdapterRegistry::defaults();
         for spec in &reg.specs {
-            let dummy: HashMap<String, String> =
-                spec.fields.iter().map(|f| (f.clone(), "x/y".to_string())).collect();
+            let dummy: HashMap<String, String> = spec
+                .fields
+                .iter()
+                .map(|f| (f.clone(), "x/y".to_string()))
+                .collect();
             render(&spec.uri, &dummy).unwrap_or_else(|e| panic!("{} uri template: {e}", spec.app));
-            render(&spec.name, &dummy).unwrap_or_else(|e| panic!("{} name template: {e}", spec.app));
+            render(&spec.name, &dummy)
+                .unwrap_or_else(|e| panic!("{} name template: {e}", spec.app));
             if let Some(p) = &spec.path {
                 render(p, &dummy).unwrap_or_else(|e| panic!("{} path template: {e}", spec.app));
             }
@@ -469,7 +547,10 @@ mod tests {
         // `things`/`file` from literal templates; `bear` from an explicit declaration
         // (its uri is dynamic — built from the clipboard — so it can't be inferred).
         for s in ["bear", "things", "file"] {
-            assert!(schemes.contains(&s.to_string()), "expected scheme {s}; got {schemes:?}");
+            assert!(
+                schemes.contains(&s.to_string()),
+                "expected scheme {s}; got {schemes:?}"
+            );
         }
         // …but a "{url}" template (browsers) has no literal scheme to extract.
         assert!(!schemes.iter().any(|s| s == "{url}" || s.contains('{')));
@@ -485,7 +566,14 @@ mod tests {
         )
         .unwrap();
         assert!(reg.for_app("Slack").is_some(), "user app added");
-        assert_eq!(reg.apps().iter().filter(|a| a.eq_ignore_ascii_case("Safari")).count(), 1, "Safari overridden, not duplicated");
+        assert_eq!(
+            reg.apps()
+                .iter()
+                .filter(|a| a.eq_ignore_ascii_case("Safari"))
+                .count(),
+            1,
+            "Safari overridden, not duplicated"
+        );
         assert_eq!(reg.apps().len(), before + 1);
     }
 }

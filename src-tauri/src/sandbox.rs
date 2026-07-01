@@ -66,7 +66,11 @@ fn build_command(host_script: &Path) -> (Command, bool) {
         // (allow default) then (deny network*) => everything allowed EXCEPT network.
         let profile = "(version 1)(allow default)(deny network*)";
         let mut c = Command::new("sandbox-exec");
-        c.arg("-p").arg(profile).arg("node").args(node_args).arg(host_script);
+        c.arg("-p")
+            .arg(profile)
+            .arg("node")
+            .args(node_args)
+            .arg(host_script);
         (c, true)
     } else {
         let mut c = Command::new("node");
@@ -90,7 +94,11 @@ fn which_sandbox_exec() -> bool {
 impl Session {
     /// Spawn the plugin host as a separate, deny-by-default (and on macOS,
     /// net-jailed) process.
-    pub fn spawn(host_script: &Path, manifest: &Manifest, resource: FocusedResource) -> io::Result<Session> {
+    pub fn spawn(
+        host_script: &Path,
+        manifest: &Manifest,
+        resource: FocusedResource,
+    ) -> io::Result<Session> {
         let (mut cmd, net_jailed) = build_command(host_script);
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -109,21 +117,37 @@ impl Session {
             loop {
                 let mut buf = Vec::new();
                 // `take` bounds memory at MAX_LINE_BYTES regardless of plugin output.
-                let n = match (&mut reader).take(MAX_LINE_BYTES).read_until(b'\n', &mut buf) {
+                let n = match (&mut reader)
+                    .take(MAX_LINE_BYTES)
+                    .read_until(b'\n', &mut buf)
+                {
                     Ok(n) => n,
-                    Err(e) => { let _ = tx.send(Err(e)); return; }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
                 };
                 if n == 0 {
-                    let _ = tx.send(Err(io::Error::new(io::ErrorKind::UnexpectedEof, "plugin host closed the pipe")));
+                    let _ = tx.send(Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "plugin host closed the pipe",
+                    )));
                     return;
                 }
                 if !buf.ends_with(b"\n") && buf.len() as u64 >= MAX_LINE_BYTES {
-                    let _ = tx.send(Err(io::Error::new(io::ErrorKind::InvalidData, "IPC line exceeded size cap (S5)")));
+                    let _ = tx.send(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "IPC line exceeded size cap (S5)",
+                    )));
                     return;
                 }
                 let line = String::from_utf8_lossy(&buf);
                 match serde_json::from_str::<Value>(line.trim_end()) {
-                    Ok(v) => { if tx.send(Ok(v)).is_err() { return; } }
+                    Ok(v) => {
+                        if tx.send(Ok(v)).is_err() {
+                            return;
+                        }
+                    }
                     Err(_) => { /* skip malformed line, keep reading */ }
                 }
             }
@@ -142,7 +166,7 @@ impl Session {
         // Wait (with timeout) for the host's ready handshake.
         let ready = session.recv()?;
         if ready.get("t").and_then(|v| v.as_str()) != Some("ready") {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("no ready handshake: {ready}")));
+            return Err(io::Error::other(format!("no ready handshake: {ready}")));
         }
         Ok(session)
     }
@@ -165,11 +189,15 @@ impl Session {
             Ok(r) => r,
             Err(RecvTimeoutError::Timeout) => {
                 let _ = self.child.kill();
-                Err(io::Error::new(io::ErrorKind::TimedOut, "plugin exceeded execution timeout — killed (S5)"))
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "plugin exceeded execution timeout — killed (S5)",
+                ))
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                Err(io::Error::new(io::ErrorKind::UnexpectedEof, "reader thread gone"))
-            }
+            Err(RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "reader thread gone",
+            )),
         }
     }
 
@@ -193,7 +221,11 @@ impl Session {
                 Some("cap_request") => self.answer_cap(&msg)?,
                 Some("result") => return Ok(msg.get("value").cloned().unwrap_or(Value::Null)),
                 Some("log") => eprintln!("[plugin] {}", msg.get("msg").unwrap_or(&Value::Null)),
-                other => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected during invoke: {other:?} ({msg})"))),
+                other => {
+                    return Err(io::Error::other(format!(
+                        "unexpected during invoke: {other:?} ({msg})"
+                    )))
+                }
             }
         }
     }
@@ -206,21 +238,37 @@ impl Session {
             match msg.get("t").and_then(|v| v.as_str()) {
                 Some("cap_request") => self.answer_cap(&msg)?,
                 Some("recheck_result") => {
-                    let allowed = msg.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let reason = msg.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let allowed = msg
+                        .get("allowed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let reason = msg
+                        .get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     return Ok((allowed, reason));
                 }
                 Some("log") => eprintln!("[plugin] {}", msg.get("msg").unwrap_or(&Value::Null)),
-                other => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected during recheck: {other:?} ({msg})"))),
+                other => {
+                    return Err(io::Error::other(format!(
+                        "unexpected during recheck: {other:?} ({msg})"
+                    )))
+                }
             }
         }
     }
 
     fn answer_cap(&mut self, msg: &Value) -> io::Result<()> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
-        let cap = msg.get("cap").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let cap = msg
+            .get("cap")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let decision = self.broker.decide(&cap);
-        self.cap_log.push((cap.clone(), decision.allowed, decision.reason.clone()));
+        self.cap_log
+            .push((cap.clone(), decision.allowed, decision.reason.clone()));
         self.send(&json!({
             "t": "cap_response", "id": id,
             "allowed": decision.allowed, "result": decision.result, "reason": decision.reason,

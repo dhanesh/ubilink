@@ -47,7 +47,10 @@ pub fn detect_automation_permission() -> PermissionState {
 pub enum CaptureFailure {
     /// OS automation permission is missing (S4/TN7). `explanation` + `how_to_fix`
     /// are shown to the user; capture is retried after the user grants it.
-    PermissionRequired { explanation: String, how_to_fix: String },
+    PermissionRequired {
+        explanation: String,
+        how_to_fix: String,
+    },
     /// No adapter supports the active app/resource (degradation, U3).
     Unsupported { explanation: String },
     /// The adapter tried but failed (e.g. the app returned nothing).
@@ -133,7 +136,10 @@ impl ResourceAdapter for FileAdapter {
         } else {
             vec![resource.uri.clone()]
         };
-        OpenPlan { program: program.into(), args }
+        OpenPlan {
+            program: program.into(),
+            args,
+        }
     }
 }
 
@@ -157,7 +163,10 @@ pub fn capture_active(
                 adapter.id()
             ),
         };
-        return Err(CaptureFailure::PermissionRequired { explanation, how_to_fix });
+        return Err(CaptureFailure::PermissionRequired {
+            explanation,
+            how_to_fix,
+        });
     }
     adapter.capture()
 }
@@ -179,7 +188,10 @@ mod tests {
         assert_eq!(id.name, "My Note.md");
         assert!(id.uri.starts_with("file://"));
         assert_eq!(id.path.as_deref(), Some(f.to_string_lossy().as_ref()));
-        assert!(id.content_hash.is_some(), "RT-3: content hash should be set for a readable file");
+        assert!(
+            id.content_hash.is_some(),
+            "RT-3: content hash should be set for a readable file"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -199,20 +211,30 @@ mod tests {
         // PermissionRequired failure carrying a human explanation — never silent.
         struct LiveAppAdapter;
         impl ResourceAdapter for LiveAppAdapter {
-            fn id(&self) -> &str { "safari.macos" }
-            fn needs_permission(&self) -> bool { true }
+            fn id(&self) -> &str {
+                "safari.macos"
+            }
+            fn needs_permission(&self) -> bool {
+                true
+            }
             fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
                 panic!("capture must NOT run when permission gate blocks it");
             }
             fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
-                OpenPlan { program: "open".into(), args: vec![r.uri.clone()] }
+                OpenPlan {
+                    program: "open".into(),
+                    args: vec![r.uri.clone()],
+                }
             }
         }
         let a = LiveAppAdapter;
         for state in [PermissionState::NotDetermined, PermissionState::Denied] {
             let err = capture_active(&a, state).unwrap_err();
             match err {
-                CaptureFailure::PermissionRequired { ref explanation, ref how_to_fix } => {
+                CaptureFailure::PermissionRequired {
+                    ref explanation,
+                    ref how_to_fix,
+                } => {
                     assert!(!explanation.trim().is_empty(), "U3: empty explanation");
                     assert!(!how_to_fix.trim().is_empty());
                     assert!(explanation.contains("safari.macos"));
@@ -222,7 +244,10 @@ mod tests {
         }
         // With permission granted, the gate opens (and capture runs -> panics here,
         // proving the gate is what stops it). We assert the gate path only.
-        assert!(matches!(detect_automation_permission(), PermissionState::NotDetermined));
+        assert!(matches!(
+            detect_automation_permission(),
+            PermissionState::NotDetermined
+        ));
     }
 
     #[test]
@@ -230,7 +255,9 @@ mod tests {
         let a = FileAdapter::new("/x/y.txt");
         let id = ResourceIdentity::new("y.txt", "obsidian://vault/y");
         let plan = a.open_plan(&id);
-        assert!(plan.args.iter().any(|arg| arg == "obsidian://vault/y"),
-            "open plan must target the resource URI: {plan:?}");
+        assert!(
+            plan.args.iter().any(|arg| arg == "obsidian://vault/y"),
+            "open plan must target the resource URI: {plan:?}"
+        );
     }
 }

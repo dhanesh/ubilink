@@ -16,7 +16,7 @@
 // .github/workflows/release.yml.
 
 use crate::broker::Manifest;
-use crate::integrations::{sign_bundle, Installer, InstallError, SignedBundle};
+use crate::integrations::{sign_bundle, InstallError, Installer, SignedBundle};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
@@ -101,14 +101,16 @@ pub fn sign_to_json(
     version: u32,
 ) -> Result<String, SignError> {
     let signed = sign_bundle(key, manifest, source, version);
-    serde_json::to_string_pretty(&WireBundle::from_signed(&signed)).map_err(|e| SignError::Json(e.to_string()))
+    serde_json::to_string_pretty(&WireBundle::from_signed(&signed))
+        .map_err(|e| SignError::Json(e.to_string()))
 }
 
 /// Verify a JSON artifact against a set of trusted public-key hexes (the CI
 /// self-verify step, and the model an on-device installer uses). Ok iff signed by a
 /// trusted key over its own bytes.
 pub fn verify_json(json: &str, trusted_pub_hex: &[String]) -> Result<(), SignError> {
-    let wire: WireBundle = serde_json::from_str(json).map_err(|e| SignError::Json(e.to_string()))?;
+    let wire: WireBundle =
+        serde_json::from_str(json).map_err(|e| SignError::Json(e.to_string()))?;
     let signed = wire.into_signed()?;
     let mut trusted = Vec::with_capacity(trusted_pub_hex.len());
     for h in trusted_pub_hex {
@@ -119,7 +121,9 @@ pub fn verify_json(json: &str, trusted_pub_hex: &[String]) -> Result<(), SignErr
             .map_err(|_| SignError::BadKey("trusted key must be 32 bytes".into()))?;
         trusted.push(VerifyingKey::from_bytes(&arr).map_err(|e| SignError::BadKey(e.to_string()))?);
     }
-    Installer::new(trusted).verify(&signed).map_err(SignError::Verify)
+    Installer::new(trusted)
+        .verify(&signed)
+        .map_err(SignError::Verify)
 }
 
 // ── dependency-free hex (S2: no new crates) ──
@@ -134,15 +138,19 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn from_hex(s: &str) -> Result<Vec<u8>, SignError> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(SignError::BadHex("odd length".into()));
     }
     let mut out = Vec::with_capacity(s.len() / 2);
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        let hi = (bytes[i] as char).to_digit(16).ok_or_else(|| SignError::BadHex(format!("non-hex char '{}'", bytes[i] as char)))?;
-        let lo = (bytes[i + 1] as char).to_digit(16).ok_or_else(|| SignError::BadHex(format!("non-hex char '{}'", bytes[i + 1] as char)))?;
+        let hi = (bytes[i] as char)
+            .to_digit(16)
+            .ok_or_else(|| SignError::BadHex(format!("non-hex char '{}'", bytes[i] as char)))?;
+        let lo = (bytes[i + 1] as char)
+            .to_digit(16)
+            .ok_or_else(|| SignError::BadHex(format!("non-hex char '{}'", bytes[i + 1] as char)))?;
         out.push(((hi << 4) | lo) as u8);
         i += 2;
     }
@@ -154,10 +162,19 @@ mod tests {
     use super::*;
 
     fn manifest(id: &str) -> Manifest {
-        Manifest { id: id.into(), name: "Demo".into(), app: "Obsidian".into(), version: "1".into(), needs: vec![], signature: None }
+        Manifest {
+            id: id.into(),
+            name: "Demo".into(),
+            app: "Obsidian".into(),
+            version: "1".into(),
+            needs: vec![],
+            signature: None,
+        }
     }
     // A deterministic 32-byte key as hex (test-only; real keys come from a secret).
-    fn key_hex(seed: u8) -> String { to_hex(&[seed; 32]) }
+    fn key_hex(seed: u8) -> String {
+        to_hex(&[seed; 32])
+    }
 
     #[test]
     fn hex_roundtrips_all_byte_values() {
@@ -177,7 +194,13 @@ mod tests {
         // step (and any on-device installer trusting that pubkey) accepts it.
         let key = signing_key_from_hex(&key_hex(7)).unwrap();
         let pub_hex = public_hex(&key);
-        let json = sign_to_json(&key, manifest("ubilink.obsidian"), "export function run(){}".into(), 3).unwrap();
+        let json = sign_to_json(
+            &key,
+            manifest("ubilink.obsidian"),
+            "export function run(){}".into(),
+            3,
+        )
+        .unwrap();
         assert!(verify_json(&json, &[pub_hex]).is_ok());
     }
 
@@ -189,8 +212,14 @@ mod tests {
         let pub_hex = public_hex(&key);
         let json = sign_to_json(&key, manifest("ubilink.obsidian"), "good()".into(), 1).unwrap();
         let tampered = json.replace("good()", "evil()");
-        assert_ne!(json, tampered, "test setup: source must appear in the artifact");
-        assert_eq!(verify_json(&tampered, &[pub_hex]), Err(SignError::Verify(InstallError::BadSignature)));
+        assert_ne!(
+            json, tampered,
+            "test setup: source must appear in the artifact"
+        );
+        assert_eq!(
+            verify_json(&tampered, &[pub_hex]),
+            Err(SignError::Verify(InstallError::BadSignature))
+        );
     }
 
     #[test]
@@ -199,17 +228,27 @@ mod tests {
         // because the app trusts only the release pubkey.
         let attacker = signing_key_from_hex(&key_hex(9)).unwrap();
         let release_pub = public_hex(&signing_key_from_hex(&key_hex(1)).unwrap());
-        let json = sign_to_json(&attacker, manifest("ubilink.obsidian"), "run()".into(), 1).unwrap();
-        assert_eq!(verify_json(&json, &[release_pub]), Err(SignError::Verify(InstallError::UntrustedSigner)));
+        let json =
+            sign_to_json(&attacker, manifest("ubilink.obsidian"), "run()".into(), 1).unwrap();
+        assert_eq!(
+            verify_json(&json, &[release_pub]),
+            Err(SignError::Verify(InstallError::UntrustedSigner))
+        );
     }
 
     #[test]
     fn signing_key_from_hex_rejects_wrong_length() {
-        assert!(matches!(signing_key_from_hex("00ff"), Err(SignError::BadKey(_))));
+        assert!(matches!(
+            signing_key_from_hex("00ff"),
+            Err(SignError::BadKey(_))
+        ));
     }
 
     #[test]
     fn verify_json_reports_malformed_json() {
-        assert!(matches!(verify_json("not json", &[]), Err(SignError::Json(_))));
+        assert!(matches!(
+            verify_json("not json", &[]),
+            Err(SignError::Json(_))
+        ));
     }
 }

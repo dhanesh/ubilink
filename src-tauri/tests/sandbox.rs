@@ -8,12 +8,12 @@
 //
 // Run: cd src-tauri && cargo test
 
-use ubilink_core::{FocusedResource, Manifest, Session};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use ubilink_core::{FocusedResource, Manifest, Session};
 
 fn repo_root() -> PathBuf {
     // CARGO_MANIFEST_DIR = .../ubilink/src-tauri ; repo root is its parent.
@@ -71,7 +71,10 @@ fn fail_closed_no_fs_no_child_escape() {
         "secretPath": secret_path.to_string_lossy(),
     });
     let result = session.invoke(&focused(), probe).unwrap();
-    eprintln!("\n[malicious plugin self-report] {}\n", serde_json::to_string_pretty(&result).unwrap());
+    eprintln!(
+        "\n[malicious plugin self-report] {}\n",
+        serde_json::to_string_pretty(&result).unwrap()
+    );
 
     // --- INDEPENDENT, authoritative assertions (do not trust the plugin) ---
     assert!(
@@ -97,7 +100,12 @@ fn fail_closed_no_fs_no_child_escape() {
 
     // --- corroborating: the plugin's own report must show DENIED for each ---
     let attempts = result["attempts"].as_array().expect("attempts array");
-    for name in ["fs.writeFile", "fs.readFile", "child_process.spawn", "worker_threads"] {
+    for name in [
+        "fs.writeFile",
+        "fs.readFile",
+        "child_process.spawn",
+        "worker_threads",
+    ] {
         let a = attempts
             .iter()
             .find(|a| a["name"] == name)
@@ -124,7 +132,10 @@ fn broker_allows_granted_denies_ungranted() {
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn host");
     session.load(&source).unwrap();
     let result = session.invoke(&focused(), json!({})).unwrap();
-    eprintln!("\n[benign plugin result] {}\n", serde_json::to_string_pretty(&result).unwrap());
+    eprintln!(
+        "\n[benign plugin result] {}\n",
+        serde_json::to_string_pretty(&result).unwrap()
+    );
 
     // Granted capability allowed and actually returned a result.
     assert_eq!(result["openAllowed"], true);
@@ -153,8 +164,10 @@ fn no_wholesale_graph_only_focused_resource() {
     let fr = &result["focusedResource"];
     assert!(fr.is_object(), "focused resource must be a single object");
     assert_eq!(fr["id"], "res-1");
-    assert!(fr.get("nodes").is_none() && fr.get("edges").is_none() && !fr.is_array(),
-        "a graph/collection leaked through read:focused-resource");
+    assert!(
+        fr.get("nodes").is_none() && fr.get("edges").is_none() && !fr.is_array(),
+        "a graph/collection leaked through read:focused-resource"
+    );
 
     // No string the plugin can send yields the graph.
     assert_eq!(result["graphAllowed"], false);
@@ -180,7 +193,9 @@ fn net_is_jailed_when_supported() {
         let start = std::time::Instant::now();
         while start.elapsed() < Duration::from_secs(3) {
             match listener.accept() {
-                Ok(_) => { accepts2.fetch_add(1, Ordering::SeqCst); }
+                Ok(_) => {
+                    accepts2.fetch_add(1, Ordering::SeqCst);
+                }
                 Err(_) => std::thread::sleep(Duration::from_millis(50)),
             }
         }
@@ -204,9 +219,16 @@ fn net_is_jailed_when_supported() {
     let net = attempts.iter().find(|a| a["name"] == "net.connect");
 
     if jailed {
-        assert_eq!(accepts.load(Ordering::SeqCst), 0, "FAIL-OPEN: jailed plugin still connected to the listener");
+        assert_eq!(
+            accepts.load(Ordering::SeqCst),
+            0,
+            "FAIL-OPEN: jailed plugin still connected to the listener"
+        );
         let outcome = net.expect("net attempt")["outcome"].as_str().unwrap();
-        assert!(outcome.starts_with("DENIED:"), "net was not denied under the jail: {outcome}");
+        assert!(
+            outcome.starts_with("DENIED:"),
+            "net was not denied under the jail: {outcome}"
+        );
         eprintln!("[net jail] active — connection denied ({outcome})");
     } else {
         // Non-macOS / no sandbox-exec: net jail not wired yet (documented gap).
@@ -226,9 +248,18 @@ fn hung_plugin_is_killed() {
     let start = std::time::Instant::now();
     let res = session.invoke(&focused(), json!({}));
     let elapsed = start.elapsed();
-    assert!(res.is_err(), "hung plugin should have timed out, got: {res:?}");
-    assert!(elapsed < Duration::from_secs(3), "timeout took too long: {elapsed:?}");
-    eprintln!("[exec timeout] hung plugin killed after {elapsed:?}: {}", res.unwrap_err());
+    assert!(
+        res.is_err(),
+        "hung plugin should have timed out, got: {res:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "timeout took too long: {elapsed:?}"
+    );
+    eprintln!(
+        "[exec timeout] hung plugin killed after {elapsed:?}: {}",
+        res.unwrap_err()
+    );
 }
 
 /// TEST 4 — Revoke (SC-3).

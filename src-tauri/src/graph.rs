@@ -77,7 +77,10 @@ impl LinkGraph {
             conn.execute("ALTER TABLE resources ADD COLUMN guid TEXT", [])?;
             conn.execute("ALTER TABLE resources ADD COLUMN created_at INTEGER", [])?;
             conn.execute("ALTER TABLE resources ADD COLUMN updated_at INTEGER", [])?;
-            conn.execute("UPDATE resources SET created_at = rowid, updated_at = rowid", [])?;
+            conn.execute(
+                "UPDATE resources SET created_at = rowid, updated_at = rowid",
+                [],
+            )?;
             // each legacy row gets a fresh UUID (stable once written).
             let ids: Vec<String> = {
                 let mut stmt = conn.prepare("SELECT id FROM resources WHERE guid IS NULL")?;
@@ -85,7 +88,10 @@ impl LinkGraph {
                 rows.collect::<rusqlite::Result<_>>()?
             };
             for id in ids {
-                conn.execute("UPDATE resources SET guid = ?1 WHERE id = ?2", params![Self::new_guid(), id])?;
+                conn.execute(
+                    "UPDATE resources SET guid = ?1 WHERE id = ?2",
+                    params![Self::new_guid(), id],
+                )?;
             }
             // The first backfill used rowid as a placeholder created_at — but rowid
             // isn't a real time. Re-derive it below.
@@ -145,7 +151,12 @@ impl LinkGraph {
     /// Link two resources together (bidirectional). Idempotent: linking an
     /// already-linked pair (in either order) is a no-op that returns the existing
     /// link. Atomic via a single transaction (T2).
-    pub fn link(&mut self, a: &ResourceIdentity, b: &ResourceIdentity, created_at: Option<i64>) -> rusqlite::Result<Link> {
+    pub fn link(
+        &mut self,
+        a: &ResourceIdentity,
+        b: &ResourceIdentity,
+        created_at: Option<i64>,
+    ) -> rusqlite::Result<Link> {
         let tx = self.conn.transaction()?;
         let a_id = a.uri.clone();
         let b_id = b.uri.clone();
@@ -161,7 +172,11 @@ impl LinkGraph {
             )?;
         }
         // Canonical ordering so (A,B) and (B,A) collapse to one row.
-        let (lo, hi) = if a_id <= b_id { (&a_id, &b_id) } else { (&b_id, &a_id) };
+        let (lo, hi) = if a_id <= b_id {
+            (&a_id, &b_id)
+        } else {
+            (&b_id, &a_id)
+        };
         let link_id = format!("{lo}\u{1f}{hi}");
         tx.execute(
             "INSERT INTO links (id, lo_id, hi_id, created_at) VALUES (?1, ?2, ?3, ?4)
@@ -169,18 +184,32 @@ impl LinkGraph {
             params![link_id, lo, hi, created_at],
         )?;
         tx.commit()?;
-        Ok(Link { id: link_id, source_id: a_id, target_id: b_id, created_at })
+        Ok(Link {
+            id: link_id,
+            source_id: a_id,
+            target_id: b_id,
+            created_at,
+        })
     }
 
     /// Link two resources that ALREADY exist in the graph, by uri (the browser's
     /// "L" action). Bidirectional + idempotent like `link`, but it does NOT upsert
     /// the resources — they're already captured, so their titles are left untouched.
     /// A self-link (a == b) is a no-op.
-    pub fn link_existing(&self, a_uri: &str, b_uri: &str, created_at: Option<i64>) -> rusqlite::Result<()> {
+    pub fn link_existing(
+        &self,
+        a_uri: &str,
+        b_uri: &str,
+        created_at: Option<i64>,
+    ) -> rusqlite::Result<()> {
         if a_uri == b_uri {
             return Ok(());
         }
-        let (lo, hi) = if a_uri <= b_uri { (a_uri, b_uri) } else { (b_uri, a_uri) };
+        let (lo, hi) = if a_uri <= b_uri {
+            (a_uri, b_uri)
+        } else {
+            (b_uri, a_uri)
+        };
         let link_id = format!("{lo}\u{1f}{hi}");
         self.conn.execute(
             "INSERT INTO links (id, lo_id, hi_id, created_at) VALUES (?1, ?2, ?3, ?4)
@@ -242,7 +271,13 @@ impl LinkGraph {
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                ResourceIdentity { name: row.get(1)?, uri: row.get(2)?, path: row.get(3)?, bookmark: None, content_hash: row.get(4)? },
+                ResourceIdentity {
+                    name: row.get(1)?,
+                    uri: row.get(2)?,
+                    path: row.get(3)?,
+                    bookmark: None,
+                    content_hash: row.get(4)?,
+                },
                 row.get(5)?,
             ))
         })?;
@@ -262,7 +297,13 @@ impl LinkGraph {
         )?;
         let rows = stmt.query_map(params![uri], |row| {
             Ok((
-                ResourceIdentity { name: row.get(1)?, uri: row.get(2)?, path: row.get(3)?, bookmark: None, content_hash: row.get(4)? },
+                ResourceIdentity {
+                    name: row.get(1)?,
+                    uri: row.get(2)?,
+                    path: row.get(3)?,
+                    bookmark: None,
+                    content_hash: row.get(4)?,
+                },
                 row.get(5)?,
             ))
         })?;
@@ -271,7 +312,11 @@ impl LinkGraph {
 
     /// Whether two resources are linked (order-independent).
     pub fn are_linked(&self, a_uri: &str, b_uri: &str) -> rusqlite::Result<bool> {
-        let (lo, hi) = if a_uri <= b_uri { (a_uri, b_uri) } else { (b_uri, a_uri) };
+        let (lo, hi) = if a_uri <= b_uri {
+            (a_uri, b_uri)
+        } else {
+            (b_uri, a_uri)
+        };
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM links WHERE lo_id = ?1 AND hi_id = ?2",
             params![lo, hi],
@@ -282,12 +327,14 @@ impl LinkGraph {
 
     /// Total number of links (for assertions about dedup/idempotency).
     pub fn link_count(&self) -> rusqlite::Result<i64> {
-        self.conn.query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0))
+        self.conn
+            .query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0))
     }
 
     /// Number of captured resources (Settings shows this; export sanity).
     pub fn resource_count(&self) -> rusqlite::Result<i64> {
-        self.conn.query_row("SELECT COUNT(*) FROM resources", [], |r| r.get(0))
+        self.conn
+            .query_row("SELECT COUNT(*) FROM resources", [], |r| r.get(0))
     }
 
     /// Wipe the graph — every resource and link (Settings → Reset, destructive).
@@ -307,36 +354,60 @@ impl LinkGraph {
     /// Returns (resources_seen, links_seen). Hand-parsed (no serde dep on the type)
     /// using the same field shape `export_json` writes.
     pub fn import_json(&mut self, json: &str) -> Result<(usize, usize), String> {
-        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("not valid JSON: {e}"))?;
+        let v: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("not valid JSON: {e}"))?;
         let schema = v.get("schema").and_then(|s| s.as_str()).unwrap_or("");
         // v3 = guid endpoints (current); v2 = indexed; v1 = full-URI (all back-compat).
-        enum Ref { Guid, Index, Uri }
+        enum Ref {
+            Guid,
+            Index,
+            Uri,
+        }
         let kind = match schema {
             "ubilink.graph.v3" => Ref::Guid,
             "ubilink.graph.v2" => Ref::Index,
             "ubilink.graph.v1" => Ref::Uri,
-            _ => return Err(format!("unrecognized export schema: '{schema}' (expected ubilink.graph.v3)")),
+            _ => {
+                return Err(format!(
+                    "unrecognized export schema: '{schema}' (expected ubilink.graph.v3)"
+                ))
+            }
         };
-        let resources = v.get("resources").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-        let links = v.get("links").and_then(|l| l.as_array()).cloned().unwrap_or_default();
+        let resources = v
+            .get("resources")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let links = v
+            .get("links")
+            .and_then(|l| l.as_array())
+            .cloned()
+            .unwrap_or_default();
 
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
         let mut order: Vec<String> = Vec::with_capacity(resources.len()); // index -> uri (v2)
-        let mut by_guid: HashMap<String, String> = HashMap::new();        // guid  -> uri (v3)
+        let mut by_guid: HashMap<String, String> = HashMap::new(); // guid  -> uri (v3)
         let mut nres = 0usize;
         for r in &resources {
             let uri = r.get("uri").and_then(|x| x.as_str());
             let name = r.get("name").and_then(|x| x.as_str());
             let (uri, name) = match (uri, name) {
                 (Some(u), Some(n)) if !u.is_empty() => (u, n),
-                _ => { order.push(String::new()); continue; } // keep index alignment
+                _ => {
+                    order.push(String::new());
+                    continue;
+                } // keep index alignment
             };
             let path = r.get("path").and_then(|x| x.as_str());
             // carry the original capture time when present; else 0 (legacy/foreign)
             let created = r.get("created_at").and_then(|x| x.as_i64()).unwrap_or(0);
             // preserve the file's guid (so export→import keeps identity + resolves
             // its links); generate a fresh one for v1/v2 files that carry none.
-            let guid = r.get("guid").and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(Self::new_guid);
+            let guid = r
+                .get("guid")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(Self::new_guid);
             tx.execute(
                 "INSERT INTO resources (id, name, uri, path, content_hash, guid, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?6)
@@ -353,7 +424,10 @@ impl LinkGraph {
         let endpoint = |val: &serde_json::Value| -> Option<String> {
             match kind {
                 Ref::Guid => by_guid.get(val.as_str()?).cloned(),
-                Ref::Index => order.get(val.as_u64()? as usize).filter(|u| !u.is_empty()).cloned(),
+                Ref::Index => order
+                    .get(val.as_u64()? as usize)
+                    .filter(|u| !u.is_empty())
+                    .cloned(),
                 Ref::Uri => val.as_str().map(|s| s.to_string()),
             }
         };
@@ -433,10 +507,15 @@ impl LinkGraph {
                 let (name, uri, path, guid, created_at) = row?;
                 let guid = guid.unwrap_or_else(Self::new_guid);
                 guid_of.insert(uri.clone(), guid.clone());
-                let at = created_at.map(|n| n.to_string()).unwrap_or_else(|| "null".into());
+                let at = created_at
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "null".into());
                 let mut obj = format!(
                     "{{\"guid\":\"{}\",\"name\":\"{}\",\"uri\":\"{}\",\"created_at\":{}",
-                    esc(&guid), esc(&name), esc(&uri), at
+                    esc(&guid),
+                    esc(&name),
+                    esc(&uri),
+                    at
                 );
                 if let Some(p) = path {
                     obj.push_str(&format!(",\"path\":\"{}\"", esc(&p)));
@@ -447,15 +526,28 @@ impl LinkGraph {
         }
         let mut links = Vec::new();
         {
-            let mut stmt = self.conn.prepare("SELECT lo_id, hi_id, created_at FROM links ORDER BY created_at")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT lo_id, hi_id, created_at FROM links ORDER BY created_at")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                ))
             })?;
             for row in rows {
                 let (lo, hi, at) = row?;
-                let (Some(a), Some(b)) = (guid_of.get(&lo), guid_of.get(&hi)) else { continue };
+                let (Some(a), Some(b)) = (guid_of.get(&lo), guid_of.get(&hi)) else {
+                    continue;
+                };
                 let at = at.map(|n| n.to_string()).unwrap_or_else(|| "null".into());
-                links.push(format!("{{\"a\":\"{}\",\"b\":\"{}\",\"created_at\":{}}}", esc(a), esc(b), at));
+                links.push(format!(
+                    "{{\"a\":\"{}\",\"b\":\"{}\",\"created_at\":{}}}",
+                    esc(a),
+                    esc(b),
+                    at
+                ));
             }
         }
         Ok(format!(
@@ -482,8 +574,18 @@ mod tests {
         let b = r("Paper.pdf", "file:///Paper.pdf");
         g.link(&a, &b, Some(1)).unwrap();
 
-        let from_a: Vec<String> = g.backlinks("obsidian://Note").unwrap().into_iter().map(|x| x.uri).collect();
-        let from_b: Vec<String> = g.backlinks("file:///Paper.pdf").unwrap().into_iter().map(|x| x.uri).collect();
+        let from_a: Vec<String> = g
+            .backlinks("obsidian://Note")
+            .unwrap()
+            .into_iter()
+            .map(|x| x.uri)
+            .collect();
+        let from_b: Vec<String> = g
+            .backlinks("file:///Paper.pdf")
+            .unwrap()
+            .into_iter()
+            .map(|x| x.uri)
+            .collect();
         assert_eq!(from_a, vec!["file:///Paper.pdf"]);
         assert_eq!(from_b, vec!["obsidian://Note"]);
     }
@@ -492,15 +594,30 @@ mod tests {
     fn link_existing_links_two_captured_resources_without_touching_titles() {
         let g = LinkGraph::open_in_memory().unwrap();
         g.upsert_resource(&r("Note", "obsidian://Note"), 1).unwrap();
-        g.upsert_resource(&r("Paper.pdf", "file:///Paper.pdf"), 1).unwrap();
-        g.link_existing("obsidian://Note", "file:///Paper.pdf", Some(1)).unwrap();
-        assert!(g.are_linked("obsidian://Note", "file:///Paper.pdf").unwrap());
+        g.upsert_resource(&r("Paper.pdf", "file:///Paper.pdf"), 1)
+            .unwrap();
+        g.link_existing("obsidian://Note", "file:///Paper.pdf", Some(1))
+            .unwrap();
+        assert!(g
+            .are_linked("obsidian://Note", "file:///Paper.pdf")
+            .unwrap());
         // bidirectional + idempotent + no self-links + titles preserved
-        g.link_existing("file:///Paper.pdf", "obsidian://Note", Some(2)).unwrap();
-        g.link_existing("obsidian://Note", "obsidian://Note", Some(3)).unwrap(); // self -> no-op
+        g.link_existing("file:///Paper.pdf", "obsidian://Note", Some(2))
+            .unwrap();
+        g.link_existing("obsidian://Note", "obsidian://Note", Some(3))
+            .unwrap(); // self -> no-op
         assert_eq!(g.link_count().unwrap(), 1);
-        let titles: Vec<String> = g.list_resources().unwrap().into_iter().map(|x| x.name).collect();
-        assert_eq!(titles, vec!["Note", "Paper.pdf"], "linking did not overwrite names");
+        let titles: Vec<String> = g
+            .list_resources()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.name)
+            .collect();
+        assert_eq!(
+            titles,
+            vec!["Note", "Paper.pdf"],
+            "linking did not overwrite names"
+        );
     }
 
     #[test]
@@ -517,11 +634,25 @@ mod tests {
         // re-run the heal (idempotent; same as a fresh open would do)
         LinkGraph::migrate(&g.conn).unwrap();
         let at = |id: &str| -> Option<i64> {
-            g.conn.query_row("SELECT created_at FROM resources WHERE id=?1", params![id], |r| r.get(0)).unwrap()
+            g.conn
+                .query_row(
+                    "SELECT created_at FROM resources WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap()
         };
-        assert_eq!(at("x://a"), Some(1782400000000), "linked resource gets the real link time");
+        assert_eq!(
+            at("x://a"),
+            Some(1782400000000),
+            "linked resource gets the real link time"
+        );
         assert_eq!(at("x://b"), Some(1782400000000));
-        assert_eq!(at("x://orphan"), None, "orphan with no link -> NULL (unknown), not a fake rowid");
+        assert_eq!(
+            at("x://orphan"),
+            None,
+            "orphan with no link -> NULL (unknown), not a fake rowid"
+        );
     }
 
     #[test]
@@ -531,16 +662,36 @@ mod tests {
         g.upsert_resource(&r("B", "x://b"), 200).unwrap(); // newer -> top
         let top0 = g.list_resources_with_counts().unwrap()[0].0.uri.clone();
         assert_eq!(top0, "x://b");
-        let guid_a_before: String = g.conn.query_row("SELECT guid FROM resources WHERE id='x://a'", [], |r| r.get(0)).unwrap();
+        let guid_a_before: String = g
+            .conn
+            .query_row("SELECT guid FROM resources WHERE id='x://a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
 
         // re-capture A at a later time -> it resurfaces above B, guid unchanged
         g.upsert_resource(&r("A", "x://a"), 300).unwrap();
         let top1 = g.list_resources_with_counts().unwrap()[0].0.uri.clone();
         assert_eq!(top1, "x://a", "re-capture floats A back to the top");
-        let guid_a_after: String = g.conn.query_row("SELECT guid FROM resources WHERE id='x://a'", [], |r| r.get(0)).unwrap();
-        assert_eq!(guid_a_before, guid_a_after, "guid is stable across re-capture");
+        let guid_a_after: String = g
+            .conn
+            .query_row("SELECT guid FROM resources WHERE id='x://a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            guid_a_before, guid_a_after,
+            "guid is stable across re-capture"
+        );
         // created_at preserved (still 100), only updated_at moved
-        let created: i64 = g.conn.query_row("SELECT created_at FROM resources WHERE id='x://a'", [], |r| r.get(0)).unwrap();
+        let created: i64 = g
+            .conn
+            .query_row(
+                "SELECT created_at FROM resources WHERE id='x://a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(created, 100);
     }
 
@@ -553,13 +704,22 @@ mod tests {
         g.link(&a, &b, Some(1)).unwrap();
         g.link(&a, &c, Some(2)).unwrap(); // A is linked to both B and C
         g.upsert_resource(&r("D", "x://d"), 1).unwrap(); // captured, unlinked
-        let counts: std::collections::HashMap<String, i64> =
-            g.list_resources_with_counts().unwrap().into_iter().map(|(r, n)| (r.uri, n)).collect();
+        let counts: std::collections::HashMap<String, i64> = g
+            .list_resources_with_counts()
+            .unwrap()
+            .into_iter()
+            .map(|(r, n)| (r.uri, n))
+            .collect();
         assert_eq!(counts["x://a"], 2);
         assert_eq!(counts["x://b"], 1);
         assert_eq!(counts["x://d"], 0);
         // drill into A: B and C, each reporting their own count (1 each)
-        let drilled: Vec<(String, i64)> = g.linked_with_counts("x://a").unwrap().into_iter().map(|(r, n)| (r.uri, n)).collect();
+        let drilled: Vec<(String, i64)> = g
+            .linked_with_counts("x://a")
+            .unwrap()
+            .into_iter()
+            .map(|(r, n)| (r.uri, n))
+            .collect();
         assert_eq!(drilled.len(), 2);
         assert!(drilled.iter().all(|(_, n)| *n == 1));
     }
@@ -567,30 +727,62 @@ mod tests {
     #[test]
     fn clear_wipes_everything_and_export_round_trips_the_shape() {
         let mut g = LinkGraph::open_in_memory().unwrap();
-        g.link(&r("Note", "obsidian://Note"), &r("Paper", "file:///P.pdf"), Some(7)).unwrap();
-        g.upsert_resource(&r("Solo \"quoted\"", "x://solo"), 1).unwrap(); // exercise JSON escaping
+        g.link(
+            &r("Note", "obsidian://Note"),
+            &r("Paper", "file:///P.pdf"),
+            Some(7),
+        )
+        .unwrap();
+        g.upsert_resource(&r("Solo \"quoted\"", "x://solo"), 1)
+            .unwrap(); // exercise JSON escaping
         assert_eq!(g.resource_count().unwrap(), 3);
 
         let json = g.export_json().unwrap();
         assert!(json.contains("\"schema\":\"ubilink.graph.v3\""));
-        assert!(json.contains("Solo \\\"quoted\\\""), "names are JSON-escaped");
-        assert!(json.contains("\"created_at\":7"), "link created_at preserved");
-        assert_eq!(json.matches("\"uri\":").count(), 3, "all 3 resources exported");
+        assert!(
+            json.contains("Solo \\\"quoted\\\""),
+            "names are JSON-escaped"
+        );
+        assert!(
+            json.contains("\"created_at\":7"),
+            "link created_at preserved"
+        );
+        assert_eq!(
+            json.matches("\"uri\":").count(),
+            3,
+            "all 3 resources exported"
+        );
         // v3: each resource carries a guid (a real UUID); links reference endpoints
         // BY GUID — the long URI is never repeated in a link.
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let guid_of = |uri: &str| -> String {
-            v["resources"].as_array().unwrap().iter()
-                .find(|r| r["uri"] == uri).unwrap()["guid"].as_str().unwrap().to_string()
+            v["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["uri"] == uri)
+                .unwrap()["guid"]
+                .as_str()
+                .unwrap()
+                .to_string()
         };
         let (gn, gp) = (guid_of("obsidian://Note"), guid_of("file:///P.pdf"));
         assert_eq!(gn.len(), 36, "guid is a UUID");
         let link = &v["links"].as_array().unwrap()[0];
         let (a, b) = (link["a"].as_str().unwrap(), link["b"].as_str().unwrap());
-        assert!((a == gn && b == gp) || (a == gp && b == gn), "link references the two guids");
-        assert!(!json.contains("obsidian://Note\",\"b\""), "links never repeat the URI");
+        assert!(
+            (a == gn && b == gp) || (a == gp && b == gn),
+            "link references the two guids"
+        );
+        assert!(
+            !json.contains("obsidian://Note\",\"b\""),
+            "links never repeat the URI"
+        );
         // the unlinked "Solo" resource has no path -> the key is omitted entirely
-        assert!(!json.contains("\"path\":null"), "null paths are omitted, not emitted");
+        assert!(
+            !json.contains("\"path\":null"),
+            "null paths are omitted, not emitted"
+        );
 
         let removed = g.clear().unwrap();
         assert_eq!(removed, 3);
@@ -612,7 +804,10 @@ mod tests {
         assert_eq!(g2.resource_count().unwrap(), 3);
         assert_eq!(g2.link_count().unwrap(), 1);
         // a bad schema is rejected with an explanation, not a silent no-op
-        assert!(g2.import_json("{\"schema\":\"nope\"}").unwrap_err().contains("schema"));
+        assert!(g2
+            .import_json("{\"schema\":\"nope\"}")
+            .unwrap_err()
+            .contains("schema"));
 
         // v1 (full-URI links) still imports — back-compat with older exports.
         let mut g3 = LinkGraph::open_in_memory().unwrap();
@@ -628,10 +823,25 @@ mod tests {
     fn list_resources_returns_every_resource_by_title() {
         // The link-browser's top level: every captured resource, sorted by title.
         let mut g = LinkGraph::open_in_memory().unwrap();
-        g.link(&r("Paper.pdf", "file:///Paper.pdf"), &r("Note", "obsidian://Note"), Some(1)).unwrap();
-        g.upsert_resource(&r("Acme", "https://acme.example"), 1).unwrap(); // a standalone, unlinked resource
-        let titles: Vec<String> = g.list_resources().unwrap().into_iter().map(|x| x.name).collect();
-        assert_eq!(titles, vec!["Acme", "Note", "Paper.pdf"], "A->Z by title, includes unlinked");
+        g.link(
+            &r("Paper.pdf", "file:///Paper.pdf"),
+            &r("Note", "obsidian://Note"),
+            Some(1),
+        )
+        .unwrap();
+        g.upsert_resource(&r("Acme", "https://acme.example"), 1)
+            .unwrap(); // a standalone, unlinked resource
+        let titles: Vec<String> = g
+            .list_resources()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.name)
+            .collect();
+        assert_eq!(
+            titles,
+            vec!["Acme", "Note", "Paper.pdf"],
+            "A->Z by title, includes unlinked"
+        );
     }
 
     #[test]
@@ -642,7 +852,11 @@ mod tests {
         g.link(&a, &b, Some(1)).unwrap();
         g.link(&a, &b, Some(2)).unwrap(); // same pair
         g.link(&b, &a, Some(3)).unwrap(); // reversed order
-        assert_eq!(g.link_count().unwrap(), 1, "A<->B must collapse to ONE link");
+        assert_eq!(
+            g.link_count().unwrap(),
+            1,
+            "A<->B must collapse to ONE link"
+        );
         assert!(g.are_linked("x://a", "x://b").unwrap());
         assert!(g.are_linked("x://b", "x://a").unwrap());
     }
@@ -660,7 +874,10 @@ mod tests {
         }
         {
             let g = LinkGraph::open(&p).unwrap();
-            assert!(g.are_linked("x://a", "x://b").unwrap(), "link did not persist");
+            assert!(
+                g.are_linked("x://a", "x://b").unwrap(),
+                "link did not persist"
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -687,7 +904,11 @@ mod tests {
             h.join().unwrap();
         }
         let g = LinkGraph::open(&p).unwrap();
-        assert_eq!(g.link_count().unwrap(), 1, "concurrent links duplicated the link");
+        assert_eq!(
+            g.link_count().unwrap(),
+            1,
+            "concurrent links duplicated the link"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

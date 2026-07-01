@@ -17,12 +17,23 @@ use std::time::Instant;
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
 
 /// Default scheme allowlist (SC-1). Extend via `LinkApi::with_schemes`.
-const DEFAULT_SCHEMES: &[&str] = &["file", "http", "https", "obsidian", "message", "x-devonthink-item"];
+const DEFAULT_SCHEMES: &[&str] = &[
+    "file",
+    "http",
+    "https",
+    "obsidian",
+    "message",
+    "x-devonthink-item",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiError {
     /// Input exceeds the size cap (S5/GAP-10).
-    InputTooLarge { field: String, bytes: usize, max: usize },
+    InputTooLarge {
+        field: String,
+        bytes: usize,
+        max: usize,
+    },
     /// Too many requests in the window (S5/GAP-10).
     RateLimited,
     /// URI scheme is not on the allowlist (SC-1: blocks javascript:/data: etc.).
@@ -34,9 +45,13 @@ pub enum ApiError {
 impl ApiError {
     pub fn message(&self) -> String {
         match self {
-            ApiError::InputTooLarge { field, bytes, max } => format!("`{field}` is {bytes} bytes (max {max})."),
+            ApiError::InputTooLarge { field, bytes, max } => {
+                format!("`{field}` is {bytes} bytes (max {max}).")
+            }
             ApiError::RateLimited => "Too many link requests — slow down.".into(),
-            ApiError::DisallowedScheme { scheme } => format!("URI scheme `{scheme}:` is not allowed."),
+            ApiError::DisallowedScheme { scheme } => {
+                format!("URI scheme `{scheme}:` is not allowed.")
+            }
             ApiError::Malformed { reason } => format!("Malformed link request: {reason}."),
         }
     }
@@ -53,7 +68,12 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn new(capacity: u32, refill_per_sec: u32) -> RateLimiter {
-        RateLimiter { tokens: capacity as f64, capacity: capacity as f64, refill_per_sec: refill_per_sec as f64, last: Instant::now() }
+        RateLimiter {
+            tokens: capacity as f64,
+            capacity: capacity as f64,
+            refill_per_sec: refill_per_sec as f64,
+            last: Instant::now(),
+        }
     }
     fn try_acquire(&mut self) -> bool {
         let now = Instant::now();
@@ -112,24 +132,38 @@ impl LinkApi {
         }
         // Size caps (S5).
         if uri.len() > MAX_INPUT_BYTES {
-            return Err(ApiError::InputTooLarge { field: "uri".into(), bytes: uri.len(), max: MAX_INPUT_BYTES });
+            return Err(ApiError::InputTooLarge {
+                field: "uri".into(),
+                bytes: uri.len(),
+                max: MAX_INPUT_BYTES,
+            });
         }
         if name.len() > MAX_INPUT_BYTES {
-            return Err(ApiError::InputTooLarge { field: "name".into(), bytes: name.len(), max: MAX_INPUT_BYTES });
+            return Err(ApiError::InputTooLarge {
+                field: "name".into(),
+                bytes: name.len(),
+                max: MAX_INPUT_BYTES,
+            });
         }
         // Encoding normalization + control-char rejection (SC-1).
         let uri = uri.trim();
         if uri.is_empty() {
-            return Err(ApiError::Malformed { reason: "empty uri".into() });
+            return Err(ApiError::Malformed {
+                reason: "empty uri".into(),
+            });
         }
         if uri.chars().any(|c| c.is_control()) || name.chars().any(|c| c.is_control()) {
-            return Err(ApiError::Malformed { reason: "control characters not allowed".into() });
+            return Err(ApiError::Malformed {
+                reason: "control characters not allowed".into(),
+            });
         }
         // Scheme allowlist (SC-1): blocks javascript:, data:, etc.
         let scheme = uri
             .split_once(':')
             .map(|(s, _)| s.to_ascii_lowercase())
-            .ok_or_else(|| ApiError::Malformed { reason: "uri has no scheme".into() })?;
+            .ok_or_else(|| ApiError::Malformed {
+                reason: "uri has no scheme".into(),
+            })?;
         if !self.schemes.iter().any(|s| s == &scheme) {
             return Err(ApiError::DisallowedScheme { scheme });
         }
@@ -150,7 +184,9 @@ mod tests {
     #[test]
     fn constructs_a_valid_link() {
         let mut api = LinkApi::new();
-        let id = api.construct_link("obsidian://vault/Note.md", "Note.md").unwrap();
+        let id = api
+            .construct_link("obsidian://vault/Note.md", "Note.md")
+            .unwrap();
         assert_eq!(id.uri, "obsidian://vault/Note.md");
         assert_eq!(id.name, "Note.md");
     }
@@ -171,7 +207,9 @@ mod tests {
         let mut api = LinkApi::new();
         assert_eq!(
             api.construct_link("javascript:alert(1)", "x").unwrap_err(),
-            ApiError::DisallowedScheme { scheme: "javascript".into() }
+            ApiError::DisallowedScheme {
+                scheme: "javascript".into()
+            }
         );
     }
 
@@ -181,11 +219,16 @@ mod tests {
         // scheme (declared by the Bear adapter) is trusted, then it constructs.
         let mut api = LinkApi::new();
         assert_eq!(
-            api.construct_link("bear://x-callback-url/open-note?title=x", "x").unwrap_err(),
-            ApiError::DisallowedScheme { scheme: "bear".into() }
+            api.construct_link("bear://x-callback-url/open-note?title=x", "x")
+                .unwrap_err(),
+            ApiError::DisallowedScheme {
+                scheme: "bear".into()
+            }
         );
         api.allow("bear");
-        assert!(api.construct_link("bear://x-callback-url/open-note?title=x", "x").is_ok());
+        assert!(api
+            .construct_link("bear://x-callback-url/open-note?title=x", "x")
+            .is_ok());
         // …but trusting bear: does NOT open the door to javascript: (S5 intact).
         assert!(matches!(
             api.construct_link("javascript:alert(1)", "x").unwrap_err(),
@@ -210,6 +253,9 @@ mod tests {
         for _ in 0..3 {
             assert!(api.construct_link("file:///a", "a").is_ok());
         }
-        assert_eq!(api.construct_link("file:///a", "a").unwrap_err(), ApiError::RateLimited);
+        assert_eq!(
+            api.construct_link("file:///a", "a").unwrap_err(),
+            ApiError::RateLimited
+        );
     }
 }

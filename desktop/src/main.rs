@@ -13,14 +13,14 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ubilink_core::{
-    AdapterRegistry, BrowseEntry, CommandRunner, ConfiguredAdapter, LinkGraph, OsaScriptRunner,
-    PanelBackend, PanelView, PermissionState, Support, UbilinkService, FRONTMOST_APP_SCRIPT,
-};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use ubilink_core::{
+    AdapterRegistry, BrowseEntry, CommandRunner, ConfiguredAdapter, LinkGraph, OsaScriptRunner,
+    PanelBackend, PanelView, PermissionState, Support, UbilinkService, FRONTMOST_APP_SCRIPT,
+};
 
 /// App state: the link-graph-backed panel backend + the declarative adapter registry.
 struct AppState {
@@ -47,17 +47,29 @@ struct PluginView {
 /// file → empty (everything enabled). Tiny std-only JSON via serde_json.
 fn load_disabled(data_dir: &std::path::Path) -> std::collections::HashSet<String> {
     let path = data_dir.join("plugins-state.json");
-    let Ok(text) = std::fs::read_to_string(path) else { return Default::default() };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Default::default() };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Default::default();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Default::default();
+    };
     v.get("disabled")
         .and_then(|d| d.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str()).map(|s| s.to_ascii_lowercase()).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str())
+                .map(|s| s.to_ascii_lowercase())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 /// Persist the disabled set. Best-effort (a failed write just means the toggle
 /// won't survive a restart — surfaced as the command's error).
-fn save_disabled(data_dir: &std::path::Path, disabled: &std::collections::HashSet<String>) -> Result<(), String> {
+fn save_disabled(
+    data_dir: &std::path::Path,
+    disabled: &std::collections::HashSet<String>,
+) -> Result<(), String> {
     let mut list: Vec<&String> = disabled.iter().collect();
     list.sort();
     let body = serde_json::json!({ "disabled": list });
@@ -72,21 +84,35 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
     let frontmost = OsaScriptRunner
         .run("osascript", &["-e", FRONTMOST_APP_SCRIPT])
         .map_err(|e| format!("Couldn't tell which app is active: {e}"))?;
-    let spec = state
-        .adapters
-        .for_app(&frontmost)
-        .ok_or_else(|| format!("Linking from \u{201c}{}\u{201d} isn't supported yet.", frontmost.trim()))?;
+    let spec = state.adapters.for_app(&frontmost).ok_or_else(|| {
+        format!(
+            "Linking from \u{201c}{}\u{201d} isn't supported yet.",
+            frontmost.trim()
+        )
+    })?;
     // Honor the plugin manager: a third-party plugin the user turned OFF behaves as
     // unsupported (built-ins can't be disabled, so they always pass).
     if !spec.builtin {
-        let disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+        let disabled = state
+            .disabled
+            .lock()
+            .map_err(|_| "internal state was poisoned".to_string())?;
         if disabled.contains(&spec.app.to_ascii_lowercase()) {
-            return Err(format!("Linking from \u{201c}{}\u{201d} is turned off in Settings.", spec.app));
+            return Err(format!(
+                "Linking from \u{201c}{}\u{201d} is turned off in Settings.",
+                spec.app
+            ));
         }
     }
     let adapter = ConfiguredAdapter::new(spec.clone(), OsaScriptRunner);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let mut b = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let mut b = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     b.capture_current(&adapter, now)
 }
 
@@ -98,14 +124,20 @@ fn capture_current(state: State<'_, AppState>) -> Result<PanelView, String> {
 /// The link-browser top level (Cmd+Shift+L): every captured resource, title+uri.
 #[tauri::command]
 fn list_links(state: State<'_, AppState>) -> Result<Vec<BrowseEntry>, String> {
-    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.list_links()
 }
 
 /// Drill-in (→): everything linked to `uri`.
 #[tauri::command]
 fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<BrowseEntry>, String> {
-    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.links_of(&uri)
 }
 
@@ -113,15 +145,24 @@ fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<BrowseEntry>,
 /// desktop supplies the timestamp.
 #[tauri::command]
 fn link_resources(state: State<'_, AppState>, a_uri: String, b_uri: String) -> Result<(), String> {
-    let created_at = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64);
-    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64);
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.link_resources(&a_uri, &b_uri, created_at)
 }
 
 /// Settings: resource + link counts.
 #[tauri::command]
 fn graph_stats(state: State<'_, AppState>) -> Result<ubilink_core::GraphStats, String> {
-    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.graph_stats()
 }
 
@@ -129,7 +170,10 @@ fn graph_stats(state: State<'_, AppState>) -> Result<ubilink_core::GraphStats, S
 /// the number of resources removed.
 #[tauri::command]
 fn reset_graph(state: State<'_, AppState>) -> Result<i64, String> {
-    let mut backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let mut backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.reset_graph()
 }
 
@@ -137,7 +181,10 @@ fn reset_graph(state: State<'_, AppState>) -> Result<i64, String> {
 #[tauri::command]
 fn export_graph(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let json = {
-        let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+        let backend = state
+            .backend
+            .lock()
+            .map_err(|_| "internal state was poisoned".to_string())?;
         backend.export_graph()?
     };
     let dir = app
@@ -146,7 +193,10 @@ fn export_graph(app: AppHandle, state: State<'_, AppState>) -> Result<String, St
         .or_else(|_| app.path().home_dir())
         .map_err(|e| format!("couldn't resolve a save directory: {e}"))?;
     // No clock in core; stamp the filename from the OS time here.
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let path = dir.join(format!("ubilink-export-{stamp}.json"));
     std::fs::write(&path, json).map_err(|e| format!("couldn't write export: {e}"))?;
     let p = path.to_string_lossy().to_string();
@@ -159,14 +209,20 @@ fn export_graph(app: AppHandle, state: State<'_, AppState>) -> Result<String, St
 /// Merges into the current graph; returns a human summary.
 #[tauri::command]
 fn import_graph(state: State<'_, AppState>, json: String) -> Result<String, String> {
-    let mut backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let mut backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     backend.import_graph(&json)
 }
 
 /// In-app capability disclosure (O2): what linking works where.
 #[tauri::command]
 fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
-    let backend = state.backend.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     Ok(backend.capabilities())
 }
 
@@ -174,7 +230,10 @@ fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
 /// enabled/disabled). Sorted case-insensitively by app name for a stable list.
 #[tauri::command]
 fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
-    let disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let disabled = state
+        .disabled
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     let mut rows: Vec<PluginView> = state
         .adapters
         .specs()
@@ -194,17 +253,26 @@ fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
 /// Settings › Plugins: toggle a third-party plugin on/off and persist it. Built-in
 /// adapters (core macOS apps ubilink ships with) can't be disabled.
 #[tauri::command]
-fn set_plugin_enabled(state: State<'_, AppState>, app: String, enabled: bool) -> Result<(), String> {
+fn set_plugin_enabled(
+    state: State<'_, AppState>,
+    app: String,
+    enabled: bool,
+) -> Result<(), String> {
     let is_builtin = state
         .adapters
         .specs()
         .iter()
         .any(|s| s.app.eq_ignore_ascii_case(&app) && s.builtin);
     if is_builtin && !enabled {
-        return Err(format!("{app} is a built-in adapter and can't be disabled."));
+        return Err(format!(
+            "{app} is a built-in adapter and can't be disabled."
+        ));
     }
     let key = app.to_ascii_lowercase();
-    let mut disabled = state.disabled.lock().map_err(|_| "internal state was poisoned".to_string())?;
+    let mut disabled = state
+        .disabled
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
     if enabled {
         disabled.remove(&key);
     } else {
@@ -354,15 +422,22 @@ fn permission_status() -> PermissionReport {
         PermissionState::Denied => "denied",
         PermissionState::NotDetermined => "not_determined",
     };
-    PermissionReport { accessibility: accessibility_trusted(), automation }
+    PermissionReport {
+        accessibility: accessibility_trusted(),
+        automation,
+    }
 }
 
 /// Open the relevant System Settings privacy pane so the user can grant a permission.
 #[tauri::command]
 fn open_settings(pane: String) -> Result<(), String> {
     let url = match pane.as_str() {
-        "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-        "automation" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+        "accessibility" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        }
+        "automation" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+        }
         other => return Err(format!("unknown settings pane: {other}")),
     };
     std::process::Command::new("open")
@@ -421,7 +496,7 @@ fn main() {
             // — which lets us paint the panel BEFORE the slow osascript capture runs.
             // Trade-off: no Dock icon (summon with the hotkey; Esc dismisses).
             #[cfg(target_os = "macos")]
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // Aurora material: a native NSVisualEffectView (HUD vibrancy) behind the
             // transparent webview, rounded to the panel radius (17px). The CSS panel

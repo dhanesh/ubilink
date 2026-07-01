@@ -94,6 +94,7 @@ impl Capability {
     ///   whose scope starts with it, e.g. grant `open:obsidian://` authorizes
     ///   `open:obsidian://vault/Note.md`.
     /// - otherwise scopes must be exactly equal.
+    ///
     /// Note: there is intentionally NO wildcard semantics. A grant of
     /// `read:*` would only ever match a literal request scope `*`, never
     /// `link-graph` — so no grant string can smuggle wholesale access.
@@ -128,10 +129,18 @@ pub struct Decision {
 
 impl Decision {
     fn allow(result: Value, reason: &str) -> Decision {
-        Decision { allowed: true, result: Some(result), reason: reason.to_string() }
+        Decision {
+            allowed: true,
+            result: Some(result),
+            reason: reason.to_string(),
+        }
     }
     fn deny(reason: &str) -> Decision {
-        Decision { allowed: false, result: None, reason: reason.to_string() }
+        Decision {
+            allowed: false,
+            result: None,
+            reason: reason.to_string(),
+        }
     }
 }
 
@@ -238,7 +247,9 @@ mod tests {
         // B3: an author validates a manifest before signing. A well-formed one
         // passes; empty required fields and malformed capability strings are caught
         // with a message (so authoring fails loudly, not silently downstream).
-        assert!(manifest(&["open:obsidian://", "read:focused-resource"]).validate().is_ok());
+        assert!(manifest(&["open:obsidian://", "read:focused-resource"])
+            .validate()
+            .is_ok());
 
         let mut empty_id = manifest(&[]);
         empty_id.id = "  ".into();
@@ -270,7 +281,13 @@ mod tests {
             &manifest(&["read:link-graph", "read:graph", "read:*", "read:all"]),
             res(),
         );
-        for req in ["read:link-graph", "read:graph", "read:*", "read:all", "read:everything"] {
+        for req in [
+            "read:link-graph",
+            "read:graph",
+            "read:*",
+            "read:all",
+            "read:everything",
+        ] {
             let d = b.decide(req);
             assert!(!d.allowed, "graph leaked via {req}: {}", d.reason);
         }

@@ -19,9 +19,24 @@ use std::path::PathBuf;
 /// Unambiguous outbound-network crates. Presence of any means the core could make
 /// network calls — a direct S2 violation.
 const FORBIDDEN: &[&str] = &[
-    "reqwest", "hyper", "isahc", "ureq", "curl", "surf", "attohttpc", "awc",
-    "actix-web", "axum", "warp", "rocket", "tonic", "tungstenite", "tokio-tungstenite",
-    "websocket", "async-std", "smol",
+    "reqwest",
+    "hyper",
+    "isahc",
+    "ureq",
+    "curl",
+    "surf",
+    "attohttpc",
+    "awc",
+    "actix-web",
+    "axum",
+    "warp",
+    "rocket",
+    "tonic",
+    "tungstenite",
+    "tokio-tungstenite",
+    "websocket",
+    "async-std",
+    "smol",
 ];
 
 #[test]
@@ -46,5 +61,8 @@ fn core_has_no_network_client_dependency() {
         "S2 VIOLATION: core depends on network crate(s) {offenders:?} — the core must make zero outbound connections. \
          If this is an intentional opt-in network feature, gate it and re-verify S2 with a runtime egress test."
     );
-    eprintln!("[S2 guard] {} locked deps, none are network clients ✓", names.len());
+    eprintln!(
+        "[S2 guard] {} locked deps, none are network clients ✓",
+        names.len()
+    );
 }
