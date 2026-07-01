@@ -54,7 +54,10 @@ dist-ssr/
 .world-model/
 
 # ── AI coding-agent scaffolding (local/per-user, not shared) ──
-.claude/
+# .claude/ is ignored EXCEPT settings.json — the shared, portable agent config
+# (least-privilege permissions). Personal hooks stay in the ignored settings.local.json.
+.claude/*
+!.claude/settings.json
 .cursor/
 .cursorrules
 .kiro/

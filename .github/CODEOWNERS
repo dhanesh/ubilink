@@ -1,0 +1,15 @@
+# CODEOWNERS — R6 review gate. Listed owners are auto-requested for review and,
+# with branch protection ("Require review from Code Owners"), must approve before
+# merge. INERT until this repo has a GitHub remote + branch protection configured
+# (see CONTRIBUTING.md § Human checkpoints). Confirm the @handle is correct once
+# the remote exists.
+
+# Default owner for everything.
+*                       @dhanesh
+
+# Security-critical surfaces — always want an explicit look.
+/src-tauri/src/broker.rs        @dhanesh
+/src-tauri/src/sandbox.rs       @dhanesh
+/src-tauri/src/release.rs       @dhanesh
+/.github/                       @dhanesh
+/.claude/settings.json          @dhanesh
