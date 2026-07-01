@@ -28,9 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable) + rustfmt + clippy
-        uses: dtolnay/rust-toolchain@stable
+      # Pinned to match rust-toolchain.toml so CI's clippy/rustfmt are identical to
+      # a developer's local ones (no lint drift). Keep this version in sync with it.
+      - name: Install pinned Rust + rustfmt + clippy
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.92.0"
           components: rustfmt, clippy
 
       # Cache the (heavy) Tauri dependency tree so desktop builds don't cold-start.

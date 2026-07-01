@@ -1,0 +1,8 @@
+# Pin the toolchain so `make verify` runs the SAME rustc/clippy locally and in CI
+# — "green locally" == "green in CI". Without this, CI's floating "stable" can be
+# several minor versions ahead of a dev's local stable, so a newly-added clippy
+# lint fails CI after passing locally (exactly what bit us: local 1.92 vs CI 1.96).
+# Bump deliberately, and keep .github/workflows/ci.yml's toolchain input in sync.
+[toolchain]
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]

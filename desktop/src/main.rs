@@ -246,7 +246,7 @@ fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
             scheme: s.schemes.first().cloned(),
         })
         .collect();
-    rows.sort_by(|a, b| a.app.to_ascii_lowercase().cmp(&b.app.to_ascii_lowercase()));
+    rows.sort_by_key(|p| p.app.to_ascii_lowercase());
     Ok(rows)
 }
 
