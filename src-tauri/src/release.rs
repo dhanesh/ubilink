@@ -166,7 +166,7 @@ mod tests {
             id: id.into(),
             name: "Demo".into(),
             app: "Obsidian".into(),
-            version: "1".into(),
+            version: "1.0.0".into(),
             needs: vec![],
             signature: None,
         }

@@ -38,11 +38,14 @@ even `read:link-graph` / `read:*` is denied (S1). Declare the least you need.
 
 1. **Write** `manifest.json` and `plugin.mjs` (copy `plugins/examples/benign/` as a
    starting point).
-2. **Validate** the manifest before you ship — catches empty fields and malformed
-   capability strings:
+2. **Validate** the manifest before you ship. This enforces
+   `schema/integration.manifest.schema.json`: a lowercase reverse-DNS `id`
+   (`com.example.app`), a semver `version` (`1.0.0`), `verb:scope` needs with a
+   lowercase verb and no duplicates, and no fields beyond the schema's:
    ```sh
    cargo run -q --bin ubilink-sign -- validate --manifest manifest.json
    ```
+   The same check runs again at signing, at registry publish and at install.
 3. **Sign** the bundle with your publisher key (a 64-hex ed25519 key; the same key
    model the app verifies against — see `docs/RUNBOOK-ci-signing.md`):
    ```sh
@@ -51,6 +54,11 @@ even `read:link-graph` / `read:*` is denied (S1). Declare the least you need.
        --manifest manifest.json --source plugin.mjs --version 1 \
        > my-integration.signed.json
    ```
+   There are two version numbers: the manifest's semver `version` is the
+   human-facing label, and `--version` is the integer release number that must
+   increase with every release (downgrade protection and the registry's
+   monotonicity check use it). A registry binds your integration `id` to the key
+   that first publishes it, so sign every release with the same key.
 4. **Install** — the user installs `my-integration.signed.json`. ubilink's `Installer`
    verifies the signature, the trusted publisher, and version monotonicity, then
    loads it (R3 / S3). No rebuild of ubilink is involved.
