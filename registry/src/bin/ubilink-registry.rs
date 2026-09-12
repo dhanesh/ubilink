@@ -1,7 +1,8 @@
-// Satisfies: O4. The std-only TcpListener shell over ubilink_registry::handle_stream.
-// All logic + the HTTP wire parsing are tested in the lib; this binds a port and
-// loops. Deployment (TLS, persistence, real trusted-key set) is in
-// docs/RUNBOOK-registry.md — that hosting is the ENV-blocked residual of O4.
+// Satisfies: O4. The std-only TcpListener shell over ubilink_registry::serve.
+// All logic, the HTTP wire parsing and the bounded accept loop are tested in the
+// lib; this reads config, binds a port and hands off. Deployment (TLS,
+// persistence, real trusted-key set) is in docs/RUNBOOK-registry.md — that
+// hosting is the ENV-blocked residual of O4.
 //
 // Usage:
 //   UBILINK_TRUSTED_KEYS=<comma-separated 64-hex pubkeys> \
@@ -9,7 +10,7 @@
 use std::io;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use ubilink_registry::RegistryIndex;
+use ubilink_registry::{RegistryIndex, ServerConfig};
 
 fn main() -> io::Result<()> {
     let addr = std::env::args()
@@ -27,28 +28,10 @@ fn main() -> io::Result<()> {
 
     let idx = Arc::new(Mutex::new(RegistryIndex::new(trusted)));
     let listener = TcpListener::bind(&addr)?;
-    eprintln!("[ubilink-registry] listening on {addr}");
-
-    for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("accept error: {e}");
-                continue;
-            }
-        };
-        let idx = Arc::clone(&idx);
-        // One thread per connection — fine for a low-traffic registry; the handler
-        // serves exactly one request then the connection closes (Connection: close).
-        std::thread::spawn(move || {
-            let mut guard = match idx.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(), // a poisoned lock still serves reads safely
-            };
-            if let Err(e) = ubilink_registry::handle_stream(&mut stream, &mut guard) {
-                eprintln!("connection error: {e}");
-            }
-        });
-    }
-    Ok(())
+    let cfg = ServerConfig::default();
+    eprintln!(
+        "[ubilink-registry] listening on {addr} (max {} connections, body cap {} bytes)",
+        cfg.max_connections, cfg.limits.max_body
+    );
+    ubilink_registry::serve(listener, idx, cfg)
 }

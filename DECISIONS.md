@@ -323,6 +323,15 @@ the registry's trusted set; approving a contribution means adding its publisher
 pubkey, revoking means removing it — review is enforced cryptographically, not by
 convention (`docs/RUNBOOK-registry.md`).
 
+**Hardening (2026-09).** Trust in *a* key is not trust for *every* id: each id is
+bound to the key that first published it, and a different trusted key cannot
+publish over it (key rotation / id transfer is not supported yet). The manifest
+schema is enforced (`Manifest::validate` + `deny_unknown_fields`) inside
+`Installer::verify`, the one gate shared by publish, CI self-verify and install.
+The HTTP shell reads each request with bounded sizes (1 MiB body → 413 before
+allocating; 8 KiB request line; 16 KiB headers) and no lock held, and bounds
+resources (10 s socket idle, 30 s request deadline, 64 connections → 503).
+
 **O4 MISSING → PARTIAL, not SATISFIED.** The registry mechanism and the documented
 review process exist and are proven; what remains is *operating a hosted, governed
 instance* (public host, TLS, durable storage, a standing review team) — genuinely
