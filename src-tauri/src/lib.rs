@@ -48,7 +48,7 @@ pub use adapter::{
     capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter,
 };
 pub use adapters_config::{AdapterRegistry, AdapterSpec, ConfiguredAdapter};
-pub use api::{ApiError, LinkApi, MAX_INPUT_BYTES};
+pub use api::{ApiError, LinkApi, LinkPolicy, DENIED_SCHEMES, MAX_INPUT_BYTES};
 pub use broker::{Broker, Decision, FocusedResource, Manifest};
 pub use capabilities::{Capability, CapabilityMatrix, LinkMechanism, Platform, Support};
 pub use graph::LinkGraph;
