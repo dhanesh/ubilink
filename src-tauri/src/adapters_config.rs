@@ -532,6 +532,45 @@ mod tests {
     }
 
     #[test]
+    fn a_stalled_app_times_out_with_an_explanation_naming_it() {
+        // T4 + U3 through the main capture path: the adapter's osascript stands in
+        // as a real child that never answers; the bounded runner gives up and the
+        // user sees which app stalled and what to do about a pending prompt.
+        struct StalledApp;
+        impl CommandRunner for StalledApp {
+            fn run(&self, _p: &str, _a: &[&str]) -> Result<String, String> {
+                crate::live_capture::run_bounded(
+                    "/bin/sleep",
+                    &["5"],
+                    std::time::Duration::from_millis(200),
+                )
+            }
+        }
+        let spec = AdapterSpec {
+            app: "Bear".into(),
+            script: "…".into(),
+            delimiter: None,
+            fields: vec!["title".into()],
+            uri: "bear://x-callback-url/open-note?title={title|urlencode}".into(),
+            name: "{title}".into(),
+            path: None,
+            schemes: vec![],
+            needs_permission: true,
+            builtin: false,
+            user_defined: false,
+        };
+        let start = std::time::Instant::now();
+        let err = ConfiguredAdapter::new(spec, StalledApp)
+            .capture()
+            .unwrap_err();
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        let msg = err.explanation();
+        assert!(msg.contains("Bear"), "{msg}");
+        assert!(msg.contains("didn't respond"), "{msg}");
+        assert!(msg.contains("permission prompt"), "{msg}");
+    }
+
+    #[test]
     fn defaults_load_and_cover_the_seed_apps() {
         let reg = AdapterRegistry::defaults();
         let apps = reg.apps();
