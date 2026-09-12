@@ -20,6 +20,19 @@ pub enum Platform {
     Linux,
 }
 
+impl Platform {
+    /// The platform this build targets (anything not Windows/Linux reports macOS).
+    pub fn current() -> Platform {
+        if cfg!(target_os = "windows") {
+            Platform::Windows
+        } else if cfg!(target_os = "linux") {
+            Platform::Linux
+        } else {
+            Platform::MacOS
+        }
+    }
+}
+
 /// How a link to a given app's resource is obtained/opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LinkMechanism {

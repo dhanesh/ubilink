@@ -305,14 +305,30 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Open a captured link's URI (the OpenPlan shape: macOS `open`).
+/// Runs a program without waiting for it (`open` hands off to LaunchServices, so
+/// there is nothing to wait for on the command thread). Used by `open_link`.
+struct SpawnRunner;
+
+impl CommandRunner for SpawnRunner {
+    fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
+        std::process::Command::new(program)
+            .args(args)
+            .spawn()
+            .map(|_| String::new())
+            .map_err(|e| format!("couldn't run {program}: {e}"))
+    }
+}
+
+/// Open a captured link's URI. The core re-validates it with the capture policy (a
+/// stored row may predate validation) and builds the command so the URI can't be
+/// read as an option or reach a shell (macOS: `open -- <uri>`).
 #[tauri::command]
-fn open_link(uri: String) -> Result<(), String> {
-    std::process::Command::new("open")
-        .arg(&uri)
-        .spawn()
-        .map_err(|e| format!("couldn't open {uri}: {e}"))?;
-    Ok(())
+fn open_link(state: State<'_, AppState>, uri: String) -> Result<(), String> {
+    let backend = state
+        .backend
+        .lock()
+        .map_err(|_| "internal state was poisoned".to_string())?;
+    backend.open_link(&SpawnRunner, &uri)
 }
 
 /// Resize the panel window to a content-fit height (the webview measures/computes

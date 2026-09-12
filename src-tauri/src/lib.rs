@@ -45,7 +45,8 @@ pub mod sandbox;
 pub mod service;
 
 pub use adapter::{
-    capture_active, CaptureFailure, FileAdapter, OpenPlan, PermissionState, ResourceAdapter,
+    capture_active, open_plan_for, open_uri, CaptureFailure, FileAdapter, OpenPlan,
+    PermissionState, ResourceAdapter,
 };
 pub use adapters_config::{AdapterRegistry, AdapterSpec, ConfiguredAdapter};
 pub use api::{ApiError, LinkApi, LinkPolicy, DENIED_SCHEMES, MAX_INPUT_BYTES};
