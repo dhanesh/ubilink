@@ -26,7 +26,7 @@ use ubilink_core::{
 struct AppState {
     backend: Mutex<PanelBackend>,
     adapters: AdapterRegistry,
-    /// App names (lowercased) of third-party plugins the user has turned OFF.
+    /// App names (lowercased) of non-built-in adapters the user has turned OFF.
     /// Built-in adapters can't be disabled, so they never appear here.
     disabled: Mutex<std::collections::HashSet<String>>,
     /// Where plugins-state.json lives (so toggles persist across launches).
@@ -34,11 +34,14 @@ struct AppState {
 }
 
 /// One row in the plugin manager: a supported app, whether it's a built-in
-/// default-macOS adapter or a third-party plugin, and whether it's enabled.
+/// default-macOS adapter, whether it's a custom adapter from the user's
+/// `adapters.json` (trusted local config running with the user's permissions,
+/// not a sandboxed plugin — D14), and whether it's enabled.
 #[derive(serde::Serialize, Clone)]
 struct PluginView {
     app: String,
     builtin: bool,
+    user_defined: bool,
     enabled: bool,
     scheme: Option<String>,
 }
@@ -90,7 +93,7 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
             frontmost.trim()
         )
     })?;
-    // Honor the plugin manager: a third-party plugin the user turned OFF behaves as
+    // Honor the plugin manager: a non-built-in adapter the user turned OFF behaves as
     // unsupported (built-ins can't be disabled, so they always pass).
     if !spec.builtin {
         let disabled = state
@@ -226,8 +229,8 @@ fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
     Ok(backend.capabilities())
 }
 
-/// Settings › Plugins: every adapter as a toggle row (built-in vs third-party,
-/// enabled/disabled). Sorted case-insensitively by app name for a stable list.
+/// Settings › App adapters: every adapter as a toggle row (built-in / shipped /
+/// custom, enabled/disabled). Sorted case-insensitively by app name for a stable list.
 #[tauri::command]
 fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
     let disabled = state
@@ -241,7 +244,8 @@ fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
         .map(|s| PluginView {
             app: s.app.clone(),
             builtin: s.builtin,
-            // Built-ins are always on; a third-party plugin is on unless the user disabled it.
+            user_defined: s.user_defined,
+            // Built-ins are always on; any other adapter is on unless the user disabled it.
             enabled: s.builtin || !disabled.contains(&s.app.to_ascii_lowercase()),
             scheme: s.schemes.first().cloned(),
         })
@@ -250,8 +254,9 @@ fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
     Ok(rows)
 }
 
-/// Settings › Plugins: toggle a third-party plugin on/off and persist it. Built-in
-/// adapters (core macOS apps ubilink ships with) can't be disabled.
+/// Settings › App adapters: toggle a non-built-in adapter on/off and persist it.
+/// Built-in adapters (core macOS apps ubilink ships with) can't be disabled; a
+/// user `adapters.json` entry is never built-in (D14), so it can always be disabled.
 #[tauri::command]
 fn set_plugin_enabled(
     state: State<'_, AppState>,
@@ -479,7 +484,7 @@ fn main() {
             // The bounded API (S5) must trust the schemes the adapters declare
             // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
             let schemes = adapters.declared_schemes();
-            // Which third-party plugins has the user turned off? Persisted across launches.
+            // Which non-built-in adapters has the user turned off? Persisted across launches.
             let disabled = load_disabled(&data_dir);
             app.manage(AppState {
                 backend: Mutex::new(PanelBackend::new(
