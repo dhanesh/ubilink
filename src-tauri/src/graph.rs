@@ -353,7 +353,31 @@ impl LinkGraph {
     /// same file twice is a no-op, and importing into a non-empty graph adds to it.
     /// Returns (resources_seen, links_seen). Hand-parsed (no serde dep on the type)
     /// using the same field shape `export_json` writes.
-    pub fn import_json(&mut self, json: &str) -> Result<(usize, usize), String> {
+    ///
+    /// SC-1: every row that would be written is passed to `validate(uri, name)`
+    /// BEFORE anything is written. If any row fails, the whole import is rejected
+    /// (the graph is left unchanged) with an error naming the offending row — a
+    /// shared export file can't plant links that capture would have refused.
+    pub fn import_json<F>(&mut self, json: &str, validate: F) -> Result<(usize, usize), String>
+    where
+        F: Fn(&str, &str) -> Result<(), String>,
+    {
+        // A row is written only if it has a non-empty uri and a name; anything else
+        // is skipped (keeping v2 index alignment), so it needs no validation.
+        fn row_fields(r: &serde_json::Value) -> Option<(&str, &str)> {
+            let uri = r.get("uri")?.as_str()?;
+            let name = r.get("name")?.as_str()?;
+            (!uri.is_empty()).then_some((uri, name))
+        }
+        // A short, escaped rendering of a URI for error messages (control/bidi
+        // characters show as \u{..}, long URIs are cut).
+        fn preview(s: &str) -> String {
+            let mut p: String = s.chars().take(80).collect();
+            if s.chars().count() > 80 {
+                p.push('…');
+            }
+            p.escape_debug().to_string()
+        }
         let v: serde_json::Value =
             serde_json::from_str(json).map_err(|e| format!("not valid JSON: {e}"))?;
         let schema = v.get("schema").and_then(|s| s.as_str()).unwrap_or("");
@@ -384,19 +408,26 @@ impl LinkGraph {
             .cloned()
             .unwrap_or_default();
 
+        // Validate EVERY row before opening the write transaction: all-or-nothing.
+        for (i, r) in resources.iter().enumerate() {
+            if let Some((uri, name)) = row_fields(r) {
+                validate(uri, name).map_err(|e| {
+                    format!(
+                        "resources[{i}] (`{}`) was rejected: {e} Nothing was imported.",
+                        preview(uri)
+                    )
+                })?;
+            }
+        }
+
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
         let mut order: Vec<String> = Vec::with_capacity(resources.len()); // index -> uri (v2)
         let mut by_guid: HashMap<String, String> = HashMap::new(); // guid  -> uri (v3)
         let mut nres = 0usize;
         for r in &resources {
-            let uri = r.get("uri").and_then(|x| x.as_str());
-            let name = r.get("name").and_then(|x| x.as_str());
-            let (uri, name) = match (uri, name) {
-                (Some(u), Some(n)) if !u.is_empty() => (u, n),
-                _ => {
-                    order.push(String::new());
-                    continue;
-                } // keep index alignment
+            let Some((uri, name)) = row_fields(r) else {
+                order.push(String::new()); // keep index alignment
+                continue;
             };
             let path = r.get("path").and_then(|x| x.as_str());
             // carry the original capture time when present; else 0 (legacy/foreign)
@@ -794,18 +825,18 @@ mod tests {
 
         // import round-trips: a fresh graph fed `json` rebuilds the same shape.
         let mut g2 = LinkGraph::open_in_memory().unwrap();
-        let (nr, nl) = g2.import_json(&json).unwrap();
+        let (nr, nl) = g2.import_json(&json, accept_all).unwrap();
         assert_eq!((nr, nl), (3, 1));
         assert_eq!(g2.resource_count().unwrap(), 3);
         assert_eq!(g2.link_count().unwrap(), 1);
         assert!(g2.are_linked("obsidian://Note", "file:///P.pdf").unwrap());
         // idempotent: importing again adds nothing new (upsert + ON CONFLICT)
-        g2.import_json(&json).unwrap();
+        g2.import_json(&json, accept_all).unwrap();
         assert_eq!(g2.resource_count().unwrap(), 3);
         assert_eq!(g2.link_count().unwrap(), 1);
         // a bad schema is rejected with an explanation, not a silent no-op
         assert!(g2
-            .import_json("{\"schema\":\"nope\"}")
+            .import_json("{\"schema\":\"nope\"}", accept_all)
             .unwrap_err()
             .contains("schema"));
 
@@ -814,9 +845,55 @@ mod tests {
         let v1 = r#"{"schema":"ubilink.graph.v1","resources":[
             {"name":"X","uri":"x://1","path":null},{"name":"Y","uri":"x://2","path":null}],
             "links":[{"a":"x://1","b":"x://2","created_at":9}]}"#;
-        let (r1, l1) = g3.import_json(v1).unwrap();
+        let (r1, l1) = g3.import_json(v1, accept_all).unwrap();
         assert_eq!((r1, l1), (2, 1));
         assert!(g3.are_linked("x://1", "x://2").unwrap());
+    }
+
+    /// Validator that accepts every row (tests of the storage shape, not policy).
+    fn accept_all(_uri: &str, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    #[test]
+    fn import_validates_every_row_first_and_is_all_or_nothing() {
+        // SC-1: the validator sees each writable row; one rejection aborts the whole
+        // import BEFORE any write — the valid row and the link are not stored and
+        // the existing graph is untouched. Skipped rows (no uri) aren't validated.
+        let mut g = LinkGraph::open_in_memory().unwrap();
+        g.upsert_resource(&r("Existing", "x://existing"), 1)
+            .unwrap();
+        let json = r#"{"schema":"ubilink.graph.v3","resources":[
+            {"guid":"g-ok","name":"Fine","uri":"x://fine"},
+            {"guid":"g-skip","name":"No uri"},
+            {"guid":"g-bad","name":"Evil","uri":"javascript:alert(1)"}],
+            "links":[{"a":"g-ok","b":"g-bad","created_at":1}]}"#;
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let reject_js = |uri: &str, _name: &str| -> Result<(), String> {
+            seen.borrow_mut().push(uri.to_string());
+            if uri.starts_with("javascript:") {
+                Err("URI scheme `javascript:` is not allowed.".into())
+            } else {
+                Ok(())
+            }
+        };
+        let err = g.import_json(json, reject_js).unwrap_err();
+        assert!(err.contains("resources[2]"), "names the row: {err}");
+        assert!(err.contains("javascript:alert(1)"), "shows the uri: {err}");
+        assert_eq!(*seen.borrow(), vec!["x://fine", "javascript:alert(1)"]);
+        assert_eq!(g.resource_count().unwrap(), 1, "nothing was imported");
+        assert_eq!(g.link_count().unwrap(), 0);
+        assert!(!g
+            .list_resources()
+            .unwrap()
+            .iter()
+            .any(|x| x.uri == "x://fine"));
+
+        // control/bidi characters in the offending uri are escaped in the message
+        let json = "{\"schema\":\"ubilink.graph.v3\",\"resources\":[\
+            {\"name\":\"n\",\"uri\":\"javascript:a\\u202Eb\"}],\"links\":[]}";
+        let err = g.import_json(json, reject_js).unwrap_err();
+        assert!(err.contains("\\u{202e}"), "escaped: {err}");
     }
 
     #[test]

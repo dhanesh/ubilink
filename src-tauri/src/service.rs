@@ -26,6 +26,9 @@ pub enum ServiceError {
     Validation(ApiError),
     /// The graph store failed.
     Store(String),
+    /// An import was rejected (bad JSON/schema, or a row failed validation) — the
+    /// graph was left unchanged.
+    Import(String),
 }
 
 impl ServiceError {
@@ -35,6 +38,7 @@ impl ServiceError {
             ServiceError::Capture(c) => c.explanation().to_string(),
             ServiceError::Validation(a) => a.message(),
             ServiceError::Store(e) => format!("Couldn't save the link: {e}"),
+            ServiceError::Import(e) => format!("Couldn't import: {e}"),
         }
     }
 }
@@ -179,8 +183,15 @@ impl UbilinkService {
             .export_json()
             .map_err(|e| ServiceError::Store(e.to_string()))
     }
+    /// Settings → Import. Every row is validated with the SAME policy capture uses
+    /// (S5/SC-1) before anything is written; one bad row rejects the whole file.
     pub fn import(&mut self, json: &str) -> Result<(usize, usize), ServiceError> {
-        self.graph.import_json(json).map_err(ServiceError::Store)
+        let policy = self.api.policy();
+        self.graph
+            .import_json(json, |uri, name| {
+                policy.validate(uri, name).map_err(|e| e.message())
+            })
+            .map_err(ServiceError::Import)
     }
 
     /// Every captured resource with its link count (browser list).
@@ -309,6 +320,97 @@ mod tests {
             .with_permission(PermissionState::Denied);
         let err = svc.capture(&LiveAdapter, 1).unwrap_err();
         assert!(!err.message().trim().is_empty(), "U3: empty error message");
+    }
+
+    /// A crafted v3 export: one valid row, one malicious row, and a link between them.
+    fn crafted_export(bad_name: &str, bad_uri: &str) -> String {
+        serde_json::json!({
+            "schema": "ubilink.graph.v3",
+            "resources": [
+                {"guid": "g-ok", "name": "Fine", "uri": "https://ok.example/"},
+                {"guid": "g-bad", "name": bad_name, "uri": bad_uri}
+            ],
+            "links": [{"a": "g-ok", "b": "g-bad", "created_at": 1}]
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn import_rejects_a_crafted_export_atomically_naming_the_row() {
+        // SC-1 at the import boundary: a shared export file must not be able to plant
+        // links that capture would have refused. One bad row rejects the WHOLE file
+        // (the valid row and the link are not written) and the error names the row.
+        let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        svc.graph
+            .upsert_resource(
+                &ResourceIdentity::new("Existing", "https://example.com/"),
+                1,
+            )
+            .unwrap();
+        let oversized = format!("https://x/{}", "a".repeat(crate::api::MAX_INPUT_BYTES));
+        let cases: [(&str, &str, &str); 7] = [
+            ("javascript", "Evil", "javascript:alert(1)"),
+            ("data", "Evil", "data:text/html,<script>alert(1)</script>"),
+            ("smb (not allowlisted)", "Evil", "smb://evil.example/share"),
+            ("leading dash", "Evil", "-a"),
+            ("bidi in uri", "Evil", "https://x/\u{202E}fdp.exe"),
+            ("control char in name", "Evil\u{0007}", "https://x/a"),
+            ("oversized uri", "Evil", &oversized),
+        ];
+        for (label, name, uri) in cases {
+            let err = svc
+                .import(&crafted_export(name, uri))
+                .expect_err(label)
+                .message();
+            assert!(err.contains("resources[1]"), "{label}: {err}");
+            assert_eq!(
+                svc.stats().unwrap(),
+                (1, 0),
+                "{label}: the graph must be left unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn own_export_round_trips_through_validated_import() {
+        // Regression guard: whatever capture accepted, import must accept too —
+        // including config-declared schemes (bear:) and awkward names.
+        struct BearNote;
+        impl ResourceAdapter for BearNote {
+            fn id(&self) -> &str {
+                "bear"
+            }
+            fn needs_permission(&self) -> bool {
+                false
+            }
+            fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
+                Ok(ResourceIdentity::new(
+                    "Idea \"quoted\" \u{05E9}\u{200F}",
+                    "bear://x-callback-url/open-note?id=1&title=a%20b",
+                ))
+            }
+            fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
+                OpenPlan {
+                    program: "open".into(),
+                    args: vec![r.uri.clone()],
+                }
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("ubilink-svc-rt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = FileAdapter::new(tmp_file(&dir, "My Note.md", b"x"));
+
+        let schemes = || vec!["bear".to_string()];
+        let mut svc =
+            UbilinkService::new(LinkGraph::open_in_memory().unwrap()).allow_schemes(schemes());
+        svc.capture_and_link(&file, &BearNote, Some(5)).unwrap();
+        let json = svc.export().unwrap();
+
+        let mut fresh =
+            UbilinkService::new(LinkGraph::open_in_memory().unwrap()).allow_schemes(schemes());
+        assert_eq!(fresh.import(&json).unwrap(), (2, 1));
+        assert_eq!(fresh.stats().unwrap(), (2, 1));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
