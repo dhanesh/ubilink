@@ -2,31 +2,37 @@
 
 > Spike proving the plugin-isolation architecture (Solution Option B). Satisfies
 > **RT-5** (binding), **RT-6**, **S1**, **T1**, **TN1**, **TN6** (the isolation
-> proof), **SC-3**. See `.manifold/linking-manifesto-app.md`.
+> proof), **SC-3**, **S5** (DoS bounds). See `.manifold/linking-manifesto-app.md`
+> and `DECISIONS.md` D1–D4.
 
 ## The model in one paragraph
 
 Third-party plugin code is **untrusted** and never runs in the core's trust
 domain (T1). It runs in a **separate Node process** launched with the **Node
 Permission Model** (`node --permission`) and **no** `--allow-fs*` /
-`--allow-child-process` / `--allow-worker` flags — so the runtime itself denies
-ambient filesystem, child-process and worker-thread access (deny-by-default, S1).
-The plugin's **only** channel to the outside world is an IPC pipe to the Rust
-**capability broker**, which checks every request against the capabilities the
-plugin declared in its manifest (RT-6) and either performs the mediated action or
-denies it (TN1). The link graph is never exposed wholesale: the only read handler
-returns the single focused resource the plugin was invoked for.
+`--allow-child-process` / `--allow-worker` flags, so the runtime itself denies
+ambient filesystem, child-process, worker-thread and inspector access
+(deny-by-default, S1). On macOS that process is also wrapped in a
+**`sandbox-exec` jail** that denies outbound network, every file write, and
+signals to other processes at the kernel. It starts with an **empty
+environment**. The plugin's **only** channel to the outside world is an IPC pipe
+to the Rust **capability broker**. The broker checks every request against the
+capabilities the plugin declared in its manifest (RT-6), then either performs
+the mediated action or denies it (TN1). The link graph is never exposed
+wholesale: the only read handler returns the single focused resource the plugin
+was invoked for.
 
 ```
-┌────────────────────────┐         IPC: newline-delimited JSON        ┌─────────────────────────────┐
-│  Rust core (TRUSTED)   │  ────────────  stdin/stdout  ───────────►  │  node --permission (UNTRUSTED) │
-│  src-tauri/            │                                            │  plugins/runtime/             │
-│  • reads bundle+manifest                                            │    plugin-host.mjs            │
-│    from disk (full fs) │  ◄── cap_request ────────────────────────  │  • loads plugin SOURCE via    │
-│  • broker.rs: decide() │  ─── cap_response (allow/deny) ──────────►  │    data: URL (no fs needed)   │
-│  • streams SOURCE in   │                                            │  • hands plugin ONLY caps.*   │
-└────────────────────────┘                                            │  • fs/child/worker => DENIED  │
-                                                                      └─────────────────────────────┘
+┌────────────────────────┐         IPC: newline-delimited JSON        ┌──────────────────────────────────┐
+│  Rust core (TRUSTED)   │  ────────────  stdin/stdout  ───────────►  │ sandbox-exec jail (macOS)         │
+│  src-tauri/            │   nonce (1st line, once) · load · invoke   │  node --permission (UNTRUSTED)    │
+│  • reads bundle+manifest                                            │  env = {} · cwd = /               │
+│    from disk (full fs) │  ◄── "<nonce> " + cap_request / result ──  │  plugins/runtime/plugin-host.mjs  │
+│  • drops frames w/o the│  ─── cap_response (allow/deny) ──────────►  │  • loads plugin SOURCE via data:  │
+│    session nonce       │                                            │  • hands plugin ONLY caps.*       │
+│  • broker.rs: decide() │                                            │  • fs/child/worker/net/writes/    │
+│  • deadline watchdog   │                                            │    foreign signals => DENIED      │
+└────────────────────────┘                                            └──────────────────────────────────┘
 ```
 
 Why stream the source instead of letting the host `import('./plugin.mjs')`?
@@ -36,6 +42,47 @@ trusted Rust core reads the bundle (it has full fs rights) and streams the sourc
 over the pipe; the host loads it via a `data:` URL import, which touches no
 filesystem and so needs zero fs grants. Verified: code loaded this way still
 cannot `fs.readFile`.
+
+## What is guaranteed (each item has a hostile-plugin test in `src-tauri/tests/sandbox.rs`)
+
+| Guarantee | Enforced by | Test |
+|-----------|-------------|------|
+| no fs read/write, `child_process`, `worker_threads` | `node --permission` | `fail_closed_no_fs_no_child_escape` |
+| no outbound network | macOS jail `(deny network*)` | `net_is_jailed_when_supported` |
+| no native file writes (e.g. `trace_events` → `node_trace.N.log`) | host disables `trace_events` + jail `(deny file-write*)` | `plugin_cannot_write_files_natively` |
+| cannot signal the core or any other process | jail `(deny signal)(allow signal (target self))` | `plugin_cannot_signal_the_core` |
+| no inherited env secrets; `NODE_OPTIONS` cannot re-grant permissions | `env_clear()`; `node` resolved to an absolute path by the core | `child_env_is_scrubbed` |
+| cannot forge protocol frames | per-session nonce on every frame (below) | `forged_frames_are_rejected` |
+| a lying host cannot flip a capability verdict | the core uses its own broker's decision | `recheck_verdict_comes_from_the_broker_not_the_host` |
+| hung, chatty or stdin-stalling plugins cannot hang the core | overall deadline + watchdog kill | `hung_plugin_is_killed`, `chatty_plugin_is_killed_at_overall_deadline`, `flooding_plugin_cannot_block_core_writes` |
+| no leaked or zombie children | kill + reap on every failure and in `Drop` | `timed_out_child_is_reaped`, `dropping_session_kills_and_reaps_child` |
+| only granted capabilities; never the whole graph | broker | `broker_allows_granted_denies_ungranted`, `no_wholesale_graph_only_focused_resource` |
+
+On macOS the OS-jail tests **fail** (rather than skip) if the jail is not
+active, so the proof can't pass vacuously.
+
+## Frame integrity: the per-session nonce
+
+The plugin shares the host's JS realm, so it can write to fd 1 and monkeypatch
+any global. Stubbing `process.stdout.write` is therefore not a boundary. Instead:
+
+1. The core generates a random 64-hex-char nonce per session and sends it as
+   the **first stdin line**. It never resends it and never puts it in argv or env.
+2. The host, **before any plugin code loads**, captures `fs.readSync`/`fs.writeSync`/`JSON.stringify`,
+   disables heap/trace introspection (`v8.getHeapSnapshot`, `queryObjects`,
+   `setFlagsFromString`, `trace_events`), then reads the nonce line with the
+   captured `readSync(0)` and keeps it only in module scope.
+3. Every host frame is `"<nonce> " + JSON + "\n"`. It is built from a
+   null-prototype object and written with the captured `writeSync(1, …)`.
+4. The core drops every stdout line without the exact nonce. It also treats the
+   payload of authenticated frames as plugin-controlled, and bases every
+   decision on its own broker.
+
+**Accepted residual:** after the nonce line, the plugin can read its own stdin.
+That covers its own source, its `invoke` arguments, and the broker's replies to
+**its own** requests. One host process serves one plugin invocation, so this
+reveals nothing it could not request anyway. It can also subvert host logic
+inside its own realm, which only affects its own session. See `DECISIONS.md` D3.
 
 ## Capability-string grammar
 
@@ -70,34 +117,36 @@ Examples:
 |------|------|
 | `runtime/plugin-host.mjs` | the deny-by-default Node sandbox host |
 | `examples/benign/`        | well-behaved plugin: uses only granted caps |
-| `examples/malicious/`     | attacker: tries fs/child/worker/graph escapes |
+| `examples/malicious/`     | attacker: tries fs/child/worker/net/graph escapes |
+| `examples/hostile/`       | attacker: frame forgery, env/signal probes, native writes, DoS (`probe.mode`) |
+| `examples/hang/`          | never returns (timeout fixture) |
 | `../schema/integration.manifest.schema.json` | manifest JSON Schema (RT-6) |
 | `../src-tauri/src/broker.rs` | the capability broker (decide/revoke) |
-| `../src-tauri/src/sandbox.rs` | spawns the host, owns the IPC |
-| `../src-tauri/tests/sandbox.rs` | end-to-end proof (E8/E9) |
+| `../src-tauri/src/sandbox.rs` | spawns + jails the host, owns the authenticated IPC, deadlines |
+| `../src-tauri/tests/sandbox.rs` | end-to-end proof (E8/E9) against a real `node` |
 
-## ⚠️ Honest limitation: network is NOT sandboxed by this mechanism
+## Residual risk and follow-ups
 
-Verified empirically in this environment (Node v24.16.0): under `node --permission`
-with no allow flags, `fetch('http://example.com')` **succeeds**. The Node
-Permission Model does **not** restrict outbound network. We therefore do **not**
-claim network is contained by the sandbox runtime alone.
-
-What IS provably denied by `--permission`: filesystem read/write, `child_process`,
-and `worker_threads` (each throws `ERR_ACCESS_DENIED`). What the broker denies:
-every capability not in the granted manifest, and the link graph wholesale.
-
-**Hardening path (future work):** wrap the plugin host in an OS-level network
-jail — macOS `sandbox-exec` (seccomp/`network*` deny profile) / Linux seccomp-bpf
-or network namespaces / Windows AppContainer — so outbound sockets are blocked at
-the kernel, and route any granted network capability through the broker. Until
-then, treat network egress from a plugin as possible and gate plugin installation
-on provenance (signing, S2).
+- **Non-macOS has no OS jail yet.** Network, native file writes and signals to
+  other processes are open there, and `Session::net_jailed()` reports `false`.
+  The follow-ups are Linux landlock/seccomp-bpf/network namespaces and Windows
+  AppContainer. Until then, gate plugin installation on provenance (signing, S2).
+- **The macOS profile is `allow default` plus targeted denies, not deny-default.**
+  Native code (a Node/V8 bug) could still read user-readable files. A
+  deny-default profile needs a per-install allowlist for the node binary and
+  its dylibs.
+- **No memory cap.** A plugin can grow its heap until the deadline kills it.
+- **`node` must be a real binary** found on an absolute `PATH` entry.
+  Version-manager shims that need `PATH`/`HOME` do not work under the empty
+  environment.
+- History: the Node Permission Model alone does **not** restrict network. Under
+  `node --permission`, `fetch('http://example.com')` succeeds (Node v24.16.0).
+  Only the OS jail closes it (D2).
 
 ## Run the proof
 
 ```
-cd src-tauri && cargo test
+cd src-tauri && cargo test --test sandbox
 # fail-closed escape demonstration:
 cargo test fail_closed -- --nocapture --test-threads=1
 ```
