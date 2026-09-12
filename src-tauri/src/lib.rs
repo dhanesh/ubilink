@@ -21,14 +21,16 @@
 //      is a capability request over the IPC pipe, checked against the granted
 //      manifest. There is NO broker handler that returns the link graph wholesale —
 //      the only read handler exposes the single focused resource the plugin was
-//      invoked for (S1).
+//      invoked for (S1), and only to a plugin that declared
+//      `read:focused-resource` (and not after revocation, SC-3). The resource is
+//      never pushed to the plugin outside the broker.
 //
-// Honest limitation (verified empirically, see plugins/README.md + DECISIONS):
-// the Node Permission Model in v24 does NOT restrict outbound network (fetch
-// succeeds under --permission). Net is therefore NOT sandboxed by this mechanism
-// alone; OS-level hardening (macOS sandbox-exec / Linux seccomp) is the future
-// path. We do not claim net is contained. fs + child_process + worker ARE
-// provably denied, and the broker denies every ungranted capability.
+// Network (DECISIONS D1/D2): the Node Permission Model alone does NOT restrict
+// outbound network, so on macOS the host also runs inside a `sandbox-exec` jail
+// that denies network, every file write and signals to other processes at the
+// kernel. That jail is not yet wired on Linux/Windows (seccomp/landlock and
+// AppContainer are follow-ups); `Session::net_jailed()` reports whether it is
+// active, and callers must not claim containment when it is false.
 
 pub mod adapter;
 pub mod adapters_config;

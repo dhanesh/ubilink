@@ -40,11 +40,14 @@ process that denies filesystem, child-process, and worker access at the OS/runti
 level. The only thing a plugin can do is request a capability it declared in its
 manifest; the **Rust capability broker** checks the grant and either performs the
 mediated action or denies it (deny-by-default). The link graph is never exposed to a
-plugin wholesale — a plugin only ever sees the single resource it was invoked for.
+plugin wholesale — a plugin only ever sees the single resource it was invoked for,
+and only if its manifest declares `read:focused-resource` (the broker is the only
+way to get it, and revoking the grant stops it).
 
-> **Honest caveat:** the Node permission model does **not** yet contain outbound
-> network. See [`DECISIONS.md`](DECISIONS.md) (D2) for the mitigation path. fs /
-> child_process / worker access **are** provably denied.
+> **Honest caveat:** the Node permission model alone does **not** contain outbound
+> network. On macOS the plugin host also runs in a `sandbox-exec` jail that denies
+> network, file writes and signals to other processes; on Linux/Windows that jail is
+> not wired yet. See [`DECISIONS.md`](DECISIONS.md) (D1, D2).
 
 > **Custom adapters are not plugins.** App adapters you add in `adapters.json`
 > ([`docs/SUPPORTED-APPS.md`](docs/SUPPORTED-APPS.md)) are trusted local
