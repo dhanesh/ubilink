@@ -46,6 +46,13 @@ plugin wholesale — a plugin only ever sees the single resource it was invoked 
 > network. See [`DECISIONS.md`](DECISIONS.md) (D2) for the mitigation path. fs /
 > child_process / worker access **are** provably denied.
 
+> **Custom adapters are not plugins.** App adapters you add in `adapters.json`
+> ([`docs/SUPPORTED-APPS.md`](docs/SUPPORTED-APPS.md)) are trusted local
+> configuration: their AppleScript runs via `osascript` with **your** user
+> privileges and Ubilink's Automation/Accessibility grants, and is **not**
+> sandboxed. The guarantees above apply only to the Node plugin runtime. Only use
+> adapter scripts you wrote or have read. See [`DECISIONS.md`](DECISIONS.md) (D14).
+
 ## Status
 
 Early foundation. Proven and tested so far:
