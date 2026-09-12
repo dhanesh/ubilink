@@ -163,6 +163,144 @@ pub fn open_plan_for(platform: Platform, uri: &str) -> OpenPlan {
     }
 }
 
+/// How to SHOW a launchable `file://` target instead of running it: macOS selects
+/// it in Finder (`open -R`, which takes the file URL as-is — verified on macOS 27);
+/// Windows and Linux open the folder that contains it through the same no-shell
+/// opener as any link. `None` if the containing folder can't be worked out.
+pub fn reveal_plan_for(platform: Platform, uri: &str) -> Option<OpenPlan> {
+    match platform {
+        Platform::MacOS => Some(OpenPlan {
+            program: "open".into(),
+            args: vec!["-R".into(), "--".into(), uri.into()],
+        }),
+        _ => parent_uri(uri).map(|parent| open_plan_for(platform, &parent)),
+    }
+}
+
+/// Extensions whose targets RUN something when handed to the OS opener — launch an
+/// app, run a script, start an installer, or follow a shortcut to another target.
+/// Lowercase, without the dot.
+fn launchable_extensions(platform: Platform) -> &'static [&'static str] {
+    match platform {
+        Platform::MacOS => &[
+            "app", "command", "tool", "terminal", "workflow", "action", "pkg", "mpkg", "dmg",
+            "fileloc", "webloc", "inetloc", "prefpane", "saver", "jar",
+        ],
+        Platform::Windows => &[
+            "exe",
+            "com",
+            "bat",
+            "cmd",
+            "msi",
+            "msp",
+            "scr",
+            "pif",
+            "cpl",
+            "ps1",
+            "vbs",
+            "vbe",
+            "js",
+            "jse",
+            "wsf",
+            "wsh",
+            "hta",
+            "lnk",
+            "url",
+            "reg",
+            "appx",
+            "msix",
+            "appinstaller",
+            "application",
+            "scf",
+            "jar",
+            "settingcontent-ms",
+            "library-ms",
+        ],
+        Platform::Linux => &["desktop", "appimage", "run", "jar"],
+    }
+}
+
+/// Would opening this local `path` run something rather than show a document? The
+/// name decides, and on Unix so does what is really on disk: symlinks are followed
+/// (an innocent `Report.pdf` can point at an app) and a regular file with any
+/// execute bit counts (`open` runs an extensionless executable in Terminal).
+fn is_launchable_target(platform: Platform, path: &str) -> bool {
+    let exts = launchable_extensions(platform);
+    let launchable_name = |p: &str| extension_of(p).is_some_and(|e| exts.contains(&e.as_str()));
+    if launchable_name(path) {
+        return true;
+    }
+    #[cfg(unix)]
+    if platform != Platform::Windows {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(real) = std::fs::canonicalize(path) {
+            if launchable_name(&real.to_string_lossy()) {
+                return true;
+            }
+            if let Ok(meta) = std::fs::metadata(&real) {
+                if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The last path segment's extension, lowercased (`/a/B.APP` → `app`).
+fn extension_of(path: &str) -> Option<String> {
+    let name = path.rsplit(['/', '\\']).next()?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    (!stem.is_empty()).then(|| ext.to_ascii_lowercase())
+}
+
+/// The local path a `file://` URI names — query/fragment dropped, `%XX` decoded
+/// (so `Evil%2Eapp` is seen as `Evil.app`), trailing `/` trimmed — or `None` for
+/// any other scheme.
+fn file_uri_path(uri: &str) -> Option<String> {
+    let (scheme, rest) = uri.split_once(':')?;
+    if !scheme.eq_ignore_ascii_case("file") {
+        return None;
+    }
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    // `file://host/path` → `/path`; `file:/path` has no authority.
+    let path = match rest.strip_prefix("//") {
+        Some(authority_and_path) => authority_and_path
+            .find('/')
+            .map_or("", |i| &authority_and_path[i..]),
+        None => rest,
+    };
+    Some(percent_decode(path).trim_end_matches('/').to_string())
+}
+
+/// `file:///a/b/c.exe?q#f` → `file:///a/b/` (query, fragment and last segment dropped).
+fn parent_uri(uri: &str) -> Option<String> {
+    let base = uri.split(['?', '#']).next()?.trim_end_matches('/');
+    let (_, path) = base.split_once(':')?;
+    let cut = base.len() - path.len() + path.rfind('/')?;
+    Some(base[..=cut].to_string())
+}
+
+/// Decode `%XX` escapes; an invalid escape is kept as-is. Dependency-free (S2).
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Open a link: validate it with the shared policy first (defence in depth: a row
 /// already in the DB may predate validation or come from an old import), then run
 /// the platform plan through the `CommandRunner` seam. Errors are user-facing (U3).
@@ -175,7 +313,17 @@ pub fn open_uri<R: CommandRunner>(
     policy
         .validate(uri, "")
         .map_err(|e| format!("Refusing to open this link: {}", e.message()))?;
-    let plan = open_plan_for(platform, uri);
+    // A `file://` link to something that would RUN (an app, script, installer or
+    // shortcut) is shown, not launched: an imported link must not execute code.
+    let plan = match file_uri_path(uri) {
+        Some(path) if is_launchable_target(platform, &path) => reveal_plan_for(platform, uri)
+            .ok_or_else(|| {
+                "Refusing to open this link: it points at a program, and its folder \
+                 couldn't be worked out."
+                    .to_string()
+            })?,
+        _ => open_plan_for(platform, uri),
+    };
     let args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
     runner
         .run(&plan.program, &args)
@@ -411,6 +559,129 @@ mod tests {
             }
         }
         assert!(rec.calls.borrow().is_empty(), "nothing may be launched");
+    }
+
+    /// Runs `open_uri` on `platform` and returns the single command it launched.
+    fn launched(platform: Platform, uri: &str) -> (String, Vec<String>) {
+        let rec = RecordingRunner::new(Ok(String::new()));
+        open_uri(&rec, &LinkPolicy::new(), platform, uri).unwrap();
+        let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 1, "exactly one command for {uri}");
+        calls[0].clone()
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn launchable_file_links_are_revealed_not_run_on_macos() {
+        // An imported `file://…/Evil.app` would launch under plain `open`. Select it
+        // in Finder instead: `open -R` takes the file URL as-is (verified on macOS 27).
+        for uri in [
+            "file:///Users/me/Downloads/Evil.app",
+            "file:///Users/me/Downloads/Evil.app/",
+            "file:///Users/me/Downloads/EVIL.APP",
+            "file:///Users/me/Downloads/Evil%2Eapp",
+            "file:///Users/me/Downloads/run.command",
+            "file:///Users/me/Downloads/setup.pkg",
+            "file:///Users/me/Downloads/x.app?a=1#frag",
+            "file:///Users/me/Downloads/shortcut.fileloc",
+        ] {
+            assert_eq!(
+                launched(Platform::MacOS, uri),
+                ("open".to_string(), strings(&["-R", "--", uri])),
+                "{uri}"
+            );
+        }
+    }
+
+    #[test]
+    fn launchable_file_links_open_their_folder_on_windows_and_linux() {
+        assert_eq!(
+            launched(
+                Platform::Windows,
+                "file:///C:/Users/me/My Downloads/setup.exe"
+            ),
+            (
+                "rundll32".to_string(),
+                strings(&[
+                    "url.dll,FileProtocolHandler",
+                    "file:///C:/Users/me/My%20Downloads/"
+                ])
+            )
+        );
+        for uri in [
+            "file:///C:/x/a.BAT",
+            "file:///C:/x/a.lnk",
+            "file:///C:/x/a.ps1",
+            "file:///C:/x/a.msi",
+        ] {
+            assert_eq!(
+                launched(Platform::Windows, uri).1[1],
+                "file:///C:/x/",
+                "{uri}"
+            );
+        }
+        assert_eq!(
+            launched(Platform::Linux, "file:///home/me/tool.AppImage"),
+            ("xdg-open".to_string(), strings(&["file:///home/me/"]))
+        );
+        assert_eq!(
+            launched(Platform::Linux, "file:///home/me/app.desktop").1,
+            strings(&["file:///home/me/"])
+        );
+    }
+
+    #[test]
+    fn documents_folders_and_web_links_still_open_normally() {
+        for uri in [
+            "file:///Users/me/Report.pdf",
+            "file:///Users/me/My Note.md",
+            "file:///Users/me/Projects/",
+            "file:///Users/me/apps.txt",
+            "https://example.com/setup.exe",
+        ] {
+            assert_eq!(
+                launched(Platform::MacOS, uri),
+                ("open".to_string(), strings(&["--", uri])),
+                "{uri}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_files_and_symlinks_to_apps_are_revealed() {
+        // What is on disk decides too: `open` runs an extensionless executable in
+        // Terminal, and follows a symlink with an innocent name to an app bundle.
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("ubilink-reveal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Calc.app")).unwrap();
+        let tool = dir.join("tool");
+        std::fs::write(&tool, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let notes = dir.join("notes");
+        std::fs::write(&notes, b"text").unwrap();
+        std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let alias = dir.join("Report.pdf");
+        symlink(dir.join("Calc.app"), &alias).unwrap();
+        let uri = |p: &std::path::Path| format!("file://{}", p.display());
+
+        for p in [&tool, &alias] {
+            assert_eq!(
+                launched(Platform::MacOS, &uri(p)).1[0],
+                "-R",
+                "{}",
+                p.display()
+            );
+        }
+        assert_eq!(
+            launched(Platform::MacOS, &uri(&notes)).1,
+            strings(&["--", &uri(&notes)])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
