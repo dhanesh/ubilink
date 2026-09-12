@@ -20,7 +20,24 @@ to the Rust **capability broker**. The broker checks every request against the
 capabilities the plugin declared in its manifest (RT-6), then either performs
 the mediated action or denies it (TN1). The link graph is never exposed
 wholesale: the only read handler returns the single focused resource the plugin
-was invoked for.
+was invoked for, and only to a plugin that declared `read:focused-resource`.
+
+## Plugin contract
+
+A plugin exports `async function run({ probe, caps })`:
+
+- `caps.request(capability)` resolves to `{ allowed, result, reason }`, and the
+  broker decides each call when it is made. It is the **only** way to reach
+  anything outside the plugin, including the focused resource:
+  `await caps.request('read:focused-resource')` returns the single resource the
+  plugin was invoked for if the manifest declares that capability and it has
+  not been revoked. Otherwise it returns `allowed: false` and no data.
+- The focused resource is **never** passed to `run()` and never crosses the pipe
+  without a grant. (Before 2026-09-13 it was pushed as `run({ resource })` to
+  every plugin, regardless of its manifest.)
+- `probe` is optional caller-supplied input, passed through without brokering.
+  The core never puts graph or resource data in it; today only the test
+  harness uses it, to steer the hostile fixtures.
 
 ```
 ┌────────────────────────┐         IPC: newline-delimited JSON        ┌──────────────────────────────────┐
@@ -57,6 +74,7 @@ cannot `fs.readFile`.
 | hung, chatty or stdin-stalling plugins cannot hang the core | overall deadline + watchdog kill | `hung_plugin_is_killed`, `chatty_plugin_is_killed_at_overall_deadline`, `flooding_plugin_cannot_block_core_writes` |
 | no leaked or zombie children | kill + reap on every failure and in `Drop` | `timed_out_child_is_reaped`, `dropping_session_kills_and_reaps_child` |
 | only granted capabilities; never the whole graph | broker | `broker_allows_granted_denies_ungranted`, `no_wholesale_graph_only_focused_resource` |
+| focused resource only with `read:focused-resource`, never after revocation, never pushed into `run()` or onto the pipe | broker is its only channel; `invoke` carries no resource | `undeclared_plugin_never_sees_the_focused_resource`, `declared_plugin_gets_the_focused_resource_from_the_broker`, `revoked_grant_stops_delivering_the_focused_resource` |
 
 On macOS the OS-jail tests **fail** (rather than skip) if the jail is not
 active, so the proof can't pass vacuously.
@@ -79,8 +97,9 @@ any global. Stubbing `process.stdout.write` is therefore not a boundary. Instead
    decision on its own broker.
 
 **Accepted residual:** after the nonce line, the plugin can read its own stdin.
-That covers its own source, its `invoke` arguments, and the broker's replies to
-**its own** requests. One host process serves one plugin invocation, so this
+That covers its own source, its `invoke` arguments (`probe` only, never the
+focused resource), and the broker's replies to **its own** requests. One host
+process serves one plugin, so this
 reveals nothing it could not request anyway. It can also subvert host logic
 inside its own realm, which only affects its own session. See `DECISIONS.md` D3.
 
@@ -118,7 +137,7 @@ Examples:
 | `runtime/plugin-host.mjs` | the deny-by-default Node sandbox host |
 | `examples/benign/`        | well-behaved plugin: uses only granted caps |
 | `examples/malicious/`     | attacker: tries fs/child/worker/net/graph escapes |
-| `examples/hostile/`       | attacker: frame forgery, env/signal probes, native writes, DoS (`probe.mode`) |
+| `examples/hostile/`       | attacker: frame forgery, env/signal probes, native writes, DoS, focused-resource disclosure incl. a stdin tap (`probe.mode`) |
 | `examples/hang/`          | never returns (timeout fixture) |
 | `../schema/integration.manifest.schema.json` | manifest JSON Schema (RT-6) |
 | `../src-tauri/src/broker.rs` | the capability broker (decide/revoke) |

@@ -32,7 +32,22 @@ import (so the host needs zero fs grants). Proven end-to-end against a real
   absolute canonical path (absolute `PATH` entries only); `sandbox-exec` is
   `/usr/bin/sandbox-exec`; the child's cwd is `/`.
 - **Broker:** denies every ungranted capability and the link graph wholesale;
-  grants are revocable mid-session (SC-3). ✅
+  grants are revocable mid-session (SC-3). ✅ The broker is also the **only**
+  channel for the focused resource. `Session::invoke` sends
+  `{"t":"invoke","probe":…}` and never the resource, and the host calls
+  `run({ probe, caps })`. A plugin gets the resource only through
+  `caps.request('read:focused-resource')`, which the broker decides at request
+  time, so an undeclared grant yields nothing, a revoked grant stops working
+  from the next request on, and every read lands in `cap_log`. Before
+  2026-09-13 the core pushed the resource into `run({ resource })` without
+  asking the broker, so any plugin saw it whatever it had declared. Proven by
+  `tests/sandbox.rs::{undeclared_plugin_never_sees_the_focused_resource,
+  declared_plugin_gets_the_focused_resource_from_the_broker,
+  revoked_grant_stops_delivering_the_focused_resource}`. These tests also scan
+  everything the plugin can read off its stdin, so the resource never crosses
+  the pipe without a grant. `probe` is caller-supplied input that is passed
+  through without brokering; callers may put in it only data any plugin may
+  see (today only the test harness sets it).
 - **Protocol integrity** (D3) and **DoS bounds** (D4).
 
 **Residual risk / follow-ups:**
@@ -128,10 +143,11 @@ null-prototype).
 
 **Residual risk:**
 - **Stdin eavesdropping is accepted.** After the nonce line, the plugin can read
-  what the core sends: its own source, the `invoke` args, and the broker's
-  replies to **its own** requests. One host process serves exactly one plugin
-  invocation, so it learns nothing it could not request itself. No core→host
-  message carries a secret.
+  what the core sends: its own source, the `invoke` args (`probe` only, never
+  the focused resource, see D1), and the broker's replies to **its own**
+  requests. One host process serves exactly one plugin, so it learns nothing
+  it could not request itself. No core→host message carries a secret or any
+  data the broker has not granted.
 - **The shared realm remains.** A plugin can subvert host logic and steer
   *what* the host sends (for example, fake `cap_response`s to itself). This is
   bounded because the core derives every decision from its broker; the worst

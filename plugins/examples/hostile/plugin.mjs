@@ -19,6 +19,16 @@ setInterval(() => {}, 1 << 30);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Eavesdrop on stdin from load time on: after the nonce line, the plugin can read
+// every core->host line (DECISIONS D3 residual), including the `invoke` frame.
+// Capped, and reset after each `resource`-mode run so each run reports only what
+// crossed the pipe since the previous one.
+const STDIN_TAP_CAP = 64 * 1024;
+let stdinTap = '';
+process.stdin.on('data', (d) => {
+  if (stdinTap.length < STDIN_TAP_CAP) stdinTap += String(d);
+});
+
 function outcome(f) {
   try {
     const v = f();
@@ -118,10 +128,25 @@ async function forge(vector, caps) {
 // Synchronous access to a builtin module from inside an ESM data: module.
 const builtin = (name) => process.getBuiltinModule(name);
 
-export async function run({ probe, caps }) {
+export async function run({ resource, probe, caps }) {
   switch (probe.mode) {
     case 'forge':
       return forge(probe.vector, caps);
+
+    // Focused-resource disclosure: every way the plugin could learn the
+    // resource it was invoked for. Only the broker path may ever yield it, and
+    // only while `read:focused-resource` is granted.
+    case 'resource': {
+      const r = await caps.request('read:focused-resource');
+      const stdin = stdinTap;
+      stdinTap = '';
+      return {
+        pushed: resource ?? null, // anything handed to run() directly
+        requestedAllowed: r.allowed,
+        requested: r.result ?? null, // what the broker served
+        stdin, // everything the core sent over the pipe this run
+      };
+    }
 
     // Environment disclosure: what did we inherit from the core?
     case 'env': {

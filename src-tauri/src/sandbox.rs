@@ -35,9 +35,15 @@
 //   - plugin stderr is piped, forwarded up to a byte cap, then discarded;
 //   - a killed child is always reaped, and `Drop` kills + reaps.
 //
+// Focused resource (S1/TN1/RT-6/SC-3): the resource a session is invoked for is
+// held ONLY by its broker. It is never pushed to the host (not in `invoke`, not
+// in any other frame); plugin code gets it solely by `caps.request(
+// 'read:focused-resource')`, which the broker decides at request time, so an
+// undeclared or revoked grant yields nothing.
+//
 // Protocol: newline-delimited JSON.
 //   Rust -> host:  <nonce>\n (once, first)  {"t":"load","source":...}
-//                  {"t":"invoke","resource":...,"probe":...}
+//                  {"t":"invoke","probe":...}   (never the resource)
 //                  {"t":"cap_response","id":N,...} {"t":"recheck","cap":...} {"t":"shutdown"}
 //   host -> Rust:  "<nonce> " + one of:
 //                  {"t":"ready"} {"t":"cap_request","id":N,"cap":...}
@@ -526,11 +532,24 @@ impl Session {
         self.guarded(|s, _| s.send(&json!({ "t": "load", "source": source })))
     }
 
-    /// Invoke the plugin's `run()`, brokering every capability request until it
-    /// returns or the overall deadline kills it.
-    pub fn invoke(&mut self, resource: &FocusedResource, probe: Value) -> io::Result<Value> {
+    /// Invoke the plugin's `run({ probe, caps })`, brokering every capability
+    /// request until it returns or the overall deadline kills it.
+    ///
+    /// The focused resource is deliberately NOT sent (S1/TN1/RT-6): it lives only
+    /// in this session's broker and reaches plugin code solely as the answer to
+    /// `caps.request('read:focused-resource')`, decided at request time — so an
+    /// undeclared or revoked (SC-3) grant yields nothing, and every read is in
+    /// `cap_log`. Anything in the `invoke` frame is readable by the plugin (it can
+    /// tap stdin, DECISIONS D3), so the frame carries no privileged data.
+    ///
+    /// `probe` is caller-supplied invocation input passed through verbatim to the
+    /// plugin as `run({ probe })`. It is not brokered: callers must put in it only
+    /// data the plugin may see regardless of its grants — never graph/resource
+    /// data or secrets. (Today only the test harness sets it, to steer the hostile
+    /// fixtures.)
+    pub fn invoke(&mut self, probe: Value) -> io::Result<Value> {
         self.guarded(|s, deadline| {
-            s.send(&json!({ "t": "invoke", "resource": resource, "probe": probe }))?;
+            s.send(&json!({ "t": "invoke", "probe": probe }))?;
             loop {
                 let msg = s.recv(deadline)?;
                 match msg.get("t").and_then(|v| v.as_str()) {

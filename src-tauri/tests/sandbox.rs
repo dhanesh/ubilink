@@ -70,7 +70,7 @@ fn fail_closed_no_fs_no_child_escape() {
         "spawnSentinelPath": spawn_sentinel.to_string_lossy(),
         "secretPath": secret_path.to_string_lossy(),
     });
-    let result = session.invoke(&focused(), probe).unwrap();
+    let result = session.invoke(probe).unwrap();
     eprintln!(
         "\n[malicious plugin self-report] {}\n",
         serde_json::to_string_pretty(&result).unwrap()
@@ -131,7 +131,7 @@ fn broker_allows_granted_denies_ungranted() {
     let (manifest, source) = read_plugin("benign");
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn host");
     session.load(&source).unwrap();
-    let result = session.invoke(&focused(), json!({})).unwrap();
+    let result = session.invoke(json!({})).unwrap();
     eprintln!(
         "\n[benign plugin result] {}\n",
         serde_json::to_string_pretty(&result).unwrap()
@@ -157,7 +157,7 @@ fn no_wholesale_graph_only_focused_resource() {
     let (manifest, source) = read_plugin("benign");
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn host");
     session.load(&source).unwrap();
-    let result = session.invoke(&focused(), json!({})).unwrap();
+    let result = session.invoke(json!({})).unwrap();
 
     // read:focused-resource returned exactly one resource object (object, not array).
     assert_eq!(result["focusedAllowed"], true);
@@ -211,7 +211,7 @@ fn net_is_jailed_when_supported() {
         "secretPath": std::env::temp_dir().join("z").to_string_lossy(),
         "netPort": port,
     });
-    let result = session.invoke(&focused(), probe).unwrap();
+    let result = session.invoke(probe).unwrap();
     session.shutdown().unwrap();
     let _ = handle.join();
 
@@ -254,7 +254,7 @@ fn hung_plugin_is_killed() {
     session.set_timeout(Duration::from_millis(800)); // short, for the test
     session.load(&source).unwrap();
     let start = std::time::Instant::now();
-    let res = session.invoke(&focused(), json!({}));
+    let res = session.invoke(json!({}));
     let elapsed = start.elapsed();
     assert!(
         res.is_err(),
@@ -325,8 +325,7 @@ fn forged_frames_are_rejected() {
         let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
         session.set_timeout(Duration::from_secs(5));
         session.load(&source).unwrap();
-        let result = match session.invoke(&focused(), json!({ "mode": "forge", "vector": vector }))
-        {
+        let result = match session.invoke(json!({ "mode": "forge", "vector": vector })) {
             Ok(r) => r,
             Err(e) => {
                 failures.push(format!("[{vector}] invoke failed: {e}"));
@@ -404,9 +403,7 @@ fn env_probe_inner() {
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
     session.load(&source).unwrap();
     let r = session
-        .invoke(
-            &focused(),
-            json!({ "mode": "env", "plantedVar": PLANTED_VAR, "secretPath": secret_path.to_string_lossy() }),
+        .invoke(json!({ "mode": "env", "plantedVar": PLANTED_VAR, "secretPath": secret_path.to_string_lossy() }),
         )
         .unwrap();
     session.shutdown().unwrap();
@@ -448,9 +445,7 @@ fn plugin_cannot_signal_the_core() {
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
     let jailed = session.net_jailed();
     session.load(&source).unwrap();
-    let r = session
-        .invoke(&focused(), json!({ "mode": "signal" }))
-        .unwrap();
+    let r = session.invoke(json!({ "mode": "signal" })).unwrap();
     session.shutdown().unwrap();
     eprintln!("[signal probe] {r}");
     if cfg!(target_os = "macos") {
@@ -487,10 +482,8 @@ fn plugin_cannot_write_files_natively() {
     let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
     session.set_timeout(Duration::from_secs(3));
     session.load(&source).unwrap();
-    let r = session.invoke(
-        &focused(),
-        json!({ "mode": "native-write", "reportPath": report_path.to_string_lossy() }),
-    );
+    let r = session
+        .invoke(json!({ "mode": "native-write", "reportPath": report_path.to_string_lossy() }));
     drop(session);
     let trace_created = !trace_existed && cwd_trace.exists();
     if trace_created {
@@ -522,7 +515,7 @@ fn chatty_plugin_is_killed_at_overall_deadline() {
         session.set_timeout(Duration::from_millis(800));
         session.load(&source).unwrap();
         let start = std::time::Instant::now();
-        let res = session.invoke(&focused(), json!({ "mode": "chatty" }));
+        let res = session.invoke(json!({ "mode": "chatty" }));
         (res.map_err(|e| e.kind()), start.elapsed())
     });
     let (res, elapsed) =
@@ -544,7 +537,7 @@ fn flooding_plugin_cannot_block_core_writes() {
         session.set_timeout(Duration::from_millis(800));
         session.load(&source).unwrap();
         let start = std::time::Instant::now();
-        let res = session.invoke(&focused(), json!({ "mode": "flood" }));
+        let res = session.invoke(json!({ "mode": "flood" }));
         (res.map_err(|e| e.kind()), start.elapsed())
     });
     let (res, elapsed) =
@@ -564,7 +557,7 @@ fn timed_out_child_is_reaped() {
     session.set_timeout(Duration::from_millis(500));
     session.load(&source).unwrap();
     let pid = session.pid();
-    assert!(session.invoke(&focused(), json!({})).is_err());
+    assert!(session.invoke(json!({})).is_err());
     // The session is still alive here: reaping must not wait for Drop.
     assert!(
         !pid_exists(pid),
@@ -608,6 +601,130 @@ fn recheck_verdict_comes_from_the_broker_not_the_host() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Focused-resource disclosure (S1 / TN1 / RT-6 / SC-3). The resource a plugin is
+// invoked for is graph-adjacent data: it may reach plugin code ONLY through the
+// broker, as `read:focused-resource`, and only while that grant is live. The
+// hostile fixture's `resource` mode reports every channel it could learn it
+// from: what `run()` was handed directly, what the broker served, and every
+// byte the core sent over its stdin since the previous run. The assertions are
+// on that returned value (a distinctive marker must be absent), not on any
+// host-reported verdict.
+// ---------------------------------------------------------------------------
+
+/// Marker present in every field of `private_resource()`; must never appear in
+/// anything a plugin without the grant returns.
+const RESOURCE_MARKER: &str = "7f3a";
+
+fn private_resource() -> FocusedResource {
+    FocusedResource {
+        id: "res-7f3a".into(),
+        name: "Private-7f3a.md".into(),
+        uri: "obsidian://vault/Private-7f3a.md".into(),
+    }
+}
+
+/// Invoke the hostile fixture's `resource` mode twice and return both results.
+/// The second run is the authoritative one for the stdin channel: the plugin's
+/// stdin tap is installed when its module evaluates, which can race the first
+/// `invoke` frame, but it is always in place before the second.
+fn peek_resource_twice(session: &mut Session) -> (serde_json::Value, serde_json::Value) {
+    let first = session
+        .invoke(json!({ "mode": "resource" }))
+        .expect("invoke 1");
+    let second = session
+        .invoke(json!({ "mode": "resource" }))
+        .expect("invoke 2");
+    (first, second)
+}
+
+/// The stdin tap must have seen this run's `invoke` frame, or the stdin half of
+/// the assertion would pass vacuously.
+fn assert_tap_saw_invoke(r: &serde_json::Value) {
+    let stdin = r["stdin"].as_str().expect("stdin tap string");
+    assert!(
+        stdin.contains(r#""t":"invoke""#),
+        "stdin tap missed the invoke frame (vacuous): {stdin:?}"
+    );
+}
+
+/// A plugin that did NOT declare `read:focused-resource` learns nothing about the
+/// resource: not via `run()`'s arguments, not via the broker, not by reading the
+/// pipe.
+#[test]
+fn undeclared_plugin_never_sees_the_focused_resource() {
+    let (mut manifest, source) = hostile();
+    manifest.needs = vec!["open:obsidian://".into()]; // some grant, just not this one
+    let mut session = Session::spawn(&host_script(), &manifest, private_resource()).expect("spawn");
+    session.load(&source).unwrap();
+    let (first, second) = peek_resource_twice(&mut session);
+    session.shutdown().unwrap();
+    eprintln!("[resource:undeclared] {first}\n[resource:undeclared] {second}");
+
+    assert_tap_saw_invoke(&second);
+    for r in [&first, &second] {
+        assert_eq!(r["requestedAllowed"], false, "broker served it: {r}");
+        assert!(
+            !r.to_string().contains(RESOURCE_MARKER),
+            "FAIL-OPEN: plugin without read:focused-resource learned the resource: {r}"
+        );
+    }
+}
+
+/// Regression guard: a plugin that DID declare `read:focused-resource` still
+/// gets the single focused resource, from the broker. It is never pushed into
+/// `run()` (the broker is the only channel, so every read is audited and
+/// revocable).
+#[test]
+fn declared_plugin_gets_the_focused_resource_from_the_broker() {
+    let (manifest, source) = hostile();
+    assert!(manifest.needs.iter().any(|n| n == "read:focused-resource"));
+    let mut session = Session::spawn(&host_script(), &manifest, private_resource()).expect("spawn");
+    session.load(&source).unwrap();
+    let (_, r) = peek_resource_twice(&mut session);
+    session.shutdown().unwrap();
+    eprintln!("[resource:declared] {r}");
+
+    assert_eq!(r["requestedAllowed"], true, "{r}");
+    let got = &r["requested"];
+    assert!(got.is_object(), "expected a single resource object: {r}");
+    assert_eq!(got["id"], "res-7f3a");
+    assert_eq!(got["uri"], "obsidian://vault/Private-7f3a.md");
+    assert_eq!(got["name"], "Private-7f3a.md");
+    assert!(
+        r["pushed"].is_null(),
+        "resource was pushed into run() instead of going through the broker: {r}"
+    );
+}
+
+/// SC-3: once `read:focused-resource` is revoked mid-session, the next
+/// invocation no longer delivers the resource through any channel.
+#[test]
+fn revoked_grant_stops_delivering_the_focused_resource() {
+    let (manifest, source) = hostile();
+    let mut session = Session::spawn(&host_script(), &manifest, private_resource()).expect("spawn");
+    session.load(&source).unwrap();
+
+    let before = session
+        .invoke(json!({ "mode": "resource" }))
+        .expect("invoke before revoke");
+    assert_eq!(before["requested"]["id"], "res-7f3a", "{before}");
+
+    session.broker.revoke("read:focused-resource");
+    let after = session
+        .invoke(json!({ "mode": "resource" }))
+        .expect("invoke after revoke");
+    session.shutdown().unwrap();
+    eprintln!("[resource:revoked] before={before}\n[resource:revoked] after={after}");
+
+    assert_tap_saw_invoke(&after);
+    assert_eq!(after["requestedAllowed"], false, "{after}");
+    assert!(
+        !after.to_string().contains(RESOURCE_MARKER),
+        "FAIL-OPEN: resource still delivered after its grant was revoked: {after}"
+    );
+}
+
 /// TEST 4 — Revoke (SC-3).
 /// A capability that was ALLOWED becomes DENIED after the grant is revoked
 /// mid-session — proving grants are force-invalidatable.
@@ -618,7 +735,7 @@ fn revoke_invalidates_previously_allowed_capability() {
     session.load(&source).unwrap();
 
     // First run: open is allowed.
-    let _ = session.invoke(&focused(), json!({})).unwrap();
+    let _ = session.invoke(json!({})).unwrap();
     assert!(session.was_allowed("open:obsidian://vault/Note.md"));
 
     // Revoke the grant, then have the (still-running) plugin re-request it.
