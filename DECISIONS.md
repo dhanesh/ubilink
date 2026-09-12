@@ -8,20 +8,52 @@ Third-party plugins run in a separate `node --permission` process with no
 `--allow-fs*` / `--allow-child-process` / `--allow-worker` flags. The Rust core is
 the capability broker; all privileged access is broker-mediated over an IPC pipe.
 Plugin source is streamed from the trusted core and loaded via a `data:` URL
-import (so the host needs zero fs grants). Proven by `src-tauri/tests/sandbox.rs`
-(4 e2e tests + 4 broker unit tests, all passing).
+import (so the host needs zero fs grants). Proven end-to-end against a real
+`node` by `src-tauri/tests/sandbox.rs` (hostile fixtures in
+`plugins/examples/{malicious,hostile,hang}`).
 
-**Empirically verified (Node v24.16.0):**
-- `fs.readFile`, `fs.writeFile`, `child_process.spawn`, `worker_threads`
-  → `ERR_ACCESS_DENIED` (denied). ✅
-- Broker denies every ungranted capability and the link graph wholesale. ✅
-- Grants are revocable mid-session (SC-3). ✅
+**Containment layers (hardened 2026-09-13; each one has a hostile-plugin test):**
+- **Node Permission Model:** `fs` read/write, `child_process`, `worker_threads`,
+  `inspector`, `process.binding` and WASI → `ERR_ACCESS_DENIED`. ✅
+- **macOS OS jail** (`sandbox-exec -p SANDBOX_PROFILE`, `src-tauri/src/sandbox.rs`):
+  `(allow default)(deny network*)(deny file-write*)(deny signal)(allow signal (target self))`.
+  Denies outbound network (D2), **every file write** (including native writes
+  that bypass `--permission`, e.g. `trace_events` creating `node_trace.N.log` in
+  the cwd), and **signals to any other process** (`process.kill(process.ppid, 0)`
+  → `EPERM`; the permission model does not gate `kill`). Two traps found while
+  hardening: `(deny signal (target others))` is *not* enforced by current macOS,
+  and the old availability probe (`sandbox-exec -n no-network`) is killed on
+  current macOS, which had **silently disabled the jail**. The probe now runs the
+  exact profile, and on macOS the tests fail if the jail is not active.
+- **Empty environment:** the host is spawned with `env_clear()`, so no core
+  secret (e.g. `UBILINK_SIGNING_KEY` in CI) is visible and an inherited
+  `NODE_OPTIONS` (verified: `--allow-fs-read=*` re-granted fs reads) cannot
+  re-grant permissions or preload code. `node` is resolved by the core to an
+  absolute canonical path (absolute `PATH` entries only); `sandbox-exec` is
+  `/usr/bin/sandbox-exec`; the child's cwd is `/`.
+- **Broker:** denies every ungranted capability and the link graph wholesale;
+  grants are revocable mid-session (SC-3). ✅
+- **Protocol integrity** (D3) and **DoS bounds** (D4).
+
+**Residual risk / follow-ups:**
+- Non-macOS has no OS jail yet (network, native file writes and signals are
+  open there); `Session::net_jailed()` reports it. Linux landlock/seccomp and
+  Windows AppContainer are follow-ups.
+- The macOS profile is `allow default` plus targeted denies, not deny-default:
+  native code (e.g. a V8/Node bug) could still read user-readable files or use
+  mach services. A deny-default profile needs a per-install allowlist for the
+  node binary and its dylibs; tracked as a follow-up.
+- No memory cap: a plugin can grow its heap until the deadline kills it (add
+  `--max-old-space-size` / an RLIMIT as a follow-up).
+- `node` must be a real binary: version-manager shims that need `PATH`/`HOME`
+  fail under the empty environment.
 
 ## D2 — Network containment: ✅ CLOSED via macOS sandbox-exec net jail
 
 > **Resolved 2026-06-17 (build loop R1).** The host is now spawned wrapped in
-> `sandbox-exec -p '(version 1)(allow default)(deny network*)'` on macOS, which
-> denies outbound network at the OS level. Proven by
+> `sandbox-exec -p '(version 1)(allow default)(deny network*)…'` on macOS (the
+> full profile, which also denies file writes and foreign signals, is in D1),
+> which denies outbound network at the OS level. Proven by
 > `tests/sandbox.rs::net_is_jailed_when_supported`: a real local TCP listener
 > receives ZERO connections from the jailed plugin and the plugin's `net.connect`
 > returns `EPERM`. `Session::net_jailed()` reports the truth so non-macOS callers
@@ -44,36 +76,92 @@ Windows AppContainer — plus routing any granted network capability through the
 broker, plus provenance gating (signing, S2) on plugin install. Tracked as a
 follow-up before any plugin is allowed to declare a network capability.
 
-## D3 — Plugin shares the host realm (partial integrity hardening applied)
+## D3 — Plugin shares the host realm; frames are authenticated with a per-session nonce
 
-**Date:** 2026-06-17 · **Constraints:** S1, TN1 · **Source:** m4 code-quality review
+**Date:** 2026-06-17, revised 2026-09-13 · **Constraints:** S1, TN1 · **Source:** m4 code-quality review, then a hostile-plugin security review
 
 The plugin is loaded via `data:` import into the host's own Node process/realm, so
-it shares `globalThis`/`process`. The OS-enforced ambient denial (fs/child/worker)
-holds regardless, but a hostile plugin could otherwise tamper with the protocol
-channel.
+it shares `globalThis`/`process` with the host. The OS-enforced ambient denial
+holds regardless, but the plugin can write to fd 1 and monkeypatch any global.
+The original mitigation (stubbing `process.stdout.write`) was shown to be
+bypassable: `Object.getPrototypeOf(process.stdout).write.call(...)`, a raw
+`fs.writeSync(1, …)`, replacing the global `JSON.stringify`, or polluting
+`Object.prototype.toJSON` all got a forged `{"t":"result"}` frame accepted by the
+core ahead of the real one. `node:vm` is not a security boundary, so it is not
+relied on.
 
-**Applied now:** `process.stdout.write` is neutered (rerouted to stderr) after the
-host captures the real writer, so a plugin **cannot forge protocol frames** on
-stdout. Regression-guarded by escape-7 in `plugins/examples/malicious/plugin.mjs`
-+ an assertion in `fail_closed_no_fs_no_child_escape`.
+**Design now (per-session nonce, `src-tauri/src/sandbox.rs` + `plugins/runtime/plugin-host.mjs`):**
+- The core generates a 64-hex-char nonce (two OS-CSPRNG v4 UUIDs, 244 random
+  bits) per session and sends it as the **first stdin line**, then waits for
+  `ready`. It never sends the nonce again, nor puts it in argv/env.
+- Before any plugin code exists in the realm, the host captures `fs.readSync`,
+  `fs.writeSync`, `JSON.stringify/parse` and the few string primitives it needs,
+  disables heap/trace introspection (`v8.getHeapSnapshot`, `writeHeapSnapshot`,
+  `queryObjects`, `setFlagsFromString`, `trace_events.createTracing` →
+  `ERR_ACCESS_DENIED`, synced into the ESM namespaces), then reads exactly the
+  nonce line with the captured `readSync(0)` and keeps it only in module scope.
+- Every frame is `"<nonce> " + JSON + "\n"`: built from a **null-prototype**
+  object with the captured `stringify`, escaped to ASCII, and written with the
+  captured `writeSync(1, string)`. The nonce only ever meets primitive string
+  concatenation and a C++ binding, so no patchable prototype method sees it.
+- The core's reader thread drops every stdout line that lacks the exact nonce
+  (constant-time compare). `process.stdout` in the host resolves to stderr, so
+  casual plugin prints go to logs rather than being dropped.
+- **The core trusts only the frame's origin, never its content:** payloads are
+  treated as plugin-controlled, and every security decision comes from the
+  core's own broker. In particular `recheck` returns the broker's decision for
+  the capability it brokered, not the host's `recheck_result` fields (proven
+  with a deliberately lying host, `tests/fixtures/lying-host.mjs`).
 
-**Deferred to the integration-runtime task:** full realm isolation — run the
-plugin in a curated `node:vm` SourceTextModule context with **no** `process`
-handle (so it cannot touch stdin, `process.exit`, env, or fds), or one host
-process *per* plugin. The current spike proves the binding constraint; complete
-isolation is a runtime-design task, not a spike concern.
+Proven by `tests/sandbox.rs::forged_frames_are_rejected`, which runs six vectors
+(stream-prototype write, raw fd-1 write, `JSON.stringify` replacement,
+`Object.prototype.toJSON` pollution, V8 heap-snapshot scraping, and scanning
+argv/env/stdin for a nonce-shaped string). It asserts the core returns the real
+result every time, the heap snapshot is denied, and no nonce candidate is visible.
+
+**How the plugin could still observe the nonce, and the status of each:**
+argv/env (never there); stdin (consumed synchronously before the plugin loads;
+the core never resends it); heap snapshot / `queryObjects` / V8 flags (disabled
+by the host); `inspector`, `process.binding` (denied by `--permission`);
+prototype patching of host primitives (captured before load; frames are
+null-prototype).
+
+**Residual risk:**
+- **Stdin eavesdropping is accepted.** After the nonce line, the plugin can read
+  what the core sends: its own source, the `invoke` args, and the broker's
+  replies to **its own** requests. One host process serves exactly one plugin
+  invocation, so it learns nothing it could not request itself. No core→host
+  message carries a secret.
+- **The shared realm remains.** A plugin can subvert host logic and steer
+  *what* the host sends (for example, fake `cap_response`s to itself). This is
+  bounded because the core derives every decision from its broker; the worst
+  case is self-sabotage or a deadline kill.
+- A future Node API, or a Node/V8 bug, that exposes heap contents would leak
+  the nonce. The blast radius is that plugin's own session, and per the point
+  above, forging frames there gains it nothing beyond what it can already do.
+- Stronger isolation, with one process for the host and a separate process for
+  the plugin, remains a follow-up if host↔core messages ever need to carry
+  secrets.
 
 ## D4 — Plugin execution timeout + IPC line cap: ✅ DONE (build loop R1)
 
 **Date:** 2026-06-17 · **Constraints:** S5, GAP-10 (resource exhaustion)
 
-`Session` now reads on a dedicated reader thread; the main thread reads with
-`recv_timeout` and **kills the child** on timeout (`Session::set_timeout`), and the
-reader caps each IPC line at `MAX_LINE_BYTES` (1 MiB) via `Read::take` so an
-unbounded line cannot exhaust memory. Proven by
-`tests/sandbox.rs::hung_plugin_is_killed` (a never-returning plugin is killed in
-<1s instead of blocking forever). NOTE: this is plugin-IPC DoS hardening; S5's
+`Session` now reads on a dedicated reader thread into a **bounded**
+`sync_channel`, and the reader caps each IPC line at `MAX_LINE_BYTES` (1 MiB)
+via `Read::take`, so an unbounded line cannot exhaust memory. Every operation
+(handshake, `load`, `invoke`, `recheck`) runs under one **overall** `Instant`
+deadline (`Session::set_timeout`). The earlier per-message timeout let a plugin
+that sent a request every 4.9 s run forever. A **watchdog** thread kills the
+child at the deadline, which also unblocks a core pipe *write* that a plugin
+stalled by not reading stdin. Any failed operation poisons the session: the
+child is killed and **reaped at once**, with no zombie. `impl Drop for Session`
+kills and reaps as well, so error paths never leak the child, and `shutdown`
+waits only a short grace period before killing. Plugin stderr is piped,
+forwarded up to 64 KiB, then drained and discarded. Proven by
+`tests/sandbox.rs::{hung_plugin_is_killed, chatty_plugin_is_killed_at_overall_deadline,
+flooding_plugin_cannot_block_core_writes, timed_out_child_is_reaped,
+dropping_session_kills_and_reaps_child}`. NOTE: this is plugin-IPC DoS hardening; S5's
 *own* scope (the public local link API size/rate bounds) is a separate later task.
 
 ## D5 — Integration facade: `UbilinkService` ties every round into the user flow (R6 / m6-integrate)
