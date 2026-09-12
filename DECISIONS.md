@@ -303,9 +303,54 @@ the manifesto's whole premise: the ecosystem scales app coverage. Seeds 10 apps
 ~80-app list of linking-capable apps
 is now reachable as config. Honest scope: only seeds with verifiable patterns ship;
 the rest need a per-app script + a Mac with the app (`docs/SUPPORTED-APPS.md`) — but
-that work is now config a user/community can contribute, not a core change.
+that work is now local config a user can add, not a core change. *(Amended by D14:
+adapter JSON is trusted local configuration running with the user's privileges, not
+a sandboxed plugin; distributing community adapter JSON is **not** supported.)*
 
 The template engine (`render`) and `parse` are pure and unit-tested, including a
 guard that **every shipped spec's templates render** (a typo can't ship a broken
 adapter). The single `osascript` call is the only ENV-blocked part. 77 cargo + 9
 node tests green; desktop compiles.
+
+## D14 — Adapter JSON is trusted local configuration, not a plugin
+
+**Date:** 2026-09-13 · **Constraints:** S1, S2, S4, B3, TN1 · **Source:** security review of the desktop plugin manager
+
+**Decision.** A declarative adapter (`adapters.default.json` embedded, plus the
+user's `adapters.json` merged by `AdapterRegistry::extend_from_json`) is **trusted
+local configuration**, equivalent to a script the user wrote and runs as
+themselves. It is **not** a plugin and is **not** sandboxed. Distributing
+community adapters (copy-paste JSON, gists, a shared list) is **not supported**.
+
+**Why.** An adapter's `script` runs via `osascript -e` in the Ubilink process's
+context: the user's full privileges plus whatever macOS Automation/Accessibility
+(TCC) grants Ubilink holds. AppleScript's `do shell script` makes that arbitrary
+code execution. None of the D1–D4 guarantees (`node --permission`, the
+`sandbox-exec` net jail, the capability broker) apply, because adapters never go
+through the Node plugin runtime. D13 blurred this by inviting community-contributed
+adapter JSON, and the README's "Security model" section implied the plugin sandbox
+covered all extensions. Calling user JSON "third-party plugins" in the UI made it
+worse: a user would reasonably assume it was contained.
+
+**Applied now.**
+- `builtin` is honoured only for the embedded defaults. `extend_from_json` forces
+  `builtin = false` on every user entry, including one that sets
+  `"builtin": true` or overrides a built-in by app name. Overriding a built-in
+  stays allowed (users may fix a broken script), but the result is a user-defined,
+  disableable adapter. A new `AdapterSpec::user_defined` flag (never read from JSON)
+  marks these entries. `AdapterRegistry::from_json`, the path that honours
+  `builtin`, is now private to the embedded defaults. Tests in `adapters_config.rs`
+  cover this.
+- The plugin manager labels user entries "Custom adapter · runs with your
+  permissions" instead of "Third-party". README (Security model) and
+  `docs/SUPPORTED-APPS.md` say plainly that custom adapters are unsandboxed.
+
+**What community distribution would need (not built).** Community adapters must
+ship as **signed bundles** through the existing S2/S3 path: `ubilink-sign`,
+`Installer::verify` with trust and downgrade checks, and the O4 registry's
+trusted-key review. They must also execute **behind the capability broker**
+instead of raw `osascript -e`. For example, the broker could expose a restricted,
+core-owned set of AppleScript *templates* ("front document URL of app X",
+"selected item id of app X"), where a bundle supplies only parameters and an app
+name gated by a declared capability, so no bundle can supply free-form script text
+or `do shell script`. Until that exists, adapter JSON is local-only.

@@ -19,14 +19,22 @@ These follow patterns ubilink can verify; the broader
 list of apps that support ubiquitous linking
 (browsers, PDF readers, mail, task/notes, dev tools — ~80 apps) is reachable the same
 way: each is a config entry. They are **not** all shipped because each needs the
-correct per-app script and testing on a Mac that has the app — exactly the work a
-config entry makes cheap and shareable.
+correct per-app script and testing on a Mac that has the app — work a config entry
+makes cheap for you to do locally.
 
 ## Add an app yourself — no recompile
 
 Drop an `adapters.json` (a JSON array of specs) in the app data dir:
 `~/Library/Application Support/org.dhanesh.ubilink/adapters.json`. Entries
-with an `app` matching a built-in **override** it; new apps are added. Restart ubilink.
+with an `app` matching a built-in **override** it (the result is then a custom
+adapter you can switch off, not a built-in); new apps are added. Restart ubilink.
+
+> **Trust:** a custom adapter is trusted local configuration, not a sandboxed
+> plugin. Its `script` runs via `osascript` with **your** user privileges and
+> Ubilink's Automation/Accessibility grants — AppleScript's `do shell script`
+> means it can run any command. Only use scripts you wrote or have read and
+> understand. Sharing adapters as copy-paste JSON is not a supported distribution
+> channel (see [`DECISIONS.md`](../DECISIONS.md) D14).
 
 ### Spec fields
 - `app` — the frontmost-app name to match (what `System Events` reports), e.g. `"Notes"`.
