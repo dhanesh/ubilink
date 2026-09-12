@@ -10,10 +10,14 @@
 // HERE is plain Rust over UbilinkService and is cargo-tested. Keeping the logic out of
 // the Tauri layer is why the panel's behaviour is verifiable without a GUI.
 
-use crate::adapter::ResourceAdapter;
+use crate::adapter::{capture_active, ResourceAdapter};
 use crate::resource::ResourceIdentity;
 use crate::service::UbilinkService;
 use serde::Serialize;
+use std::sync::Mutex;
+
+/// The explanation for a poisoned backend lock (a command panicked mid-update).
+const POISONED: &str = "internal state was poisoned";
 
 /// One link as the panel renders it (name + uri). Serialized to the webview as JSON.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -78,16 +82,25 @@ impl PanelBackend {
     /// The `capture_current` command: capture the active resource (permission-gated,
     /// S4) and surface its existing backlinks (U5). On any failure, return the
     /// user-facing explanation (U3) as `Err` — the webview shows it, never silence.
+    ///
+    /// Takes the shared backend rather than `&mut self` because the adapter call
+    /// (an `osascript` round trip, up to its timeout if the app stalls) must NOT
+    /// hold the lock: other commands (list, open, settings) keep working meanwhile.
+    /// The lock is taken only for the fast steps on either side of it.
     pub fn capture_current(
-        &mut self,
+        backend: &Mutex<PanelBackend>,
         adapter: &dyn ResourceAdapter,
         now: i64,
     ) -> Result<PanelView, String> {
-        let id = self
-            .service
-            .capture(adapter, now)
-            .map_err(|e| e.message())?;
-        let backlinks = self
+        let lock = || backend.lock().map_err(|_| POISONED.to_string());
+        // 1. Under the lock: read the permission the S4 gate checks.
+        let permission = lock()?.service.permission();
+        // 2. Lock released: the slow part, the adapter's call into the target app.
+        let raw = capture_active(adapter, permission).map_err(|e| e.explanation().to_string())?;
+        // 3. Re-lock: validate (S5) and store the link, then read its backlinks (U5).
+        let mut b = lock()?;
+        let id = b.service.store_capture(raw, now).map_err(|e| e.message())?;
+        let backlinks = b
             .service
             .backlinks(&id.uri)
             .map_err(|e| e.message())?
@@ -328,8 +341,8 @@ mod tests {
         let b = svc.capture(&paper, 1).unwrap();
         svc.link(&a, &b, Some(1)).unwrap();
 
-        let mut panel = PanelBackend::new(svc);
-        let view = panel.capture_current(&note, 1).unwrap();
+        let panel = Mutex::new(PanelBackend::new(svc));
+        let view = PanelBackend::capture_current(&panel, &note, 1).unwrap();
         assert_eq!(view.resource.uri, a.uri);
         assert_eq!(
             view.backlinks.len(),
@@ -364,9 +377,96 @@ mod tests {
         }
         let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
             .with_permission(PermissionState::Denied);
-        let mut panel = PanelBackend::new(svc);
-        let err = panel.capture_current(&LiveAdapter, 1).unwrap_err();
+        let panel = Mutex::new(PanelBackend::new(svc));
+        let err = PanelBackend::capture_current(&panel, &LiveAdapter, 1).unwrap_err();
         assert!(!err.trim().is_empty(), "U3: empty explanation");
+    }
+
+    /// An app adapter whose capture blocks until released, standing in for a
+    /// stalled target app (the slow osascript call).
+    struct StalledApp {
+        uri: &'static str,
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl ResourceAdapter for StalledApp {
+        fn id(&self) -> &str {
+            "stalled"
+        }
+        fn needs_permission(&self) -> bool {
+            false
+        }
+        fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(ResourceIdentity::new("Stalled", self.uri))
+        }
+        fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
+            OpenPlan {
+                program: "open".into(),
+                args: vec![r.uri.clone()],
+            }
+        }
+    }
+
+    /// Run a capture through `StalledApp` on another thread; while it is stalled,
+    /// try to take the backend lock. Returns (lock was free?, capture result).
+    fn capture_while_probing_the_lock(
+        backend: &Mutex<PanelBackend>,
+        uri: &'static str,
+    ) -> (bool, Result<PanelView, String>) {
+        let (entered, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release) = std::sync::mpsc::channel();
+        std::thread::scope(|s| {
+            let capture = s.spawn(move || {
+                let app = StalledApp {
+                    uri,
+                    entered,
+                    release,
+                };
+                PanelBackend::capture_current(backend, &app, 7)
+            });
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("capture reached the adapter");
+            // Another command (here: the link browser) while the app is stalled.
+            let free = backend
+                .try_lock()
+                .map(|b| b.list_links().is_ok())
+                .unwrap_or(false);
+            release_tx.send(()).unwrap();
+            (free, capture.join().unwrap())
+        })
+    }
+
+    #[test]
+    fn backend_serves_other_commands_while_a_capture_is_in_flight() {
+        // T4: one stalled app must not freeze list/open/settings for the whole
+        // capture, so the backend lock is NOT held across the adapter call.
+        let backend = Mutex::new(PanelBackend::new(UbilinkService::new(
+            LinkGraph::open_in_memory().unwrap(),
+        )));
+        let (lock_was_free, result) =
+            capture_while_probing_the_lock(&backend, "https://stalled.example/");
+        assert!(lock_was_free, "backend lock held during the adapter call");
+        // …and the capture still completes and is stored afterwards.
+        assert_eq!(result.unwrap().resource.uri, "https://stalled.example/");
+        let listed = backend.lock().unwrap().list_links().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].uri, "https://stalled.example/");
+    }
+
+    #[test]
+    fn a_captured_link_is_still_validated_before_it_is_stored() {
+        // S5: the link an adapter hands back is validated through the bounded API
+        // before it reaches the graph, even though the lock was released meanwhile.
+        let backend = Mutex::new(PanelBackend::new(UbilinkService::new(
+            LinkGraph::open_in_memory().unwrap(),
+        )));
+        let (_, result) = capture_while_probing_the_lock(&backend, "javascript:alert(1)");
+        let err = result.unwrap_err();
+        assert!(err.contains("javascript"), "{err}");
+        assert!(backend.lock().unwrap().list_links().unwrap().is_empty());
     }
 
     #[test]

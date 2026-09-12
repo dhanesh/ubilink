@@ -112,11 +112,9 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    let mut b = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    b.capture_current(&adapter, now)
+    // Takes the backend lock only around its fast reads/writes, never across the
+    // (possibly stalled) osascript call, so other commands stay responsive.
+    PanelBackend::capture_current(&state.backend, &adapter, now)
 }
 
 #[tauri::command]
