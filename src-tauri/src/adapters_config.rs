@@ -9,6 +9,11 @@
 // entry, not a code change and not a recompile (B3). Built-ins ship embedded; users
 // drop an `adapters.json` to extend or override.
 //
+// Trust (DECISIONS D14): adapter JSON is TRUSTED LOCAL CONFIGURATION, not a plugin.
+// Its `script` runs via `osascript` with the user's privileges and Ubilink's TCC
+// grants, outside the Node plugin sandbox. Only the embedded defaults may be
+// `builtin`; user entries are always `user_defined` and disableable.
+//
 // Functional core: `render` (the template engine) and `ConfiguredAdapter::parse` are
 // pure and fully unit-tested; only the single `osascript` call needs a real Mac.
 
@@ -46,10 +51,18 @@ pub struct AdapterSpec {
     #[serde(default = "default_true")]
     pub needs_permission: bool,
     /// Built-in = a default-macOS app (Safari, Finder) shipped as core, always on
-    /// and not removable. Everything else is a third-party "plugin": listed in the
-    /// plugin manager, toggleable on/off, and (future) installable.
+    /// and not removable. Everything else is listed in the plugin manager and
+    /// toggleable on/off. Only honoured for the EMBEDDED defaults: a user
+    /// `adapters.json` entry is always forced to `false` (D14), so it can't make
+    /// itself impossible to disable.
     #[serde(default)]
     pub builtin: bool,
+    /// True for entries that came from the user's `adapters.json` (including a
+    /// user override of a built-in). Never read from JSON; set by
+    /// `extend_from_json`. These are trusted local config running with the
+    /// user's own privileges, NOT sandboxed plugins (D14).
+    #[serde(skip)]
+    pub user_defined: bool,
 }
 
 fn default_true() -> bool {
@@ -231,7 +244,9 @@ pub struct AdapterRegistry {
 }
 
 impl AdapterRegistry {
-    pub fn from_json(json: &str) -> Result<AdapterRegistry, String> {
+    /// Parse the EMBEDDED defaults. Private on purpose: this path honours
+    /// `builtin`, so it must never be fed user JSON (use `extend_from_json`).
+    fn from_json(json: &str) -> Result<AdapterRegistry, String> {
         let specs: Vec<AdapterSpec> = serde_json::from_str(json).map_err(|e| e.to_string())?;
         Ok(AdapterRegistry { specs })
     }
@@ -242,12 +257,19 @@ impl AdapterRegistry {
             .expect("built-in adapters.default.json must be valid")
     }
 
-    /// Merge user-supplied specs; a user entry replaces a built-in with the same app
-    /// (B3: the ecosystem extends or overrides coverage without touching core).
+    /// Merge the user's local `adapters.json`; a user entry replaces a built-in with
+    /// the same app (B3: extend or fix coverage without touching core).
+    ///
+    /// Trust (D14): these entries are trusted LOCAL configuration — their `script`
+    /// runs via `osascript` with the user's own privileges and TCC grants. They are
+    /// not sandboxed plugins. So a user entry is never `builtin` (whatever the JSON
+    /// says, including when it overrides a built-in): it stays disableable.
     pub fn extend_from_json(&mut self, json: &str) -> Result<usize, String> {
         let user: Vec<AdapterSpec> = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let n = user.len();
-        for spec in user {
+        for mut spec in user {
+            spec.builtin = false;
+            spec.user_defined = true;
             self.specs
                 .retain(|s| !s.app.eq_ignore_ascii_case(&spec.app));
             self.specs.insert(0, spec);
@@ -430,6 +452,7 @@ mod tests {
             schemes: vec![],
             needs_permission: true,
             builtin: false,
+            user_defined: false,
         };
         let a = ConfiguredAdapter::new(
             spec,
@@ -453,6 +476,7 @@ mod tests {
             schemes: vec![],
             needs_permission: true,
             builtin: false,
+            user_defined: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("/Users/me/Docs/Report.pdf".into())));
         let id = a.capture().unwrap();
@@ -474,6 +498,7 @@ mod tests {
             schemes: vec![],
             needs_permission: true,
             builtin: false,
+            user_defined: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("My Note: ideas".into())));
         let id = a.capture().unwrap();
@@ -497,6 +522,7 @@ mod tests {
             schemes: vec![],
             needs_permission: true,
             builtin: false,
+            user_defined: false,
         };
         let a = ConfiguredAdapter::new(spec, FakeRunner(Ok("   \n".into())));
         match a.capture().unwrap_err() {
@@ -575,5 +601,75 @@ mod tests {
             "Safari overridden, not duplicated"
         );
         assert_eq!(reg.apps().len(), before + 1);
+    }
+
+    // Adapter JSON is TRUSTED LOCAL CONFIG (DECISIONS D14): only the embedded
+    // defaults may be built-in. A user entry can never claim `builtin`, because
+    // built-ins can't be disabled in the plugin manager.
+
+    #[test]
+    fn user_entry_cannot_claim_builtin() {
+        let mut reg = AdapterRegistry::defaults();
+        reg.extend_from_json(
+            r#"[{"app":"Slack","script":"x","fields":["u"],"uri":"{u}","name":"{u}","builtin":true}]"#,
+        )
+        .unwrap();
+        let slack = reg.for_app("Slack").expect("user app added");
+        assert!(
+            !slack.builtin,
+            "a user adapters.json entry must never become builtin (non-disableable)"
+        );
+    }
+
+    #[test]
+    fn user_override_of_a_builtin_is_no_longer_builtin() {
+        let mut reg = AdapterRegistry::defaults();
+        assert!(
+            reg.for_app("Safari").unwrap().builtin,
+            "precondition: Safari ships as a built-in"
+        );
+        // Overriding a built-in by name stays allowed (users may fix a script), and
+        // an explicit `"builtin": true` must not keep it locked on.
+        reg.extend_from_json(
+            r#"[{"app":"safari","script":"user script","fields":["url"],"uri":"{url}","name":"{url}","builtin":true}]"#,
+        )
+        .unwrap();
+        let safari = reg.for_app("Safari").unwrap();
+        assert_eq!(safari.script, "user script", "user override took effect");
+        assert!(
+            !safari.builtin,
+            "a user override of a built-in is user-defined, so it must be disableable"
+        );
+    }
+
+    #[test]
+    fn user_override_without_builtin_flag_is_not_builtin() {
+        let mut reg = AdapterRegistry::defaults();
+        reg.extend_from_json(
+            r#"[{"app":"Finder","script":"x","fields":["path"],"uri":"file://{path}","name":"{path}"}]"#,
+        )
+        .unwrap();
+        assert!(!reg.for_app("Finder").unwrap().builtin);
+    }
+
+    #[test]
+    fn user_entries_are_marked_user_defined_and_defaults_are_not() {
+        let mut reg = AdapterRegistry::defaults();
+        assert!(
+            reg.specs().iter().all(|s| !s.user_defined),
+            "embedded defaults are not user-defined"
+        );
+        // `user_defined` is never read from JSON — only set by the merge.
+        reg.extend_from_json(
+            r#"[{"app":"Safari","script":"x","fields":["url"],"uri":"{url}","name":"{url}"},
+                {"app":"Slack","script":"x","fields":["u"],"uri":"{u}","name":"{u}"}]"#,
+        )
+        .unwrap();
+        assert!(reg.for_app("Safari").unwrap().user_defined, "override");
+        assert!(reg.for_app("Slack").unwrap().user_defined, "new app");
+        assert!(
+            !reg.for_app("Finder").unwrap().user_defined,
+            "untouched default"
+        );
     }
 }

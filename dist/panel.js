@@ -256,8 +256,10 @@ async function openSettings(stats) {
   fitWindow();
 }
 
-// Render the plugin manager: one toggle row per adapter. Built-ins are shown but
-// locked on; third-party plugins toggle set_plugin_enabled (persisted in Rust).
+// Render the adapter manager: one toggle row per app adapter. Built-ins are shown
+// but locked on; every other adapter toggles set_plugin_enabled (persisted in Rust).
+// Custom adapters (the user's adapters.json) are trusted local config that run with
+// the user's permissions — NOT sandboxed plugins (DECISIONS D14) — so say so.
 async function renderPlugins() {
   const ul = $('set-plugins');
   if (!ul) return;
@@ -274,7 +276,11 @@ async function renderPlugins() {
     name.textContent = p.app;
     const sub = document.createElement('span');
     sub.className = 'set-sub';
-    sub.textContent = p.builtin ? 'Built-in' : (p.scheme ? `${p.scheme}: link` : 'Third-party');
+    sub.textContent = p.builtin
+      ? 'Built-in'
+      : p.user_defined
+        ? 'Custom adapter · runs with your permissions'
+        : (p.scheme ? `${p.scheme}: link` : 'App adapter');
     label.append(name, sub);
 
     const toggle = document.createElement('input');
