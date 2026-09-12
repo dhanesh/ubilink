@@ -10,8 +10,28 @@
 // captures (GAP-17) are serialized and idempotent rather than duplicating links.
 
 use crate::resource::{Link, ResourceIdentity};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use std::collections::HashMap;
+
+/// The schema version this build writes, stored in `PRAGMA user_version`.
+///
+/// - v0: unversioned — any DB from before versioning (see `run_migrations`).
+/// - v1: base tables + indexes exist.
+/// - v2: `resources` has `guid`, `created_at`, `updated_at`, and every row is
+///   backfilled (a UUID guid; rowid placeholder times for legacy rows).
+/// - v3: rowid-placeholder `created_at` healed once from the earliest link.
+pub const SCHEMA_VERSION: i32 = MIGRATIONS.len() as i32;
+
+/// One migration step. It runs inside the transaction `run_migrations` opens.
+type MigrationStep = fn(&Connection) -> rusqlite::Result<()>;
+
+/// `MIGRATIONS[i]` takes the schema from version `i` to `i + 1`. Append only:
+/// never edit or reorder a step that has shipped.
+const MIGRATIONS: &[MigrationStep] = &[
+    LinkGraph::create_base_tables,
+    LinkGraph::add_resource_columns,
+    LinkGraph::heal_placeholder_created_at,
+];
 
 pub struct LinkGraph {
     conn: Connection,
@@ -29,12 +49,59 @@ impl LinkGraph {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> rusqlite::Result<LinkGraph> {
+    fn init(mut conn: Connection) -> rusqlite::Result<LinkGraph> {
         // WAL: concurrent readers + a serialized writer (GAP-17). busy_timeout so a
         // racing writer waits for the lock instead of erroring.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Self::migrate(&mut conn)?;
+        Ok(LinkGraph { conn })
+    }
+
+    /// Bring the schema to `SCHEMA_VERSION`. See `run_migrations`.
+    fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
+        Self::run_migrations(conn, MIGRATIONS)
+    }
+
+    /// Run every step whose version is above the DB's `PRAGMA user_version`.
+    /// `steps[i]` takes the schema to version `i + 1`.
+    ///
+    /// Each step runs in ONE transaction that also bumps `user_version`, so a
+    /// step either lands completely (schema + data + version) or not at all —
+    /// SQLite DDL is transactional, so a crash or error mid-step rolls it back
+    /// and the next open simply retries it. The transaction is IMMEDIATE (takes
+    /// the write lock up front) and the version is re-read inside it, so two
+    /// processes opening the same old DB can't both apply a step.
+    ///
+    /// Version 0 is every DB from before versioning — an empty file, the
+    /// original 5-column schema, a DB the old non-atomic migration left half
+    /// done, or a fully migrated one. The steps inspect the actual columns rather
+    /// than assume, so all of those converge on the same final schema.
+    fn run_migrations(conn: &mut Connection, steps: &[MigrationStep]) -> rusqlite::Result<()> {
+        let version = |c: &Connection| -> rusqlite::Result<i32> {
+            c.query_row("PRAGMA user_version", [], |r| r.get(0))
+        };
+        // Fast path: an up-to-date DB takes no write lock and writes nothing.
+        if version(conn)? >= steps.len() as i32 {
+            return Ok(());
+        }
+        for (i, step) in steps.iter().enumerate() {
+            let target = i as i32 + 1;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if version(&tx)? >= target {
+                continue; // already applied (maybe by another process); tx rolls back
+            }
+            step(&tx)?; // on error, `tx` drops and rolls the whole step back
+            tx.pragma_update(None, "user_version", target)?;
+            tx.commit()?;
+        }
+        Ok(())
+    }
+
+    /// v1: the base tables and indexes. A fresh DB gets the full current shape
+    /// here; an existing one is left as is (`IF NOT EXISTS`) for v2 to fill in.
+    fn create_base_tables(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS resources (
@@ -58,44 +125,54 @@ impl LinkGraph {
             CREATE INDEX IF NOT EXISTS idx_links_lo ON links(lo_id);
             CREATE INDEX IF NOT EXISTS idx_links_hi ON links(hi_id);
             "#,
-        )?;
-        Self::migrate(&conn)?;
-        Ok(LinkGraph { conn })
+        )
     }
 
-    /// Add guid/created_at/updated_at to a pre-existing resources table (DBs created
-    /// before these columns). Backfills order from rowid (so the current list order
-    /// is preserved; real ms-timestamps from future captures sort above all legacy
-    /// rows) and guid from the URI.
-    fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    /// v2: add guid/created_at/updated_at to a resources table that predates them,
+    /// and backfill the rows. Idempotent, so it also finishes a DB the old
+    /// non-atomic migration left half done (e.g. `guid` added, the rest missing).
+    ///
+    /// Only rows the legacy backfill never reached are touched: every write path
+    /// sets `updated_at`, so `updated_at IS NULL` marks exactly those rows. They get
+    /// rowid as a placeholder time (keeps the current list order; real ms times from
+    /// future captures sort above all legacy rows) — v3 then heals `created_at`.
+    /// Any row without a guid gets a fresh UUID (stable once written).
+    fn add_resource_columns(conn: &Connection) -> rusqlite::Result<()> {
         let cols: Vec<String> = {
             let mut stmt = conn.prepare("SELECT name FROM pragma_table_info('resources')")?;
             let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
-        if !cols.iter().any(|c| c == "guid") {
-            conn.execute("ALTER TABLE resources ADD COLUMN guid TEXT", [])?;
-            conn.execute("ALTER TABLE resources ADD COLUMN created_at INTEGER", [])?;
-            conn.execute("ALTER TABLE resources ADD COLUMN updated_at INTEGER", [])?;
-            conn.execute(
-                "UPDATE resources SET created_at = rowid, updated_at = rowid",
-                [],
-            )?;
-            // each legacy row gets a fresh UUID (stable once written).
-            let ids: Vec<String> = {
-                let mut stmt = conn.prepare("SELECT id FROM resources WHERE guid IS NULL")?;
-                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<_>>()?
-            };
-            for id in ids {
-                conn.execute(
-                    "UPDATE resources SET guid = ?1 WHERE id = ?2",
-                    params![Self::new_guid(), id],
-                )?;
+        for (col, ty) in [
+            ("guid", "TEXT"),
+            ("created_at", "INTEGER"),
+            ("updated_at", "INTEGER"),
+        ] {
+            if !cols.iter().any(|c| c == col) {
+                conn.execute_batch(&format!("ALTER TABLE resources ADD COLUMN {col} {ty}"))?;
             }
-            // The first backfill used rowid as a placeholder created_at — but rowid
-            // isn't a real time. Re-derive it below.
         }
+        conn.execute(
+            "UPDATE resources SET created_at = rowid, updated_at = rowid WHERE updated_at IS NULL",
+            [],
+        )?;
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM resources WHERE guid IS NULL")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for id in ids {
+            conn.execute(
+                "UPDATE resources SET guid = ?1 WHERE id = ?2",
+                params![Self::new_guid(), id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// v3: a one-time heal of placeholder `created_at` values. Runs once per DB,
+    /// as a migration step, never on a normal open.
+    fn heal_placeholder_created_at(conn: &Connection) -> rusqlite::Result<()> {
         // Heal placeholder created_at (the rowid backfill, values << a real epoch-ms):
         // use the EARLIEST link the resource is in — a real timestamp, since you can
         // only link something that already exists. Orphans (no links) have no
@@ -651,19 +728,292 @@ mod tests {
         );
     }
 
+    // ---- schema migrations -------------------------------------------------------
+
+    /// The schema every DB had before any migration existed (git: 86c704d..4c3002f):
+    /// resources WITHOUT guid/created_at/updated_at, `user_version` = 0.
+    const LEGACY_V0_SCHEMA: &str = r#"
+        CREATE TABLE resources (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            uri          TEXT NOT NULL,
+            path         TEXT,
+            content_hash TEXT
+        );
+        CREATE TABLE links (
+            id         TEXT PRIMARY KEY,
+            lo_id      TEXT NOT NULL REFERENCES resources(id),
+            hi_id      TEXT NOT NULL REFERENCES resources(id),
+            created_at INTEGER,
+            UNIQUE (lo_id, hi_id)
+        );
+        CREATE INDEX idx_links_lo ON links(lo_id);
+        CREATE INDEX idx_links_hi ON links(hi_id);
+    "#;
+
+    /// The resources columns the app reads and writes today, in table order.
+    const EXPECTED_RESOURCE_COLUMNS: [&str; 8] = [
+        "id",
+        "name",
+        "uri",
+        "path",
+        "content_hash",
+        "guid",
+        "created_at",
+        "updated_at",
+    ];
+
+    /// A real link time (ms since epoch, 2026) — above the heal's placeholder floor.
+    const REAL_MS: i64 = 1_782_400_000_000;
+
+    /// A fresh on-disk DB path, removed on drop (for scenarios that reopen a file).
+    struct TempDb {
+        dir: std::path::PathBuf,
+        path: String,
+    }
+
+    impl TempDb {
+        fn new(tag: &str) -> TempDb {
+            static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir()
+                .join(format!("ubilink-graph-{tag}-{}-{n}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("graph.sqlite").to_string_lossy().to_string();
+            TempDb { dir, path }
+        }
+    }
+
+    impl Drop for TempDb {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn user_version(conn: &Connection) -> i32 {
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn columns_of(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT name FROM pragma_table_info(?1)")
+            .unwrap();
+        let rows = stmt.query_map([table], |r| r.get(0)).unwrap();
+        rows.collect::<rusqlite::Result<_>>().unwrap()
+    }
+
+    /// Every resource row as (rowid, id, guid, created_at, updated_at), by rowid.
+    type RowSnapshot = (i64, String, Option<String>, Option<i64>, Option<i64>);
+    fn snapshot(conn: &Connection) -> Vec<RowSnapshot> {
+        let mut stmt = conn
+            .prepare("SELECT rowid, id, guid, created_at, updated_at FROM resources ORDER BY rowid")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap();
+        rows.collect::<rusqlite::Result<_>>().unwrap()
+    }
+
+    /// A legacy (v0) DB at `path`: two linked resources + one orphan, then
+    /// `extra_columns` added the way the old non-atomic migration's first ALTERs
+    /// did before a crash (so `&["guid"]` is "crashed after the first ALTER").
+    fn build_legacy_db(path: &str, extra_columns: &[&str]) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(LEGACY_V0_SCHEMA).unwrap();
+        conn.execute_batch(
+            "INSERT INTO resources (id,name,uri,path) VALUES ('x://a','Alpha','x://a','/a');
+             INSERT INTO resources (id,name,uri) VALUES ('x://b','Beta','x://b');
+             INSERT INTO resources (id,name,uri) VALUES ('x://orphan','Orphan','x://orphan');",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO links (id,lo_id,hi_id,created_at) VALUES ('x://a\u{1f}x://b','x://a','x://b',?1)",
+            [REAL_MS],
+        )
+        .unwrap();
+        for col in extra_columns {
+            let ty = if *col == "guid" { "TEXT" } else { "INTEGER" };
+            conn.execute_batch(&format!("ALTER TABLE resources ADD COLUMN {col} {ty}"))
+                .unwrap();
+        }
+        assert_eq!(user_version(&conn), 0, "legacy DBs are unversioned");
+    }
+
+    /// What a legacy DB must look like once opened: latest version, full schema,
+    /// every row + link kept, a UUID per row, created_at healed from the link.
+    fn assert_fully_migrated(g: &LinkGraph) {
+        assert_eq!(user_version(&g.conn), SCHEMA_VERSION);
+        assert_eq!(columns_of(&g.conn, "resources"), EXPECTED_RESOURCE_COLUMNS);
+        assert_eq!(g.resource_count().unwrap(), 3, "no resource lost");
+        assert_eq!(g.link_count().unwrap(), 1, "no link lost");
+        assert!(g.are_linked("x://a", "x://b").unwrap());
+        let names: Vec<String> = g
+            .list_resources()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.name)
+            .collect();
+        assert_eq!(names, vec!["Alpha", "Beta", "Orphan"]);
+        let rows = snapshot(&g.conn);
+        let mut guids: Vec<&str> = rows.iter().map(|r| r.2.as_deref().unwrap()).collect();
+        assert!(guids.iter().all(|g| g.len() == 36), "every row has a UUID");
+        guids.sort();
+        guids.dedup();
+        assert_eq!(guids.len(), 3, "guids are distinct");
+        let created: Vec<Option<i64>> = rows.iter().map(|r| r.3).collect();
+        assert_eq!(
+            created,
+            vec![Some(REAL_MS), Some(REAL_MS), None],
+            "created_at healed from the earliest link; orphan unknown"
+        );
+        // updated_at keeps the legacy list order (rowid proxy): newest row on top.
+        let updated: Vec<Option<i64>> = rows.iter().map(|r| r.4).collect();
+        assert_eq!(updated, vec![Some(1), Some(2), Some(3)]);
+        let top = g.list_resources_with_counts().unwrap()[0].0.uri.clone();
+        assert_eq!(top, "x://orphan");
+    }
+
     #[test]
-    fn migration_heals_rowid_placeholder_created_at_from_links() {
-        // Simulate a legacy DB: rowid-placeholder created_at on resources, but a real
-        // link timestamp exists. The heal (run on every open) should re-derive the
-        // resource created_at from the link; an orphan resource becomes NULL.
-        let g = LinkGraph::open_in_memory().unwrap();
+    fn fresh_db_is_created_at_the_latest_version_with_the_full_schema() {
+        let db = TempDb::new("fresh");
+        let g = LinkGraph::open(&db.path).unwrap();
+        assert_eq!(user_version(&g.conn), SCHEMA_VERSION);
+        assert_eq!(columns_of(&g.conn, "resources"), EXPECTED_RESOURCE_COLUMNS);
+        assert_eq!(
+            columns_of(&g.conn, "links"),
+            vec!["id", "lo_id", "hi_id", "created_at"]
+        );
+        let indexes: Vec<String> = {
+            let mut stmt = g
+                .conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name")
+                .unwrap();
+            let rows = stmt.query_map([], |r| r.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(indexes, vec!["idx_links_hi", "idx_links_lo"]);
+        // in-memory graphs take the same path
+        let m = LinkGraph::open_in_memory().unwrap();
+        assert_eq!(user_version(&m.conn), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_v0_db_migrates_with_rows_and_links_preserved() {
+        let db = TempDb::new("legacy");
+        build_legacy_db(&db.path, &[]);
+        let g = LinkGraph::open(&db.path).unwrap();
+        assert_fully_migrated(&g);
+        let a = g.list_resources().unwrap().remove(0);
+        assert_eq!(a.path.as_deref(), Some("/a"), "row data preserved");
+    }
+
+    #[test]
+    fn partially_migrated_db_opens_and_finishes_migrating() {
+        // The old migration ran three ALTERs + backfills outside a transaction; a
+        // crash between them left a DB its column check then skipped forever.
+        for done in [
+            &["guid"][..],
+            &["guid", "created_at"][..],
+            &["guid", "created_at", "updated_at"][..], // ALTERs done, backfill not
+        ] {
+            let db = TempDb::new("partial");
+            build_legacy_db(&db.path, done);
+            let g = LinkGraph::open(&db.path)
+                .unwrap_or_else(|e| panic!("open failed after crash at {done:?}: {e}"));
+            assert_fully_migrated(&g);
+        }
+    }
+
+    #[test]
+    fn reopening_a_migrated_db_rewrites_nothing() {
+        // The created_at heal is a one-time migration step: once the DB is at the
+        // latest version, opening it must not write a single row — even rows whose
+        // created_at is below the heal's floor (small or unknown capture times).
+        let db = TempDb::new("reopen");
+        let before = {
+            let mut g = LinkGraph::open(&db.path).unwrap();
+            g.link(&r("A", "x://a"), &r("B", "x://b"), Some(1)).unwrap();
+            g.upsert_resource(&r("C", "x://c"), 0).unwrap(); // unknown capture time
+            snapshot(&g.conn)
+        };
+        for _ in 0..2 {
+            let g = LinkGraph::open(&db.path).unwrap();
+            assert_eq!(g.conn.total_changes(), 0, "open wrote rows");
+            assert_eq!(snapshot(&g.conn), before, "open rewrote rows");
+        }
+    }
+
+    /// The real v2 step, then a failure after its ALTERs have run — a stand-in for
+    /// a crash or error midway through a step.
+    fn add_resource_columns_then_fail(conn: &Connection) -> rusqlite::Result<()> {
+        LinkGraph::add_resource_columns(conn)?;
+        assert!(
+            columns_of(conn, "resources").contains(&"guid".to_string()),
+            "the step really did alter the table before failing"
+        );
+        conn.execute_batch("INSERT INTO no_such_table VALUES (1)")
+    }
+
+    #[test]
+    fn a_failing_migration_step_leaves_the_db_at_its_previous_version() {
+        let db = TempDb::new("atomic");
+        build_legacy_db(&db.path, &[]);
+        {
+            let mut conn = Connection::open(&db.path).unwrap();
+            let steps: &[MigrationStep] = &[
+                LinkGraph::create_base_tables,
+                add_resource_columns_then_fail,
+            ];
+            assert!(LinkGraph::run_migrations(&mut conn, steps).is_err());
+        }
+        // Reopen raw: step 1 committed, step 2 rolled back completely.
+        {
+            let conn = Connection::open(&db.path).unwrap();
+            assert_eq!(user_version(&conn), 1, "stays at the last completed step");
+            assert_eq!(
+                columns_of(&conn, "resources"),
+                vec!["id", "name", "uri", "path", "content_hash"],
+                "no half-applied columns"
+            );
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM resources", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 3, "rows untouched");
+        }
+        // The next open retries the step and completes the migration.
+        let g = LinkGraph::open(&db.path).unwrap();
+        assert_fully_migrated(&g);
+    }
+
+    #[test]
+    fn unversioned_current_schema_db_is_healed_once() {
+        // A DB written by the pre-versioning code that already had every column
+        // (user_version 0): rowid-placeholder created_at on resources, but a real
+        // link timestamp exists. Migrating re-derives the resource created_at from
+        // the link; an orphan resource becomes NULL.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE resources (id TEXT PRIMARY KEY, name TEXT NOT NULL, uri TEXT NOT NULL,
+                 path TEXT, content_hash TEXT, guid TEXT, created_at INTEGER, updated_at INTEGER);
+             CREATE TABLE links (id TEXT PRIMARY KEY, lo_id TEXT NOT NULL REFERENCES resources(id),
+                 hi_id TEXT NOT NULL REFERENCES resources(id), created_at INTEGER, UNIQUE (lo_id, hi_id));",
+        )
+        .unwrap();
         // two linked resources + one orphan, all with placeholder created_at (=rowid-ish)
-        g.conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://a','A','x://a','g1',1,1)", []).unwrap();
-        g.conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://b','B','x://b','g2',2,2)", []).unwrap();
-        g.conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://orphan','O','x://orphan','g3',3,3)", []).unwrap();
-        g.conn.execute("INSERT INTO links (id,lo_id,hi_id,created_at) VALUES ('k','x://a','x://b',1782400000000)", []).unwrap();
-        // re-run the heal (idempotent; same as a fresh open would do)
-        LinkGraph::migrate(&g.conn).unwrap();
+        conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://a','A','x://a','g1',1,1)", []).unwrap();
+        conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://b','B','x://b','g2',2,2)", []).unwrap();
+        conn.execute("INSERT INTO resources (id,name,uri,guid,created_at,updated_at) VALUES ('x://orphan','O','x://orphan','g3',3,3)", []).unwrap();
+        conn.execute(
+            "INSERT INTO links (id,lo_id,hi_id,created_at) VALUES ('k','x://a','x://b',?1)",
+            [REAL_MS],
+        )
+        .unwrap();
+        let g = LinkGraph::init(conn).unwrap();
+        assert_eq!(user_version(&g.conn), SCHEMA_VERSION);
         let at = |id: &str| -> Option<i64> {
             g.conn
                 .query_row(
