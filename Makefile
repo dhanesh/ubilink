@@ -55,6 +55,8 @@ test-rust: ## cargo test for the core and registry crates
 	$(CARGO) test $(LOCKED) --manifest-path $(REGISTRY)
 
 test-js: ## node --test for the panel view-state reducer (zero deps)
+	@# node --test exits 0 when the glob matches nothing — fail loudly instead.
+	@set -- $(UI_DIR)/*.test.mjs; [ -e "$$1" ] || { echo "test-js: no $(UI_DIR)/*.test.mjs found" >&2; exit 1; }
 	$(NODE) --test '$(UI_DIR)/*.test.mjs'
 
 test-desktop: ## cargo test for the Tauri desktop crate (heavy: pulls the Tauri dep tree)
