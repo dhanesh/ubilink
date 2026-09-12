@@ -18,6 +18,9 @@
 // absent, returns a `CaptureOutcome::PermissionRequired` carrying a human
 // explanation — the UI surfaces that (U3) instead of failing silently.
 
+use crate::api::LinkPolicy;
+use crate::capabilities::Platform;
+use crate::live_capture::CommandRunner;
 use crate::resource::ResourceIdentity;
 use std::path::Path;
 
@@ -69,7 +72,7 @@ impl CaptureFailure {
 }
 
 /// A plan to open a link — program + args. Returned (not executed) so it is
-/// testable; `ResourceAdapter::open` runs it.
+/// testable; `open_uri` validates the link and runs it (see `open_plan_for`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPlan {
     pub program: String,
@@ -123,24 +126,61 @@ impl ResourceAdapter for FileAdapter {
         Ok(id)
     }
     fn open_plan(&self, resource: &ResourceIdentity) -> OpenPlan {
-        // macOS `open`, Linux `xdg-open`, Windows `start` — resolve the URI.
-        let program = if cfg!(target_os = "macos") {
-            "open"
-        } else if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "xdg-open"
-        };
-        let args = if cfg!(target_os = "windows") {
-            vec!["/C".into(), "start".into(), resource.uri.clone()]
-        } else {
-            vec![resource.uri.clone()]
-        };
-        OpenPlan {
-            program: program.into(),
-            args,
-        }
+        open_plan_for(Platform::current(), &resource.uri)
     }
+}
+
+/// How to open `uri` on `platform`: never through a shell, and never in a position
+/// where it can be parsed as an option. Pure (returned, not run), so every
+/// platform's command is unit-testable from any host.
+///
+/// - macOS: `open -- <uri>`. `--` ends option parsing (verified on macOS 27:
+///   `open -- -foo` treats `-foo` as a path, while `open -foo` parses options).
+/// - Linux: `xdg-open <uri>`. xdg-open rejects `--` as an unknown option, so the
+///   URI goes alone; the shared validation already refuses a leading `-`.
+/// - Windows: `rundll32 url.dll,FileProtocolHandler <uri>`. Hands the URI to the
+///   registered protocol handler with no cmd.exe parsing (the old `cmd /C start`
+///   let `&`, `|`, `^` inject commands). Space and `"` are percent-encoded so std's
+///   argv quoting never wraps the URI in quotes, which rundll32 would pass through
+///   verbatim to the handler.
+pub fn open_plan_for(platform: Platform, uri: &str) -> OpenPlan {
+    match platform {
+        Platform::MacOS => OpenPlan {
+            program: "open".into(),
+            args: vec!["--".into(), uri.into()],
+        },
+        Platform::Linux => OpenPlan {
+            program: "xdg-open".into(),
+            args: vec![uri.into()],
+        },
+        Platform::Windows => OpenPlan {
+            program: "rundll32".into(),
+            args: vec![
+                "url.dll,FileProtocolHandler".into(),
+                uri.replace(' ', "%20").replace('"', "%22"),
+            ],
+        },
+    }
+}
+
+/// Open a link: validate it with the shared policy first (defence in depth: a row
+/// already in the DB may predate validation or come from an old import), then run
+/// the platform plan through the `CommandRunner` seam. Errors are user-facing (U3).
+pub fn open_uri<R: CommandRunner>(
+    runner: &R,
+    policy: &LinkPolicy,
+    platform: Platform,
+    uri: &str,
+) -> Result<(), String> {
+    policy
+        .validate(uri, "")
+        .map_err(|e| format!("Refusing to open this link: {}", e.message()))?;
+    let plan = open_plan_for(platform, uri);
+    let args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
+    runner
+        .run(&plan.program, &args)
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't open the link: {e}"))
 }
 
 /// Capture a link to the active resource, enforcing the S4 permission gate FIRST
@@ -248,6 +288,136 @@ mod tests {
             detect_automation_permission(),
             PermissionState::NotDetermined
         ));
+    }
+
+    #[test]
+    fn file_adapter_open_plan_on_macos_ends_options_before_the_uri() {
+        // `open -foo` parses `-foo` as options; `open -- -foo` treats it as a path
+        // (verified on macOS 27). The URI must always follow `--`.
+        if cfg!(target_os = "macos") {
+            let plan = FileAdapter::new("/x").open_plan(&ResourceIdentity::new("n", "https://x"));
+            assert_eq!(plan.program, "open");
+            assert_eq!(plan.args, vec!["--", "https://x"]);
+        }
+    }
+
+    #[test]
+    fn macos_and_linux_open_plans_pass_the_uri_as_one_argument() {
+        let uri = "https://x/?a=1&b=2";
+        let mac = open_plan_for(Platform::MacOS, uri);
+        assert_eq!(
+            (mac.program.as_str(), mac.args.clone()),
+            ("open", vec!["--".to_string(), uri.to_string()])
+        );
+        // xdg-open refuses `--` as an unknown option, so the URI goes alone (the
+        // shared validation already refuses a leading '-').
+        let linux = open_plan_for(Platform::Linux, uri);
+        assert_eq!(
+            (linux.program.as_str(), linux.args),
+            ("xdg-open", vec![uri.to_string()])
+        );
+    }
+
+    #[test]
+    fn windows_open_plan_uses_no_shell() {
+        // `cmd /C start <uri>` let `&`, `|`, `^`… inject commands. rundll32's
+        // FileProtocolHandler hands the URI to the shell's URL handler directly —
+        // no cmd.exe parsing anywhere.
+        let uri = "https://x/?a=1&b=2|calc^&whoami";
+        let plan = open_plan_for(Platform::Windows, uri);
+        assert_eq!(plan.program, "rundll32");
+        assert_eq!(plan.args, vec!["url.dll,FileProtocolHandler", uri]);
+        assert!(!plan.program.eq_ignore_ascii_case("cmd"));
+        assert!(!plan.args.iter().any(|a| a.eq_ignore_ascii_case("/c")));
+    }
+
+    #[test]
+    fn windows_open_plan_percent_encodes_space_and_quote() {
+        // Keep the URI a single argv token that std never needs to quote: a space or
+        // `"` would make std wrap it in quotes, which rundll32 passes through verbatim.
+        let plan = open_plan_for(Platform::Windows, "file:///C:/My Docs/a\"b.txt");
+        assert_eq!(plan.args[1], "file:///C:/My%20Docs/a%22b.txt");
+    }
+
+    /// Records every command instead of running it (the `CommandRunner` seam).
+    struct RecordingRunner {
+        calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
+        reply: Result<String, String>,
+    }
+    impl RecordingRunner {
+        fn new(reply: Result<String, String>) -> RecordingRunner {
+            RecordingRunner {
+                calls: Default::default(),
+                reply,
+            }
+        }
+    }
+    impl CommandRunner for RecordingRunner {
+        fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
+            self.calls.borrow_mut().push((
+                program.to_string(),
+                args.iter().map(|a| a.to_string()).collect(),
+            ));
+            self.reply.clone()
+        }
+    }
+
+    #[test]
+    fn open_uri_runs_the_platform_command_through_the_runner() {
+        let policy = LinkPolicy::new();
+        let rec = RecordingRunner::new(Ok(String::new()));
+        open_uri(&rec, &policy, Platform::Windows, "https://x/?a=1&b=2").unwrap();
+        open_uri(
+            &rec,
+            &policy,
+            Platform::MacOS,
+            "file:///Users/me/My Note.md",
+        )
+        .unwrap();
+        assert_eq!(
+            *rec.calls.borrow(),
+            vec![
+                (
+                    "rundll32".to_string(),
+                    vec![
+                        "url.dll,FileProtocolHandler".to_string(),
+                        "https://x/?a=1&b=2".to_string()
+                    ]
+                ),
+                (
+                    "open".to_string(),
+                    vec!["--".to_string(), "file:///Users/me/My Note.md".to_string()]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_uri_refuses_invalid_links_without_running_anything() {
+        // Defence in depth for rows already in the DB (captured/imported before the
+        // policy existed): validate again right before launching.
+        let policy = LinkPolicy::new();
+        let rec = RecordingRunner::new(Ok(String::new()));
+        for uri in [
+            "javascript:alert(1)",
+            "-a Calculator",
+            "smb://evil.example/share",
+            "https://x/\u{202E}fdp.exe",
+            "",
+        ] {
+            for platform in [Platform::MacOS, Platform::Windows, Platform::Linux] {
+                let err = open_uri(&rec, &policy, platform, uri).unwrap_err();
+                assert!(!err.trim().is_empty(), "U3: explained ({uri:?})");
+            }
+        }
+        assert!(rec.calls.borrow().is_empty(), "nothing may be launched");
+    }
+
+    #[test]
+    fn open_uri_surfaces_a_runner_failure() {
+        let rec = RecordingRunner::new(Err("LSOpenURLsWithRole() failed".into()));
+        let err = open_uri(&rec, &LinkPolicy::new(), Platform::MacOS, "https://x").unwrap_err();
+        assert!(err.contains("LSOpenURLsWithRole"), "{err}");
     }
 
     #[test]

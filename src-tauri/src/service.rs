@@ -29,6 +29,9 @@ pub enum ServiceError {
     /// An import was rejected (bad JSON/schema, or a row failed validation) — the
     /// graph was left unchanged.
     Import(String),
+    /// Opening a link was refused (failed validation) or the OS opener failed.
+    /// Carries the user-facing explanation.
+    Open(String),
 }
 
 impl ServiceError {
@@ -39,6 +42,7 @@ impl ServiceError {
             ServiceError::Validation(a) => a.message(),
             ServiceError::Store(e) => format!("Couldn't save the link: {e}"),
             ServiceError::Import(e) => format!("Couldn't import: {e}"),
+            ServiceError::Open(e) => e.clone(),
         }
     }
 }
@@ -194,6 +198,18 @@ impl UbilinkService {
             .map_err(ServiceError::Import)
     }
 
+    /// Open a stored link: re-validate it with the SAME policy capture and import
+    /// use (defence in depth for rows written before validation existed), then
+    /// launch it with the platform's no-shell, no-option opener through `runner`.
+    pub fn open_link<R: crate::live_capture::CommandRunner>(
+        &self,
+        runner: &R,
+        uri: &str,
+    ) -> Result<(), ServiceError> {
+        crate::adapter::open_uri(runner, self.api.policy(), self.platform, uri)
+            .map_err(ServiceError::Open)
+    }
+
     /// Every captured resource with its link count (browser list).
     pub fn list_resources_with_counts(&self) -> Result<Vec<(ResourceIdentity, i64)>, ServiceError> {
         self.graph
@@ -226,13 +242,7 @@ impl UbilinkService {
 }
 
 fn current_platform() -> Platform {
-    if cfg!(target_os = "windows") {
-        Platform::Windows
-    } else if cfg!(target_os = "linux") {
-        Platform::Linux
-    } else {
-        Platform::MacOS
-    }
+    Platform::current()
 }
 
 #[cfg(test)]

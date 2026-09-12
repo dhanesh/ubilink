@@ -168,6 +168,16 @@ impl PanelBackend {
         ))
     }
 
+    /// The `open_link` command: re-validate a stored link with the capture policy
+    /// and launch it via the platform's no-shell opener through `runner`.
+    pub fn open_link<R: crate::live_capture::CommandRunner>(
+        &self,
+        runner: &R,
+        uri: &str,
+    ) -> Result<(), String> {
+        self.service.open_link(runner, uri).map_err(|e| e.message())
+    }
+
     /// The `capabilities` command (O2): the supported app/platform/mechanism set,
     /// serialized for the webview to disclose what works where.
     pub fn capabilities(&self) -> Vec<crate::capabilities::Support> {
@@ -180,6 +190,35 @@ mod tests {
     use super::*;
     use crate::adapter::{CaptureFailure, FileAdapter, OpenPlan, PermissionState};
     use crate::graph::LinkGraph;
+
+    #[test]
+    fn open_link_revalidates_with_the_configured_policy_before_launching() {
+        // The desktop `open_link` command goes through here: an adapter-declared
+        // scheme (bear:) opens with the platform's no-shell plan; a javascript: row
+        // (e.g. planted before import validation existed) is refused, not launched.
+        struct Rec(std::cell::RefCell<Vec<(String, Vec<String>)>>);
+        impl crate::live_capture::CommandRunner for Rec {
+            fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
+                self.0.borrow_mut().push((
+                    program.to_string(),
+                    args.iter().map(|a| a.to_string()).collect(),
+                ));
+                Ok(String::new())
+            }
+        }
+        let backend = PanelBackend::new(
+            UbilinkService::new(crate::graph::LinkGraph::open_in_memory().unwrap())
+                .allow_schemes(vec!["bear".to_string()]),
+        );
+        let rec = Rec(Default::default());
+        let bear = "bear://x-callback-url/open-note?id=1&x=2";
+        backend.open_link(&rec, bear).unwrap();
+        let err = backend.open_link(&rec, "javascript:alert(1)").unwrap_err();
+        assert!(err.contains("javascript"), "{err}");
+        let expected =
+            crate::adapter::open_plan_for(crate::capabilities::Platform::current(), bear);
+        assert_eq!(*rec.0.borrow(), vec![(expected.program, expected.args)]);
+    }
 
     fn tmp(dir: &std::path::Path, name: &str) -> String {
         let p = dir.join(name);
