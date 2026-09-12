@@ -20,18 +20,25 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// An integration manifest (RT-6). Mirrors schema/integration.manifest.schema.json.
+/// An integration manifest (RT-6). Mirrors schema/integration.manifest.schema.json:
+/// `deny_unknown_fields` is the schema's `additionalProperties: false` (an unknown
+/// field would not be covered by the bundle signature, which signs only the fields
+/// below), and `needs` carries no serde default because the schema requires it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub id: String,
     pub name: String,
     pub app: String,
+    /// Human-facing semantic version (the schema's `version`). The monotonic,
+    /// downgrade-protected release number is the integer `WireBundle.version`.
     pub version: String,
     /// Capability strings the plugin declares it needs, e.g.
     /// "open:obsidian://" or "read:focused-resource".
-    #[serde(default)]
     pub needs: Vec<String>,
-    /// Placeholder for the bundle signature (S2/provenance, future task).
+    /// Placeholder for the bundle signature (S2/provenance, future task). Always
+    /// null in practice: the real signature lives in the wire envelope
+    /// (`WireBundle.signature_hex`) and is not part of the signed content.
     #[serde(default)]
     pub signature: Option<String>,
 }
@@ -46,10 +53,10 @@ impl Manifest {
         Ok(m)
     }
 
-    /// Structural validation (RT-6). A full JSON-Schema validation against
-    /// schema/integration.manifest.schema.json could be wired with the
-    /// `jsonschema` crate later; we keep deps minimal here and check the
-    /// invariants the broker relies on.
+    /// Enforce schema/integration.manifest.schema.json (RT-6) without a JSON-Schema
+    /// crate (S2: no new deps). Each check below is the hand-written equivalent of
+    /// one schema keyword; keep them in step with the schema file. Required fields
+    /// and `additionalProperties: false` are enforced by serde at parse time.
     pub fn validate(&self) -> Result<(), String> {
         for (field, val) in [
             ("id", &self.id),
@@ -61,12 +68,79 @@ impl Manifest {
                 return Err(format!("manifest field `{field}` must be non-empty"));
             }
         }
+        if !is_reverse_dns_id(&self.id) {
+            return Err(format!(
+                "manifest field `id` must be a lowercase reverse-DNS id like \
+                 com.example.app (schema ^[a-z0-9]+(\\.[a-z0-9-]+)+$), got {:?}",
+                self.id
+            ));
+        }
+        if !is_semver(&self.version) {
+            return Err(format!(
+                "manifest field `version` must be a semantic version like 1.0.0 \
+                 (schema ^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$), got {:?}",
+                self.version
+            ));
+        }
+        let mut seen = HashSet::new();
         for need in &self.needs {
-            Capability::parse(need)
-                .ok_or_else(|| format!("invalid capability string in needs[]: {need:?}"))?;
+            // (is_capability_string implies Capability::parse succeeds.)
+            if !is_capability_string(need) {
+                return Err(format!(
+                    "invalid capability string in needs[]: {need:?} (expected \
+                     `<verb>:<scope>` with a lowercase verb, schema ^[a-z][a-z0-9-]*:.+$)"
+                ));
+            }
+            if !seen.insert(need.as_str()) {
+                return Err(format!("duplicate capability in needs[]: {need:?}"));
+            }
         }
         Ok(())
     }
+}
+
+/// schema `id`: `^[a-z0-9]+(\.[a-z0-9-]+)+$` (minLength 3 is implied: >= "a.b").
+fn is_reverse_dns_id(id: &str) -> bool {
+    let mut labels = id.split('.');
+    let first = labels.next().unwrap_or("");
+    let rest: Vec<&str> = labels.collect();
+    let label_ok = |l: &str, extra: &[u8]| {
+        !l.is_empty()
+            && l.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || extra.contains(&b))
+    };
+    label_ok(first, b"") && !rest.is_empty() && rest.iter().all(|l| label_ok(l, b"-"))
+}
+
+/// schema `version`: `^\d+\.\d+\.\d+(?:[-+].+)?$`. `\d` is ASCII-only in the
+/// schema's ECMA-262 regex dialect, and `.` excludes line terminators.
+fn is_semver(v: &str) -> bool {
+    let core_end = v.find(['-', '+']).unwrap_or(v.len());
+    let (core, suffix) = v.split_at(core_end);
+    let parts: Vec<&str> = core.split('.').collect();
+    let core_ok = parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    // suffix is empty, or `-`/`+` followed by at least one non-line-terminator.
+    let suffix_ok = suffix.is_empty() || (suffix.len() > 1 && !has_line_terminator(suffix));
+    core_ok && suffix_ok
+}
+
+/// schema `needs[]` item: `^[a-z][a-z0-9-]*:.+$`.
+fn is_capability_string(s: &str) -> bool {
+    let Some((verb, scope)) = s.split_once(':') else {
+        return false;
+    };
+    let mut vb = verb.bytes();
+    let verb_ok = vb.next().is_some_and(|b| b.is_ascii_lowercase())
+        && vb.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    verb_ok && !scope.is_empty() && !has_line_terminator(scope)
+}
+
+/// ECMA-262 line terminators — the characters a regex `.` does not match.
+fn has_line_terminator(s: &str) -> bool {
+    s.contains(['\n', '\r', '\u{2028}', '\u{2029}'])
 }
 
 /// A capability string parsed into `verb:scope`, e.g. `open` + `obsidian://`.
@@ -233,7 +307,7 @@ mod tests {
 
     fn manifest(needs: &[&str]) -> Manifest {
         Manifest {
-            id: "x".into(),
+            id: "com.example.x".into(),
             name: "x".into(),
             app: "x".into(),
             version: "1.0.0".into(),
@@ -257,6 +331,146 @@ mod tests {
 
         // a capability string with no `verb:scope` shape is rejected.
         assert!(manifest(&["not-a-capability"]).validate().is_err());
+    }
+
+    // ── schema/integration.manifest.schema.json, enforced (not just non-empty) ──
+
+    #[test]
+    fn validate_enforces_reverse_dns_id() {
+        // schema: ^[a-z0-9]+(\.[a-z0-9-]+)+$, minLength 3
+        for good in [
+            "com.example.x",
+            "example.hang",
+            "a.b",
+            "com.ex-ample.v2",
+            "0.1",
+        ] {
+            let mut m = manifest(&[]);
+            m.id = good.into();
+            assert!(m.validate().is_ok(), "{good:?} should be a valid id");
+        }
+        for bad in [
+            "x",             // no dot
+            "Com.Example.X", // uppercase
+            "com..example",  // empty label
+            "com.example.",  // trailing dot
+            ".com.example",  // leading dot
+            "-com.example",  // first label may not contain '-'
+            "com.exa_mple",  // underscore
+            "com.example/x", // path char
+            "com.example x", // space
+            "com.example\n", // line terminator
+            "com.exämple",   // non-ASCII
+        ] {
+            let mut m = manifest(&[]);
+            m.id = bad.into();
+            let err = m
+                .validate()
+                .expect_err(&format!("{bad:?} must be rejected"));
+            assert!(err.contains("id"), "error should name the field: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_enforces_semver_version() {
+        // schema: ^\d+\.\d+\.\d+(?:[-+].+)?$
+        for good in [
+            "1.0.0",
+            "0.0.1",
+            "10.20.30",
+            "1.0.0-rc.1",
+            "1.0.0+build.5",
+            "6.6.6",
+        ] {
+            let mut m = manifest(&[]);
+            m.version = good.into();
+            assert!(m.validate().is_ok(), "{good:?} should be a valid version");
+        }
+        for bad in [
+            "1", "1.0", "v1.0.0", "1.0.0.0", "1.0.0-", "1.0.0+", "1.a.0", "1.0.0 ", " 1.0.0",
+            "1.0.0-\n", "١.٠.٠", // non-ASCII digits are not \d in the schema's (ECMA) regex
+        ] {
+            let mut m = manifest(&[]);
+            m.version = bad.into();
+            let err = m
+                .validate()
+                .expect_err(&format!("{bad:?} must be rejected"));
+            assert!(
+                err.contains("version"),
+                "error should name the field: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_enforces_lowercase_capability_verb() {
+        // schema: needs[] items ^[a-z][a-z0-9-]*:.+$
+        assert!(manifest(&["open:obsidian://", "read-v2:focused-resource"])
+            .validate()
+            .is_ok());
+        for bad in [
+            "Open:obsidian://",
+            "OPEN:obsidian://",
+            "1open:obsidian://",
+            "-open:x",
+            "op en:x",
+            "open:",
+            ":x",
+            "open:line\nbreak",
+        ] {
+            let err = manifest(&[bad])
+                .validate()
+                .expect_err(&format!("{bad:?} must be rejected"));
+            assert!(err.contains("needs"), "error should name the field: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_needs() {
+        // schema: needs uniqueItems
+        let err = manifest(&["open:obsidian://", "open:obsidian://"])
+            .validate()
+            .unwrap_err();
+        assert!(err.contains("needs"), "{err}");
+    }
+
+    #[test]
+    fn deserialize_rejects_unknown_fields_and_missing_needs() {
+        // schema: additionalProperties false. An unknown field is not covered by the
+        // signature (canonical_message signs only the known fields), so accepting it
+        // would let a mirror smuggle unsigned data into a "verified" manifest.
+        let base = r#""id":"com.example.x","name":"X","app":"Obsidian","version":"1.0.0""#;
+        let ok = format!(r#"{{{base},"needs":[],"signature":null}}"#);
+        assert!(serde_json::from_str::<Manifest>(&ok).is_ok());
+        let no_sig = format!(r#"{{{base},"needs":[]}}"#);
+        assert!(serde_json::from_str::<Manifest>(&no_sig).is_ok());
+
+        let unknown = format!(r#"{{{base},"needs":[],"permissions":["read:link-graph"]}}"#);
+        let err = serde_json::from_str::<Manifest>(&unknown)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown field"), "{err}");
+
+        // schema: `needs` is required.
+        let missing = format!("{{{base}}}");
+        assert!(serde_json::from_str::<Manifest>(&missing).is_err());
+    }
+
+    #[test]
+    fn every_repo_manifest_passes_the_schema_rules() {
+        // The example manifests (and the one release.yml signs: examples/benign)
+        // must keep loading under the stricter rules.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/examples");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&root).unwrap() {
+            let path = entry.unwrap().path().join("manifest.json");
+            if path.exists() {
+                Manifest::from_path(&path)
+                    .unwrap_or_else(|e| panic!("{} no longer loads: {e}", path.display()));
+                seen += 1;
+            }
+        }
+        assert!(seen >= 4, "expected the example manifests, found {seen}");
     }
 
     #[test]

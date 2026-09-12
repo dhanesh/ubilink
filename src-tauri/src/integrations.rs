@@ -90,6 +90,9 @@ pub enum InstallError {
     Downgrade { current: u32, attempted: u32 },
     /// Malformed key/signature bytes.
     Malformed(String),
+    /// Correctly signed, but the manifest breaks
+    /// schema/integration.manifest.schema.json (`Manifest::validate`).
+    InvalidManifest(String),
 }
 
 impl InstallError {
@@ -107,6 +110,7 @@ impl InstallError {
                 "Refused: integration version {attempted} is older than the installed {current}."
             ),
             InstallError::Malformed(e) => format!("Malformed integration bundle: {e}"),
+            InstallError::InvalidManifest(e) => format!("Invalid integration manifest: {e}"),
         }
     }
 }
@@ -156,6 +160,14 @@ impl Installer {
         signer
             .verify(&msg, &sig)
             .map_err(|_| InstallError::BadSignature)?;
+        // Schema gate (RT-6). This is the one chokepoint every accepted bundle passes
+        // (on-device install, `release::verify_json` for CI self-verify and the
+        // registry's publish), so a schema-invalid manifest cannot enter through any
+        // of them. Checked after the signature so a forged bundle reports as forged.
+        bundle
+            .manifest
+            .validate()
+            .map_err(InstallError::InvalidManifest)?;
         // Downgrade protection (T4/O1).
         if let Some(&current) = self.installed.get(&bundle.manifest.id) {
             if bundle.version < current {
@@ -193,7 +205,7 @@ mod tests {
             id: id.into(),
             name: "X".into(),
             app: "Obsidian".into(),
-            version: "1".into(),
+            version: "1.0.0".into(),
             needs: vec![],
             signature: None,
         }
@@ -237,7 +249,7 @@ mod tests {
         let tamperings: [fn(&mut Manifest); 3] = [
             |m| m.name = "Y".into(),
             |m| m.app = "Safari".into(),
-            |m| m.version = "2".into(),
+            |m| m.version = "2.0.0".into(),
         ];
         for tamper in tamperings {
             let mut b = signed.clone();
@@ -276,6 +288,29 @@ mod tests {
         let mut b = sign_bundle(&k, manifest("a.b"), "run()".into(), 1);
         b.signature.clear();
         assert_eq!(inst.verify(&b), Err(InstallError::Unsigned));
+    }
+
+    #[test]
+    fn signed_bundle_with_schema_invalid_manifest_is_rejected() {
+        // A trusted, correctly-signed bundle is still refused when its manifest breaks
+        // schema/integration.manifest.schema.json — the shared gate for the registry
+        // (via verify_json), CI self-verify and on-device install.
+        let k = key(1);
+        let inst = Installer::new(vec![k.verifying_key()]);
+        let bad: [fn(&mut Manifest); 3] = [
+            |m| m.id = "NotReverseDns".into(),
+            |m| m.version = "1".into(),
+            |m| m.needs = vec!["OPEN:obsidian://".into()],
+        ];
+        for tamper in bad {
+            let mut m = manifest("a.b");
+            tamper(&mut m);
+            let b = sign_bundle(&k, m.clone(), "run()".into(), 1);
+            let err = inst
+                .verify(&b)
+                .expect_err(&format!("schema-invalid manifest accepted: {m:?}"));
+            assert!(err.message().contains("manifest"), "{}", err.message());
+        }
     }
 
     #[test]
