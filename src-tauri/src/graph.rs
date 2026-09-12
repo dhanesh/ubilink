@@ -209,7 +209,9 @@ impl LinkGraph {
     /// Insert or update a resource at time `now` (ms). On first insert: set guid +
     /// created_at + updated_at. On re-capture (conflict): bump updated_at (so the
     /// list resurfaces it), keep guid + created_at. `now` is caller-supplied (core
-    /// has no clock — same contract as `link`).
+    /// has no clock — same contract as `link`). updated_at never moves backwards,
+    /// so an unknown time (`now` = 0, e.g. `capture_and_link(.., None)`) or an older
+    /// one leaves an existing resource's position alone.
     pub fn upsert_resource(&self, r: &ResourceIdentity, now: i64) -> rusqlite::Result<String> {
         let id = Self::id_of(r).to_string();
         // guid: set on first insert; ON CONFLICT does NOT touch it, so re-capture
@@ -219,7 +221,8 @@ impl LinkGraph {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
              ON CONFLICT(id) DO UPDATE SET name=excluded.name, path=excluded.path,
                                            content_hash=excluded.content_hash,
-                                           updated_at=excluded.updated_at",
+                                           updated_at=MAX(excluded.updated_at,
+                                                          IFNULL(updated_at, excluded.updated_at))",
             params![id, r.name, r.uri, r.path, r.content_hash, Self::new_guid(), now],
         )?;
         Ok(id)
@@ -227,16 +230,27 @@ impl LinkGraph {
 
     /// Link two resources together (bidirectional). Idempotent: linking an
     /// already-linked pair (in either order) is a no-op that returns the existing
-    /// link. Atomic via a single transaction (T2).
+    /// link. Atomic via a single transaction (T2). Like `upsert_resource`, it never
+    /// moves an existing resource's updated_at backwards — `created_at = None`
+    /// (no time) leaves it as is. A self-link (a == b) is a no-op that writes
+    /// nothing, matching `link_existing`.
     pub fn link(
         &mut self,
         a: &ResourceIdentity,
         b: &ResourceIdentity,
         created_at: Option<i64>,
     ) -> rusqlite::Result<Link> {
-        let tx = self.conn.transaction()?;
         let a_id = a.uri.clone();
         let b_id = b.uri.clone();
+        if a_id == b_id {
+            return Ok(Link {
+                id: format!("{a_id}\u{1f}{b_id}"),
+                source_id: a_id,
+                target_id: b_id,
+                created_at,
+            });
+        }
+        let tx = self.conn.transaction()?;
         let now = created_at.unwrap_or(0);
         for r in [a, b] {
             tx.execute(
@@ -244,7 +258,8 @@ impl LinkGraph {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
                  ON CONFLICT(id) DO UPDATE SET name=excluded.name, path=excluded.path,
                                                content_hash=excluded.content_hash,
-                                               updated_at=excluded.updated_at",
+                                               updated_at=MAX(excluded.updated_at,
+                                                              IFNULL(updated_at, excluded.updated_at))",
                 params![r.uri, r.name, r.uri, r.path, r.content_hash, Self::new_guid(), now],
             )?;
         }
@@ -1337,5 +1352,51 @@ mod tests {
             "concurrent links duplicated the link"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn updated_at(g: &LinkGraph, id: &str) -> Option<i64> {
+        g.conn
+            .query_row(
+                "SELECT updated_at FROM resources WHERE id=?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn link_without_a_time_keeps_existing_updated_at() {
+        // `link(a, b, None)` has no capture time; it must not stamp 0 over the
+        // resources' real updated_at (which sank them to the bottom of the list).
+        let mut g = LinkGraph::open_in_memory().unwrap();
+        g.upsert_resource(&r("A", "x://a"), 100).unwrap();
+        g.upsert_resource(&r("B", "x://b"), 200).unwrap();
+        g.link(&r("A", "x://a"), &r("B", "x://b"), None).unwrap();
+        assert!(g.are_linked("x://a", "x://b").unwrap());
+        assert_eq!(updated_at(&g, "x://a"), Some(100));
+        assert_eq!(updated_at(&g, "x://b"), Some(200));
+        let top = g.list_resources_with_counts().unwrap()[0].0.uri.clone();
+        assert_eq!(top, "x://b", "list order unchanged");
+    }
+
+    #[test]
+    fn recapture_with_an_unknown_time_keeps_existing_updated_at() {
+        // The service's capture_and_link(.., None) captures with now = 0: the same
+        // clobber through upsert_resource.
+        let g = LinkGraph::open_in_memory().unwrap();
+        g.upsert_resource(&r("A", "x://a"), 100).unwrap();
+        g.upsert_resource(&r("A", "x://a"), 0).unwrap();
+        assert_eq!(updated_at(&g, "x://a"), Some(100));
+    }
+
+    #[test]
+    fn link_to_itself_is_a_no_op() {
+        // Same guard as link_existing: a self-link stores nothing.
+        let mut g = LinkGraph::open_in_memory().unwrap();
+        let a = r("A", "x://a");
+        g.link(&a, &a, Some(1)).unwrap();
+        assert_eq!(g.link_count().unwrap(), 0, "no self-link row");
+        assert!(g.backlinks("x://a").unwrap().is_empty());
+        assert_eq!(g.resource_count().unwrap(), 0, "nothing written");
     }
 }
