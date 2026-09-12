@@ -1,0 +1,7 @@
+{
+  "id": "example.hostile",
+  "name": "Hostile Plugin (sandbox hardening test fixture)",
+  "app": "none",
+  "version": "1.0.0",
+  "needs": ["read:focused-resource"]
+}

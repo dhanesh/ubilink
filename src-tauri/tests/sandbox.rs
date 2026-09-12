@@ -218,6 +218,14 @@ fn net_is_jailed_when_supported() {
     let attempts = result["attempts"].as_array().expect("attempts");
     let net = attempts.iter().find(|a| a["name"] == "net.connect");
 
+    // On macOS the jail is REQUIRED: a silently-skipped jail must fail the proof,
+    // not pass it vacuously.
+    if cfg!(target_os = "macos") {
+        assert!(
+            jailed,
+            "the macOS OS jail must be active (sandbox-exec probe failed)"
+        );
+    }
     if jailed {
         assert_eq!(
             accepts.load(Ordering::SeqCst),
@@ -259,6 +267,344 @@ fn hung_plugin_is_killed() {
     eprintln!(
         "[exec timeout] hung plugin killed after {elapsed:?}: {}",
         res.unwrap_err()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox hardening (hostile-plugin fixture: plugins/examples/hostile).
+// Each test below reproduces an attack a reviewer confirmed against the real
+// host; see DECISIONS.md D1/D3/D4.
+// ---------------------------------------------------------------------------
+
+fn hostile() -> (Manifest, String) {
+    read_plugin("hostile")
+}
+
+/// Run `f` on a helper thread and give up after `limit`. A test for a DoS
+/// fix must FAIL (not hang the suite) when the fix is missing.
+fn run_bounded<T: Send + 'static>(
+    limit: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(limit).ok()
+}
+
+/// Is there still a process table entry for `pid`? A zombie (killed but never
+/// waited on) still has one, so this proves "killed AND reaped".
+fn pid_exists(pid: u32) -> bool {
+    std::process::Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// ATTACK 1 — Frame forgery. Every way a plugin was shown to inject a
+/// `{"t":"result"}` frame (stream-prototype write, raw fd-1 write, replacing
+/// the global `JSON.stringify` the host serializes with, polluting
+/// `Object.prototype.toJSON`, scraping the V8 heap for the session secret,
+/// and scanning argv/env/stdin for it) must be REJECTED by the core: it returns
+/// the plugin's real value, never the forged one.
+#[test]
+fn forged_frames_are_rejected() {
+    let mut failures = Vec::new();
+    for vector in [
+        "proto-write",
+        "fd-write",
+        "stringify",
+        "tojson",
+        "heap",
+        "scan",
+    ] {
+        let (manifest, source) = hostile();
+        let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+        session.set_timeout(Duration::from_secs(5));
+        session.load(&source).unwrap();
+        let result = match session.invoke(&focused(), json!({ "mode": "forge", "vector": vector }))
+        {
+            Ok(r) => r,
+            Err(e) => {
+                failures.push(format!("[{vector}] invoke failed: {e}"));
+                continue;
+            }
+        };
+        eprintln!("[forge:{vector}] core returned {result}");
+        if result.get("forged").is_some() || result["real"] != true {
+            failures.push(format!(
+                "FAIL-OPEN [{vector}]: core accepted a forged frame: {result}"
+            ));
+        }
+        let heap = result["notes"]["heap"].as_str().unwrap_or("");
+        if vector == "heap" && !heap.starts_with("DENIED") {
+            failures.push(format!(
+                "[heap] plugin could snapshot the V8 heap (would expose the nonce): {heap}"
+            ));
+        }
+        if vector == "scan" && result["notes"]["candidates"] != 0 {
+            failures.push(format!(
+                "[scan] nonce-shaped secret visible via argv/env/stdin: {result}"
+            ));
+        }
+        session.shutdown().unwrap();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+const PLANTED_VAR: &str = "UBILINK_PLANTED_SECRET";
+const PLANTED_VALUE: &str = "planted-secret-9c1e";
+const ENV_PROBE_MARKER: &str = "UBILINK_ENV_PROBE_CHILD";
+
+/// ATTACK 3 — Environment disclosure + NODE_OPTIONS re-grant. Re-executes this
+/// test binary with a planted secret and `NODE_OPTIONS=--allow-fs-read=*` in
+/// its environment (so the test never mutates its own env while other tests
+/// spawn processes); the inner test asserts the plugin saw neither.
+#[test]
+fn child_env_is_scrubbed() {
+    let exe = std::env::current_exe().unwrap();
+    let out = std::process::Command::new(exe)
+        .args([
+            "env_probe_inner",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(ENV_PROBE_MARKER, "1")
+        .env(PLANTED_VAR, PLANTED_VALUE)
+        .env("NODE_OPTIONS", "--allow-fs-read=*")
+        .output()
+        .expect("re-exec test binary");
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success() && text.contains("1 passed"),
+        "env probe failed:\n{text}"
+    );
+}
+
+/// Inner half of `child_env_is_scrubbed` (a no-op unless re-executed by it).
+#[test]
+fn env_probe_inner() {
+    if std::env::var_os(ENV_PROBE_MARKER).is_none() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("ubilink-env-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let secret_path = tmp.join("secret.txt");
+    std::fs::write(&secret_path, "FS-SECRET-5d2b").unwrap();
+
+    let (manifest, source) = hostile();
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+    session.load(&source).unwrap();
+    let r = session
+        .invoke(
+            &focused(),
+            json!({ "mode": "env", "plantedVar": PLANTED_VAR, "secretPath": secret_path.to_string_lossy() }),
+        )
+        .unwrap();
+    session.shutdown().unwrap();
+    let _ = std::fs::remove_dir_all(&tmp);
+    eprintln!("[env probe] {r}");
+
+    assert!(
+        r["planted"].is_null(),
+        "plugin saw the core's env secret: {r}"
+    );
+    assert!(
+        r["nodeOptions"].is_null(),
+        "NODE_OPTIONS reached the plugin host: {r}"
+    );
+    assert_eq!(
+        r["fsReadGranted"], false,
+        "inherited NODE_OPTIONS re-granted fs read: {r}"
+    );
+    assert!(
+        r["secret"].is_null(),
+        "plugin read a file via an inherited grant: {r}"
+    );
+    let keys: Vec<&str> = r["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|k| k.as_str())
+        // macOS CoreFoundation injects this into every process; it is not ours.
+        .filter(|k| *k != "__CF_USER_TEXT_ENCODING")
+        .collect();
+    assert!(keys.is_empty(), "plugin inherited env vars: {keys:?}");
+}
+
+/// ATTACK 4 — Signals. `node --permission` does not gate `process.kill`; the
+/// macOS jail must deny signalling any process other than the plugin itself.
+#[test]
+fn plugin_cannot_signal_the_core() {
+    let (manifest, source) = hostile();
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+    let jailed = session.net_jailed();
+    session.load(&source).unwrap();
+    let r = session
+        .invoke(&focused(), json!({ "mode": "signal" }))
+        .unwrap();
+    session.shutdown().unwrap();
+    eprintln!("[signal probe] {r}");
+    if cfg!(target_os = "macos") {
+        assert!(
+            jailed,
+            "the macOS OS jail must be active (sandbox-exec probe failed)"
+        );
+    }
+    if jailed {
+        let o = r["killParent"].as_str().unwrap();
+        assert!(
+            o.starts_with("DENIED:EPERM"),
+            "plugin could signal the core: {o}"
+        );
+    } else {
+        eprintln!(
+            "[signal] OS jail not active on this platform — signal containment is a follow-up"
+        );
+    }
+}
+
+/// Native file writes that bypass the Node permission model: `trace_events`
+/// writes `node_trace.N.log` into the host's cwd, `process.report` writes a
+/// report file. Neither may create a file.
+#[test]
+fn plugin_cannot_write_files_natively() {
+    let tmp = std::env::temp_dir().join(format!("ubilink-native-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let report_path = tmp.join("report.json");
+    let cwd_trace = std::env::current_dir().unwrap().join("node_trace.1.log");
+    let trace_existed = cwd_trace.exists();
+
+    let (manifest, source) = hostile();
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+    session.set_timeout(Duration::from_secs(3));
+    session.load(&source).unwrap();
+    let r = session.invoke(
+        &focused(),
+        json!({ "mode": "native-write", "reportPath": report_path.to_string_lossy() }),
+    );
+    drop(session);
+    let trace_created = !trace_existed && cwd_trace.exists();
+    if trace_created {
+        let _ = std::fs::remove_file(&cwd_trace);
+    }
+    let report_created = report_path.exists();
+    let _ = std::fs::remove_dir_all(&tmp);
+    eprintln!("[native write] {r:?}");
+
+    assert!(
+        !trace_created,
+        "FAIL-OPEN: trace_events wrote {cwd_trace:?}"
+    );
+    assert!(
+        !report_created,
+        "FAIL-OPEN: process.report wrote {report_path:?}"
+    );
+    let r = r.expect("invoke");
+    assert!(r["trace"].as_str().unwrap().starts_with("DENIED"), "{r}");
+}
+
+/// ATTACK 5a — A chatty plugin that keeps sending legitimate traffic under the
+/// per-message timeout must still be killed at an OVERALL deadline.
+#[test]
+fn chatty_plugin_is_killed_at_overall_deadline() {
+    let done = run_bounded(Duration::from_secs(8), || {
+        let (manifest, source) = hostile();
+        let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+        session.set_timeout(Duration::from_millis(800));
+        session.load(&source).unwrap();
+        let start = std::time::Instant::now();
+        let res = session.invoke(&focused(), json!({ "mode": "chatty" }));
+        (res.map_err(|e| e.kind()), start.elapsed())
+    });
+    let (res, elapsed) =
+        done.expect("FAIL-OPEN: chatty plugin was never killed (no overall deadline)");
+    assert_eq!(res.unwrap_err(), std::io::ErrorKind::TimedOut);
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "deadline overshot: {elapsed:?}"
+    );
+}
+
+/// ATTACK 5b — A plugin that stops reading stdin while flooding requests makes
+/// the core's pipe WRITE block; the deadline must still unblock it.
+#[test]
+fn flooding_plugin_cannot_block_core_writes() {
+    let done = run_bounded(Duration::from_secs(8), || {
+        let (manifest, source) = hostile();
+        let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+        session.set_timeout(Duration::from_millis(800));
+        session.load(&source).unwrap();
+        let start = std::time::Instant::now();
+        let res = session.invoke(&focused(), json!({ "mode": "flood" }));
+        (res.map_err(|e| e.kind()), start.elapsed())
+    });
+    let (res, elapsed) =
+        done.expect("FAIL-OPEN: core blocked forever writing to a flooding plugin");
+    assert_eq!(res.unwrap_err(), std::io::ErrorKind::TimedOut);
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "deadline overshot: {elapsed:?}"
+    );
+}
+
+/// ATTACK 5c — A timed-out child is killed AND reaped (no zombie).
+#[test]
+fn timed_out_child_is_reaped() {
+    let (manifest, source) = read_plugin("hang");
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+    session.set_timeout(Duration::from_millis(500));
+    session.load(&source).unwrap();
+    let pid = session.pid();
+    assert!(session.invoke(&focused(), json!({})).is_err());
+    // The session is still alive here: reaping must not wait for Drop.
+    assert!(
+        !pid_exists(pid),
+        "timed-out child {pid} still in the process table (zombie?)"
+    );
+}
+
+/// ATTACK 5d — Dropping a Session (e.g. on an error path) kills and reaps the
+/// child, even one whose event loop would otherwise keep it alive forever.
+#[test]
+fn dropping_session_kills_and_reaps_child() {
+    let (manifest, source) = hostile();
+    let mut session = Session::spawn(&host_script(), &manifest, focused()).expect("spawn");
+    session.load(&source).unwrap();
+    let pid = session.pid();
+    assert!(pid_exists(pid));
+    drop(session);
+    assert!(!pid_exists(pid), "dropped session leaked child {pid}");
+}
+
+/// Defense in depth for frame integrity: a host that authenticates correctly
+/// but LIES in `recheck_result` (models a plugin that subverted host logic in
+/// its shared realm) cannot flip the verdict — the core returns its own broker's
+/// decision, and refuses a verdict for a capability it never brokered.
+#[test]
+fn recheck_verdict_comes_from_the_broker_not_the_host() {
+    let lying_host =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lying-host.mjs");
+    let (manifest, _) = read_plugin("benign");
+    let mut session = Session::spawn(&lying_host, &manifest, focused()).expect("spawn");
+    session.broker.revoke("open:obsidian://");
+    let (allowed, reason) = session.recheck("open:obsidian://vault/Note.md").unwrap();
+    assert!(
+        !allowed,
+        "core trusted the host's recheck verdict over the broker"
+    );
+    assert_eq!(reason, "grant revoked (SC-3)");
+    assert!(
+        session.recheck("unbrokered:anything").is_err(),
+        "core accepted a recheck verdict the broker never issued"
     );
 }
 
