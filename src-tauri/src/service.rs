@@ -92,6 +92,22 @@ impl UbilinkService {
         now: i64,
     ) -> Result<ResourceIdentity, ServiceError> {
         let raw = capture_active(adapter, self.permission).map_err(ServiceError::Capture)?;
+        self.store_capture(raw, now)
+    }
+
+    /// The automation permission the capture gate (S4) checks.
+    pub fn permission(&self) -> PermissionState {
+        self.permission
+    }
+
+    /// The second half of `capture`, for a caller that ran `capture_active` itself
+    /// (so the slow adapter call need not hold a lock on this service): validate
+    /// the adapter's output through the bounded API (S5), then persist it.
+    pub fn store_capture(
+        &mut self,
+        raw: ResourceIdentity,
+        now: i64,
+    ) -> Result<ResourceIdentity, ServiceError> {
         // Re-validate the adapter's output through the bounded API (defense in depth:
         // even a trusted adapter's URI is size/scheme-checked, S5/SC-1).
         let id = self
