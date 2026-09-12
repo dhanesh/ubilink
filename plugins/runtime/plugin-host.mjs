@@ -10,9 +10,11 @@
 // It does exactly three things:
 //   1. Receives the plugin SOURCE from the trusted Rust core over stdin and
 //      loads it via a `data:` URL import (touches no filesystem).
-//   2. Calls the plugin's exported `run({ resource, probe, caps })`.
+//   2. Calls the plugin's exported `run({ probe, caps })`.
 //   3. Exposes ONLY `caps.request(capability)` to the plugin; every call is
 //      forwarded to the Rust broker, which checks it against the manifest.
+//      That includes the focused resource: the core never pushes it, so a
+//      plugin gets it only via `caps.request('read:focused-resource')`.
 //
 // FRAME INTEGRITY (DECISIONS D3). The plugin shares this realm, so it can write
 // to fd 1 and monkeypatch any global. Therefore every host->core frame is
@@ -217,14 +219,16 @@ async function loadPlugin(source) {
   pluginModule = await import('data:text/javascript,' + encodeURIComponent_(source));
 }
 
-async function invoke(resource, probe) {
+// The focused resource is NOT an argument: the core never sends it. A plugin that
+// declared `read:focused-resource` gets it from `caps.request(...)`.
+async function invoke(probe) {
   if (!pluginModule || typeof pluginModule.run !== 'function') {
     send({ __proto__: null, t: 'result', value: { error: 'plugin has no exported run()' } });
     return;
   }
   let value;
   try {
-    value = await pluginModule.run({ resource, probe, caps });
+    value = await pluginModule.run({ probe, caps });
   } catch (e) {
     value = { error: String(e && e.message ? e.message : e) };
   }
@@ -261,7 +265,7 @@ async function handle(msg) {
       }
       break;
     case 'invoke':
-      await invoke(msg.resource, msg.probe);
+      await invoke(msg.probe);
       break;
     case 'recheck':
       await recheck(msg.cap);

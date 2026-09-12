@@ -29,7 +29,7 @@ my-integration/
 | Capability | Meaning |
 | --- | --- |
 | `open:obsidian://` | open any `obsidian://…` URL (scheme-prefix grant) |
-| `read:focused-resource` | read the single resource the plugin was invoked for |
+| `read:focused-resource` | read the single resource the plugin was invoked for, via `await caps.request('read:focused-resource')` (it is **not** passed to `run()`; without this grant the plugin never sees it) |
 
 There are **no wildcards** and no capability that yields the link graph wholesale —
 even `read:link-graph` / `read:*` is denied (S1). Declare the least you need.

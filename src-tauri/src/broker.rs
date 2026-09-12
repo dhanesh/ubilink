@@ -307,4 +307,23 @@ mod tests {
         assert!(!d.allowed);
         assert_eq!(d.reason, "grant revoked (SC-3)");
     }
+
+    #[test]
+    fn revoked_focused_resource_is_no_longer_served() {
+        // The broker is the ONLY channel the focused resource reaches a plugin
+        // through (the sandbox never pushes it), so revocation must stop it here.
+        let mut b = Broker::new(&manifest(&["read:focused-resource"]), res());
+        assert_eq!(
+            b.decide("read:focused-resource").result.unwrap()["id"],
+            "r1"
+        );
+        b.revoke("read:focused-resource");
+        let d = b.decide("read:focused-resource");
+        assert!(!d.allowed);
+        assert!(
+            d.result.is_none(),
+            "revoked read still carried the resource"
+        );
+        assert_eq!(d.reason, "grant revoked (SC-3)");
+    }
 }
