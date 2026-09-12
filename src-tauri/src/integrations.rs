@@ -27,10 +27,37 @@ pub struct SignedBundle {
     pub signer: Vec<u8>,
 }
 
-/// The exact bytes a signature must cover. Any change to id/version/source flips
-/// the signature invalid (forgery/tamper detection).
-pub fn canonical_message(manifest_id: &str, version: u32, source: &str) -> Vec<u8> {
-    format!("ubilink-integration\nid={manifest_id}\nv={version}\n{source}").into_bytes()
+/// The exact bytes a signature must cover: every manifest field (including
+/// `needs`, which become the broker's grants), the bundle version and the source.
+/// Each field is length-prefixed so bytes cannot shift between fields. Any change
+/// flips the signature invalid (forgery/tamper detection).
+pub fn canonical_message(manifest: &Manifest, version: u32, source: &str) -> Vec<u8> {
+    // Exhaustive destructure: adding a Manifest field fails to compile here until
+    // it is either signed or explicitly excluded.
+    let Manifest {
+        id,
+        name,
+        app,
+        version: manifest_version,
+        needs,
+        signature: _, // placeholder, not part of the signed content
+    } = manifest;
+    let mut msg = b"ubilink-integration/v2\n".to_vec();
+    for field in [id, name, app, manifest_version] {
+        push_field(&mut msg, field.as_bytes());
+    }
+    push_field(&mut msg, &(needs.len() as u64).to_le_bytes());
+    for need in needs {
+        push_field(&mut msg, need.as_bytes());
+    }
+    push_field(&mut msg, &version.to_le_bytes());
+    push_field(&mut msg, source.as_bytes());
+    msg
+}
+
+fn push_field(msg: &mut Vec<u8>, bytes: &[u8]) {
+    msg.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    msg.extend_from_slice(bytes);
 }
 
 /// Sign a bundle with a publisher key (used by publishers / in tests).
@@ -40,7 +67,7 @@ pub fn sign_bundle(
     source: String,
     version: u32,
 ) -> SignedBundle {
-    let msg = canonical_message(&manifest.id, version, &source);
+    let msg = canonical_message(&manifest, version, &source);
     let sig: Signature = key.sign(&msg);
     SignedBundle {
         manifest,
@@ -125,7 +152,7 @@ impl Installer {
             .try_into()
             .map_err(|_| InstallError::Malformed("signature must be 64 bytes".into()))?;
         let sig = Signature::from_bytes(&sig_bytes);
-        let msg = canonical_message(&bundle.manifest.id, bundle.version, &bundle.source);
+        let msg = canonical_message(&bundle.manifest, bundle.version, &bundle.source);
         signer
             .verify(&msg, &sig)
             .map_err(|_| InstallError::BadSignature)?;
@@ -189,6 +216,46 @@ mod tests {
         let mut b = sign_bundle(&k, manifest("a.b"), "good()".into(), 1);
         b.source = "evil()".into(); // tamper after signing
         assert_eq!(inst.verify(&b), Err(InstallError::BadSignature));
+    }
+
+    #[test]
+    fn tampered_needs_is_rejected() {
+        // `needs[]` becomes the broker's grants, so widening it after signing must
+        // invalidate the signature.
+        let k = key(1);
+        let inst = Installer::new(vec![k.verifying_key()]);
+        let mut b = sign_bundle(&k, manifest("a.b"), "run()".into(), 1);
+        b.manifest.needs.push("open:file://".into());
+        assert_eq!(inst.verify(&b), Err(InstallError::BadSignature));
+    }
+
+    #[test]
+    fn tampered_manifest_metadata_is_rejected() {
+        let k = key(1);
+        let inst = Installer::new(vec![k.verifying_key()]);
+        let signed = sign_bundle(&k, manifest("a.b"), "run()".into(), 1);
+        let tamperings: [fn(&mut Manifest); 3] = [
+            |m| m.name = "Y".into(),
+            |m| m.app = "Safari".into(),
+            |m| m.version = "2".into(),
+        ];
+        for tamper in tamperings {
+            let mut b = signed.clone();
+            tamper(&mut b.manifest);
+            assert_eq!(inst.verify(&b), Err(InstallError::BadSignature));
+        }
+    }
+
+    #[test]
+    fn signature_does_not_transfer_across_field_boundaries() {
+        // Shifting bytes between id / version / source must not yield the same
+        // signed message (the encoding must be injective).
+        let k = key(1);
+        let inst = Installer::new(vec![k.verifying_key()]);
+        let signed = sign_bundle(&k, manifest("x\nv=2\nA"), "B".into(), 3);
+        let mut forged = sign_bundle(&k, manifest("x"), "A\nv=3\nB".into(), 2);
+        forged.signature = signed.signature.clone();
+        assert_eq!(inst.verify(&forged), Err(InstallError::BadSignature));
     }
 
     #[test]

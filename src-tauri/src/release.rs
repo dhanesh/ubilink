@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn tampered_artifact_fails_verify() {
         // GAP-09 over the wire format: editing the shipped source after signing is
-        // caught (the signature covers id/version/source).
+        // caught (the signature covers the manifest, version and source).
         let key = signing_key_from_hex(&key_hex(7)).unwrap();
         let pub_hex = public_hex(&key);
         let json = sign_to_json(&key, manifest("ubilink.obsidian"), "good()".into(), 1).unwrap();
@@ -215,6 +215,26 @@ mod tests {
         assert_ne!(
             json, tampered,
             "test setup: source must appear in the artifact"
+        );
+        assert_eq!(
+            verify_json(&tampered, &[pub_hex]),
+            Err(SignError::Verify(InstallError::BadSignature))
+        );
+    }
+
+    #[test]
+    fn artifact_with_widened_capabilities_fails_verify() {
+        // A registry, mirror or cache editing `needs` in the shipped JSON must be
+        // caught — those strings become the plugin's broker grants.
+        let key = signing_key_from_hex(&key_hex(7)).unwrap();
+        let pub_hex = public_hex(&key);
+        let mut m = manifest("ubilink.obsidian");
+        m.needs = vec!["open:obsidian://".into()];
+        let json = sign_to_json(&key, m, "run()".into(), 1).unwrap();
+        let tampered = json.replace("open:obsidian://", "open:file://");
+        assert_ne!(
+            json, tampered,
+            "test setup: needs must appear in the artifact"
         );
         assert_eq!(
             verify_json(&tampered, &[pub_hex]),
