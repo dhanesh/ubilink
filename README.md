@@ -97,8 +97,9 @@ Not done yet:
   tests and the CLI tools.
 - ⬜ **No OS sandbox off macOS.** On Linux/Windows the plugin host has no jail, so
   network, native file writes and signals are open there (`DECISIONS.md` D1).
-- ⬜ **No hosted registry.** The registry keeps its index in memory
-  ([`docs/RUNBOOK-registry.md`](docs/RUNBOOK-registry.md)).
+- ⬜ **No hosted registry.** The registry service persists its index and each id's
+  owner to a data directory (`UBILINK_REGISTRY_DATA`), but no public, governed
+  instance runs yet ([`docs/RUNBOOK-registry.md`](docs/RUNBOOK-registry.md)).
 
 ## Build & test
 
