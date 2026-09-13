@@ -72,6 +72,14 @@ impl UbilinkService {
         self
     }
 
+    /// Use a capability matrix derived from the caller's adapter registry (O2), e.g.
+    /// `CapabilityMatrix::from_registry(&merged)` so user-added adapters are
+    /// disclosed too. Defaults to the built-in adapters' matrix.
+    pub fn with_capabilities(mut self, matrix: CapabilityMatrix) -> UbilinkService {
+        self.matrix = matrix;
+        self
+    }
+
     /// Trust the URI schemes that registered adapters declare (B3 + S5): an adapter
     /// producing `bear://…` links means `bear:` is an expected, safe scheme. Keeps
     /// the bounded API an allowlist while letting config-added apps work.
