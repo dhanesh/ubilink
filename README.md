@@ -1,7 +1,9 @@
 # Ubilink
 
-An open-source, cross-platform desktop app for **ubiquitous linking** — a faithful,
-extensible implementation of the [Linking Manifesto](https://linkingmanifesto.org/).
+An open-source desktop app for **ubiquitous linking** — a faithful, extensible
+implementation of the [Linking Manifesto](https://linkingmanifesto.org/). It is
+designed to be cross-platform, but today it builds and captures on **macOS only**
+(see [Status](#status)).
 
 > *"The ability to copy a link to a resource is as important for cognitive
 > productivity as the ability to copy other types of information."* — the Linking Manifesto
@@ -25,7 +27,7 @@ third-party integration system so anyone can add support for new apps.
 |-------|------|-----|
 | Core | **Rust** (Tauri) | OS automation, the link graph, the capability broker — the trusted domain |
 | UI | Web (Tauri webview) | the hotkey panel + settings |
-| Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/net/child** access; all privileged access is broker-mediated |
+| Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/child** access (and, on macOS, no network); all privileged access is broker-mediated |
 | Storage | **Local SQLite** | the bidirectional graph, on-device, zero telemetry |
 
 Key decisions and their rationale live in [`DECISIONS.md`](DECISIONS.md). The full
@@ -58,23 +60,64 @@ way to get it, and revoking the grant stops it).
 
 ## Status
 
-Early foundation. Proven and tested so far:
+Built and tested:
 
-- ✅ Plugin sandbox + capability broker (the security keystone) — `src-tauri/`, `plugins/`
+- ✅ macOS desktop app: hotkey panel (Cmd+Shift+K capture, Cmd+Shift+L link browser,
+  Cmd+Shift+, settings), permission onboarding, graph export/import, app-adapter
+  manager — `desktop/`, `dist/`
+- ✅ Declarative macOS app adapters (7 browsers, Finder, Bear, Things3), extensible
+  with your own `adapters.json`; every `osascript` call is bounded (15 s) —
+  `src-tauri/src/adapters_config.rs`, `src-tauri/src/live_capture.rs`,
+  [`docs/SUPPORTED-APPS.md`](docs/SUPPORTED-APPS.md)
+- ✅ Link validation: one policy for capture, import and open (scheme deny-list,
+  local-only `file:`), and openers that never go through a shell — `src-tauri/src/api.rs`,
+  `src-tauri/src/adapter.rs`
+- ✅ Bidirectional SQLite link graph (backlinks, idempotent, concurrent-safe,
+  versioned atomic migrations) — `src-tauri/src/graph.rs`
 - ✅ Resource identity + confidence-gated link re-resolution — `src-tauri/src/resource.rs`
-- ✅ Bidirectional SQLite link graph (backlinks, idempotent, concurrent-safe) — `src-tauri/src/graph.rs`
-- ✅ Per-app/-platform capability matrix with honest degradation — `src-tauri/src/capabilities.rs`
-- ⬜ Hotkey panel UI · macOS link adapters · integration runtime/installer (next)
+- ✅ Plugin sandbox + capability broker (the security keystone) — `src-tauri/src/sandbox.rs`,
+  `src-tauri/src/broker.rs`, `plugins/`
+- ✅ Signed integrations (ed25519 over the full manifest, schema gate, downgrade
+  protection), the `ubilink-sign` CLI and a CI signing workflow —
+  `src-tauri/src/integrations.rs`, `src-tauri/src/release.rs`
+- ✅ Integration registry service (std-only HTTP, per-id publisher ownership, bounded
+  requests) — `registry/`
+- ✅ Capability matrix derived from the adapter registry, published as
+  [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) and drift-guarded by a test —
+  `src-tauri/src/capabilities.rs`
+
+Not done yet:
+
+- ⬜ **Windows/Linux capture is unsupported.** Every adapter captures through macOS
+  AppleScript; off macOS only a file path can be linked
+  ([`docs/CAPABILITIES.md`](docs/CAPABILITIES.md)). The desktop app is built and
+  CI-tested on macOS only.
+- ⬜ **The plugin sandbox runtime is not wired into the desktop app.** The app does not
+  install or run integrations yet; the sandbox, broker and installer are exercised by
+  tests and the CLI tools.
+- ⬜ **No OS sandbox off macOS.** On Linux/Windows the plugin host has no jail, so
+  network, native file writes and signals are open there (`DECISIONS.md` D1).
+- ⬜ **No hosted registry.** The registry keeps its index in memory
+  ([`docs/RUNBOOK-registry.md`](docs/RUNBOOK-registry.md)).
 
 ## Build & test
 
-```sh
-# Rust core (broker, graph, resource identity, capabilities)
-cd src-tauri && cargo test
+Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, and Node ≥ 22.13.
 
-# the plugin sandbox proof spawns a real `node --permission` child process
-node --version   # v24+ required for the Node Permission Model
+```sh
+make verify                  # the merge gate: fmt + clippy + every crate's tests + JS tests
+make verify LOCKED=--locked  # exactly what CI runs
+make test                    # faster loop: core + registry + JS (skips the Tauri build)
+make run                     # build + launch the desktop app
 ```
+
+**Node:** the sandbox tests spawn a real `node --permission` process, which needs
+Node ≥ 22.13 (CI uses Node 22). The plugin host runs with an empty environment, so
+the core resolves `node` to an absolute path from the absolute entries on your
+`PATH`. The first `node` found there must be a real binary: a version-manager shim
+that needs `PATH`/`HOME` to find the real `node` will fail.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
 
 ## Extending Ubilink
 
