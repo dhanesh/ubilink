@@ -17,7 +17,8 @@
 // Functional core: `render` (the template engine) and `ConfiguredAdapter::parse` are
 // pure and fully unit-tested; only the single `osascript` call needs a real Mac.
 
-use crate::adapter::{CaptureFailure, OpenPlan, ResourceAdapter};
+use crate::adapter::{open_plan_for, CaptureFailure, OpenPlan, ResourceAdapter};
+use crate::capabilities::Platform;
 use crate::live_capture::CommandRunner;
 use crate::resource::ResourceIdentity;
 use serde::Deserialize;
@@ -231,10 +232,8 @@ impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
         }
     }
     fn open_plan(&self, resource: &ResourceIdentity) -> OpenPlan {
-        OpenPlan {
-            program: "open".into(),
-            args: vec![resource.uri.clone()],
-        }
+        // The shared no-shell, no-option opener (`open -- <uri>` on macOS).
+        open_plan_for(Platform::current(), &resource.uri)
     }
 }
 
@@ -500,6 +499,29 @@ mod tests {
                 .capture()
                 .unwrap();
             assert_eq!(policy.validate(&id.uri, &id.name), Ok(()), "{}", id.uri);
+        }
+    }
+
+    #[test]
+    fn open_plan_uses_the_safe_platform_opener() {
+        // A configured adapter must open links the same no-shell, no-option way as
+        // every other path (`adapter::open_plan_for`): on macOS `open -- <uri>`, so
+        // a URI can never be parsed as an `open` option.
+        use crate::capabilities::Platform;
+        let spec = AdapterRegistry::defaults()
+            .for_app("Safari")
+            .unwrap()
+            .clone();
+        let a = ConfiguredAdapter::new(spec, FakeRunner(Ok(String::new())));
+        let uri = "https://example.com/a?b=1";
+        let plan = a.open_plan(&ResourceIdentity::new("n", uri));
+        assert_eq!(
+            plan,
+            crate::adapter::open_plan_for(Platform::current(), uri)
+        );
+        if Platform::current() == Platform::MacOS {
+            assert_eq!(plan.program, "open");
+            assert_eq!(plan.args, vec!["--".to_string(), uri.to_string()]);
         }
     }
 
