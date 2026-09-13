@@ -1,37 +1,52 @@
 #!/usr/bin/env bash
-# PreToolUse guard (agent rails R5/R6): ask before any edit to CI config, the
+# PreToolUse guard (agent rails R5/R6): no silent edits to CI config, the
 # Makefile gate, or Claude settings — wherever the checkout lives, including
 # agent worktrees under .claude/worktrees/<name>/.
 #
 # Why a hook as well as the Edit(...) ask rules in settings.json: `/path` rules
-# are anchored to the settings source, and in practice they did not prompt for
-# an edit made by a background agent inside a worktree checkout. A hook sees the
-# absolute target path, so it does not depend on how rules are anchored.
+# are anchored to the settings source and did not reliably cover background
+# agents in worktree checkouts. A hook sees the absolute target path.
 #
-# Input: the PreToolUse JSON on stdin. Output: a permissionDecision of "ask" for
-# protected paths; nothing (exit 0) otherwise, so the normal rules apply.
+# Decision for a protected path:
+#   - "ask" in modes where a person is asked (default, acceptEdits, plan);
+#   - "deny" in modes where nobody is asked (auto, bypassPermissions, dontAsk).
+#     In auto mode an "ask" is decided by the auto-mode classifier, not by you,
+#     and a live test showed it silently approving a worktree agent's edit to
+#     .github/CODEOWNERS. A deny holds in every mode; switch to default mode
+#     (Shift+Tab) to make such an edit deliberately.
+# Unprotected paths: no output (exit 0), so the normal rules apply.
 set -uo pipefail
 
-ask() {
-  local reason="$1"
+emit() { # $1 = ask|deny, $2 = reason
   if command -v jq >/dev/null 2>&1; then
-    jq -n --arg r "$reason" \
-      '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $r}}'
+    jq -n --arg d "$1" --arg r "$2" \
+      '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
   else
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"guard-sensitive-edits: jq is missing, so the target path could not be checked."}}'
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"guard-sensitive-edits: jq is missing, so the target path could not be checked."}}\n' "$1"
   fi
   exit 0
 }
 
-# Without jq the path can't be read: fail closed (ask) rather than open.
-command -v jq >/dev/null 2>&1 || ask "jq missing"
+# Without jq nothing can be read: fail closed as far as we can (ask).
+command -v jq >/dev/null 2>&1 || emit ask "jq missing"
 
-path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null) || ask "could not parse the tool input"
+input=$(cat)
+path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input" 2>/dev/null) ||
+  emit ask "guard-sensitive-edits: could not parse the tool input"
 [ -n "$path" ] || exit 0
+mode=$(jq -r '.permission_mode // empty' <<<"$input" 2>/dev/null) || mode=""
 
 case "$path" in
-  .github/* | */.github/* | Makefile | */Makefile | .claude/settings*.json | */.claude/settings*.json)
-    ask "Protected path (CI config, the make gate, or Claude settings): $path. Confirm this edit."
+  .github/* | */.github/* | Makefile | */Makefile | .claude/settings*.json | */.claude/settings*.json) ;;
+  *) exit 0 ;;
+esac
+
+what="Protected path (CI config, the make gate, or Claude settings): $path."
+case "$mode" in
+  auto | bypassPermissions | dontAsk)
+    emit deny "$what Refused in $mode mode, where no one is asked. Switch to default mode (Shift+Tab) and retry if this edit is intended."
+    ;;
+  *)
+    emit ask "$what Confirm this edit."
     ;;
 esac
-exit 0
