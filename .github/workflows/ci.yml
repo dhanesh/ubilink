@@ -7,6 +7,10 @@
 #
 # (release.yml stays separate: it signs + publishes on version tags. This is the
 # per-change gate; that is the release pipeline.)
+#
+# Supply chain: every `uses:` is pinned to a full commit SHA (tags and branches
+# are mutable). The trailing comment names the release the SHA was resolved from;
+# bump both together, and keep them identical to release.yml.
 name: ci
 
 on:
@@ -14,10 +18,11 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs on the same ref (save CI minutes on rapid pushes).
+# Cancel superseded runs on the same PR (save CI minutes on rapid pushes), but
+# never cancel a run on a `main` push: each landed commit gets its own verdict.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -25,28 +30,37 @@ permissions:
 jobs:
   verify:
     runs-on: macos-latest
+    # Backstop for a hung test or runner; a warm-cache run is well under this.
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Pinned to match rust-toolchain.toml so CI's clippy/rustfmt are identical to
       # a developer's local ones (no lint drift). Keep this version in sync with it.
+      # The action has no semver releases and does not read rust-toolchain.toml; the
+      # toolchain comes from the `toolchain` input. The SHA is a master-branch commit
+      # (upstream requires SHA pins to be within master's history).
       - name: Install pinned Rust + rustfmt + clippy
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
         with:
           toolchain: "1.92.0"
           components: rustfmt, clippy
 
       # Cache the (heavy) Tauri dependency tree so desktop builds don't cold-start.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             src-tauri
             registry
             desktop
 
+      # "22" resolves to the latest 22.x; the sandbox tests need >= 22.13 for
+      # `node --permission`.
       - name: Set up Node (test-js + the sandbox tests spawn `node --permission`)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 

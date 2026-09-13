@@ -1,9 +1,18 @@
-# Satisfies: O3 (CI signed builds). On a release tag, this pipeline builds + tests
-# the core, then SIGNS each release integration bundle with the org's ed25519
-# signing key (a CI secret, never a dev laptop) and SELF-VERIFIES the artifact
-# before uploading it. The signing/verify logic is `ubilink_core::release`, proven by
-# unit tests in src/release.rs; this workflow is the operational wiring O3 needs.
-# Setup (one-time) is in docs/RUNBOOK-ci-signing.md.
+# Satisfies: O3 (CI signed builds). On a release tag, this pipeline runs the full
+# `make verify` gate, then SIGNS each release integration bundle with the org's
+# ed25519 signing key (a CI secret, never a dev laptop) and SELF-VERIFIES the
+# artifact before uploading it. The signing/verify logic is `ubilink_core::release`,
+# proven by unit tests in src/release.rs; this workflow is the operational wiring
+# O3 needs. Setup (one-time) is in docs/RUNBOOK-ci-signing.md.
+#
+# Hardening (this job holds UBILINK_SIGNING_KEY):
+#   - every `uses:` pinned to a full commit SHA (same pins as ci.yml);
+#   - `environment: release` — the key lives in that environment, gated by
+#     required reviewers and a main/v* deployment rule (see the runbook);
+#   - manual runs only proceed from `main`; tag runs only for `v*` tags;
+#   - `make verify` (same gate as ci.yml, same macOS runner) must pass BEFORE
+#     the signing steps, which are the only steps that receive the secret;
+#   - no build cache is restored, so a poisoned cache can't reach the signer.
 name: release-signed-build
 
 on:
@@ -11,23 +20,52 @@ on:
     tags: ["v*"]
   workflow_dispatch: {}
 
+# Serialize releases per ref and never cancel one mid-signing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
   signed-build:
-    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    environment: release
+    # Same runner family as ci.yml: the product is macOS-only, and on Linux the
+    # sandbox-exec network-jail test passes vacuously.
+    runs-on: macos-latest
+    # Cold build (no cache by design) of every crate incl. the Tauri desktop crate.
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Same pinned toolchain as ci.yml / rust-toolchain.toml (1.92.0). The action
+      # does not read rust-toolchain.toml, so the version is passed explicitly.
+      - name: Install pinned Rust + rustfmt + clippy
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
+        with:
+          toolchain: "1.92.0"
+          components: rustfmt, clippy
 
-      - name: Test (includes the S2 zero-egress dep guard)
-        run: cargo test --locked
+      # Same as ci.yml: the sandbox tests spawn `node --permission` (needs >= 22.13).
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      # The full gate (fmt + clippy + every test suite incl. the S2 zero-egress dep
+      # guard) must be green before anything is signed.
+      - name: make verify
+        working-directory: ${{ github.workspace }}
+        run: make verify LOCKED=--locked
 
       - name: Build signer
         run: cargo build --locked --release --bin ubilink-sign
@@ -35,7 +73,8 @@ jobs:
       - name: Sign the release bundle
         env:
           # 64-hex ed25519 signing key. Generate once with `openssl rand -hex 32`
-          # and store as a repo/org secret — see docs/RUNBOOK-ci-signing.md.
+          # and store it as a `release` environment secret — see
+          # docs/RUNBOOK-ci-signing.md.
           UBILINK_SIGNING_KEY: ${{ secrets.UBILINK_SIGNING_KEY }}
         run: |
           set -euo pipefail
@@ -58,7 +97,7 @@ jobs:
             ./target/release/ubilink-sign verify --bundle dist/benign.signed.json
 
       - name: Upload signed bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-bundles
           path: src-tauri/dist/*.signed.json
