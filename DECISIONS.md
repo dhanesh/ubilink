@@ -222,6 +222,9 @@ one `osascript` seam against a live app under a TCC grant. It is covered by an
 `#[ignore]`d live test (`live_capture_against_real_safari`) and
 `docs/RUNBOOK-live-capture.md`. **No status flip** — B1/S4 stay PARTIAL until that
 runbook is observed green on a Mac. `satisfied_count` stays 8. 53 tests green.
+*(Superseded in part by D13: the per-app `AppKind` code and the
+`live_capture_against_real_safari` test are gone; `docs/RUNBOOK-live-capture.md`
+describes the current check.)*
 
 ## D7 — CI signed builds: a release-signing pipeline reusing the R3 crypto (R8 / O3)
 
@@ -467,3 +470,133 @@ core-owned set of AppleScript *templates* ("front document URL of app X",
 "selected item id of app X"), where a bundle supplies only parameters and an app
 name gated by a declared capability, so no bundle can supply free-form script text
 or `do shell script`. Until that exists, adapter JSON is local-only.
+
+## D15 — An integration signature covers the full manifest
+
+**Date:** 2026-09-13 · **Constraints:** S3/RT-10, RT-6 · **Source:** security review (PR #1)
+
+The bundle signature used to cover only `id`, `version` and `source`, but the broker
+turns `manifest.needs` directly into grants. Anyone who could edit a signed bundle
+(registry, mirror, cache) could widen its capabilities and it still verified. The
+newline-joined encoding was not injective either.
+
+`integrations::canonical_message` now signs every manifest field (`id`, `name`,
+`app`, `version`, each of `needs`), the bundle's integer version and the source,
+each length-prefixed, under the domain tag `ubilink-integration/v2`. An exhaustive
+destructure of `Manifest` means a new field fails to compile until it is signed or
+explicitly excluded. Bundles signed in the old format no longer verify; none were
+committed, and CI re-signs on every run.
+
+## D16 — One link validation policy for capture, import and open
+
+**Date:** 2026-09-13 · **Constraints:** S5/SC-1, U3 · **Source:** security review (PRs #3, #4, #11)
+
+A link crosses three boundaries: capture, import (a shared export file) and open
+(handing it to the OS). Each had its own checks, or none. Now:
+
+- **One validator.** `LinkPolicy::validate(uri, name)` (`src-tauri/src/api.rs`) is
+  used by capture (`LinkApi`), import (`UbilinkService::import`) and open
+  (`adapter::open_uri`, which re-validates stored rows as defence in depth). It checks
+  size caps, control and bidi-override characters, a leading `-`, scheme syntax, the
+  deny-list, then the allowlist.
+- **Hard deny-list.** `DENIED_SCHEMES` (`javascript`, `vbscript`, `livescript`,
+  `data`, `blob`, `view-source`, `jar`, `ms-msdt`, `search-ms`, `search`,
+  `ms-officecmd`, `ms-appinstaller`) is checked before the allowlist, so schemes that
+  adapters declare in user-editable `adapters.json` can never re-admit them.
+- **`file:` stays, but local only.** Finder's built-in adapter emits `file://` links,
+  so `file` remains allowed. The link must name this computer: an empty host or
+  `localhost` (any case), and no UNC path (`file:////server/…`, `file:\\server\…`,
+  percent-encoded forms). Anything else is refused with `ApiError::RemoteFile`,
+  because opening it on Windows contacts that host over SMB.
+- **Import is all-or-nothing.** `LinkGraph::import_json` validates every row it
+  would write before opening the write transaction. One bad row rejects the whole
+  file, leaves the graph unchanged, and the error names the row.
+- **Openers never use a shell.** `adapter::open_plan_for` runs `open -- <uri>` on
+  macOS, `rundll32 url.dll,FileProtocolHandler <uri>` on Windows (no `cmd.exe`;
+  space and `"` percent-encoded) and `xdg-open <uri>` on Linux (which rejects `--`;
+  the leading-`-` check covers it). `ConfiguredAdapter::open_plan` uses the same
+  function.
+- **Launchable targets are revealed, not run.** A `file://` link to something that
+  would run (an app bundle, script, installer or shortcut, judged by extension after
+  percent-decoding, or on Unix a file with an execute bit, following symlinks) is
+  shown instead: `open -R --` selects it in Finder, and Windows/Linux open the
+  containing folder.
+
+## D17 — Bounded capture: a 15 s `osascript` deadline, and no lock across it
+
+**Date:** 2026-09-13 · **Constraints:** T4, U3 · **Source:** reliability review (PR #7)
+
+A stalled target app used to hang capture until the ~120 s Apple Event timeout, and
+the desktop held the backend lock the whole time, so one stuck app froze every other
+command.
+
+- **Deadline.** Every `osascript` call goes through `OsaScriptRunner` →
+  `live_capture::run_bounded`: both pipes are drained on their own threads, the
+  child is killed and reaped at one overall deadline, and the error explains what
+  to do. `OSASCRIPT_TIMEOUT` is **15 s**, not shorter, because the first capture
+  from an app can raise the macOS Automation (TCC) prompt and `osascript` blocks
+  until the user answers it. A normal capture answers in well under a second.
+- **No lock across the adapter call.** `PanelBackend::capture_current` takes the
+  shared `&Mutex<PanelBackend>` and locks only for the fast steps. It reads the
+  permission (S4), releases the lock, runs the adapter, then re-locks to validate
+  the link (D16), store it and read its backlinks. Proven by
+  `panel.rs::{backend_serves_other_commands_while_a_capture_is_in_flight,
+  a_captured_link_is_still_validated_before_it_is_stored}`.
+
+## D18 — Versioned, atomic graph migrations
+
+**Date:** 2026-09-13 · **Constraints:** RT-4, T2 · **Source:** reliability review (PR #8)
+
+The old resources-table migration ran several `ALTER`s outside a transaction and was
+gated only on the presence of one column, so a crash midway left a DB that the
+check skipped forever and that failed on the next open.
+
+- **Versioned.** The schema version lives in `PRAGMA user_version`. `MIGRATIONS` in
+  `src-tauri/src/graph.rs` is **append-only**: `MIGRATIONS[i]` takes version `i` to
+  `i + 1`, and a shipped step is never edited or reordered.
+- **Atomic.** Each step runs in one `IMMEDIATE` transaction that also bumps
+  `user_version`, re-reading the version inside it. A failed or interrupted step
+  rolls back completely and is retried on the next open, and two processes can't
+  both apply it. An up-to-date DB takes no write lock on open.
+- **Legacy DBs converge.** Unversioned (v0) DBs, including half-migrated ones,
+  reach the same final schema because the steps inspect the actual columns.
+- **Related invariants.** `updated_at` never moves backwards: upserts keep the
+  larger of the stored and incoming time, so linking with no time doesn't sink a
+  resource in the newest-first list. `link(a, a)` is a no-op that writes nothing.
+
+## D19 — Registry ids are bound to their first signer; the schema gate is shared
+
+**Date:** 2026-09-13 · **Constraints:** O4, S3/RT-10, RT-6 · **Source:** security review (PR #9)
+
+D10's hardening paragraph records the mechanism. This decision records its limits.
+
+- Each id is owned by the key that first published it (`owner_hex`). A bundle for
+  that id signed by any other key, even a trusted one, is refused.
+- **No rotation yet.** An owner who loses or rotates their key cannot publish that
+  id again without operator intervention.
+- **Ownership is not persisted.** The index is in memory, so a restart forgets every
+  owner, and the first trusted publish after it claims the id. A hosted instance
+  must persist owners alongside bundles (`docs/RUNBOOK-registry.md`).
+- The manifest schema is enforced in `Installer::verify` (`Manifest::validate` plus
+  `#[serde(deny_unknown_fields)]`, i.e. `additionalProperties: false`). That is the
+  one gate shared by on-device install, CI self-verify (`release::verify_json`) and
+  registry publish. Because the signature covers only known fields (D15), an unknown
+  field would otherwise be a smuggling channel.
+- HTTP bounds: 1 MiB body (413 before allocating), 8 KiB request line, 16 KiB
+  headers, 10 s socket waits, 30 s per request, 64 connections (503 over the limit).
+
+## D20 — The capability matrix is derived from the adapter registry
+
+**Date:** 2026-09-13 · **Constraints:** O2, RT-7, U3 · **Source:** review (PR #11)
+
+The hand-written matrix claimed Obsidian, which has no adapter, and omitted most of
+the adapters that ship, so the published disclosure both over- and under-claimed.
+
+`CapabilityMatrix::from_registry` now builds the rows from the adapters that exist:
+one macOS/AppleScript row per adapter (they all capture through `osascript`), plus
+the `Files` path fallback on every platform. `baseline()` is the matrix of the
+built-in registry. `docs/CAPABILITIES.md` is generated from it and pinned by
+`capabilities_doc_is_in_sync_with_the_matrix`. The desktop passes its merged registry
+(defaults + `adapters.json`) through `UbilinkService::with_capabilities`, so the
+`capabilities` command reports user adapters too. Off macOS, `capability()` explains that the
+adapter needs macOS AppleScript and offers the file-path fallback.
