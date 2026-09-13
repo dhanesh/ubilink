@@ -14,11 +14,14 @@
 // already published (monotonicity — no silent downgrade).
 //
 // Key rotation / id transfer is NOT supported yet: an id stays bound to the key
-// that first published it for the life of the index.
+// that first published it for the life of the data directory (`RegistryIndex::open`),
+// or of the process for a purely in-memory index (`RegistryIndex::new`).
 
 use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -29,8 +32,8 @@ struct Entry {
     version: u32,
     name: String,
     app: String,
-    /// Lowercase hex of the ed25519 key that first published this id. Stored with
-    /// the entry so any future persistence of the index persists ownership too.
+    /// Lowercase hex of the ed25519 key that first published this id. Persisted in
+    /// the id's record next to the bundle, so ownership survives a restart.
     owner_hex: String,
 }
 
@@ -55,65 +58,220 @@ impl ListItem {
     }
 }
 
-/// The registry's in-memory index. (Persistence to disk is a deployment concern —
-/// see docs/RUNBOOK-registry.md; the logic here is storage-agnostic.)
+/// Why a publish was refused: the bundle's fault (HTTP 400) or the store's (500).
+enum PublishError {
+    Rejected(String),
+    Storage(String),
+}
+
+impl PublishError {
+    fn message(self) -> String {
+        match self {
+            PublishError::Rejected(m) | PublishError::Storage(m) => m,
+        }
+    }
+}
+
+/// The registry's index. Always in memory; when opened on a data directory
+/// (`open`) it is also on disk, one record per id (see `Store`). A purely
+/// in-memory index (`new`) forgets every entry AND its owner on restart.
 pub struct RegistryIndex {
     trusted_pub_hex: Vec<String>,
     by_id: HashMap<String, Entry>,
+    /// Ids whose stored record did not load at startup, with the reason. They are
+    /// neither served nor publishable by ANY key (fail closed) until an operator
+    /// restores or removes the record — see `load`.
+    reserved: HashMap<String, String>,
+    store: Option<Store>,
 }
 
 impl RegistryIndex {
+    /// An in-memory index: nothing is persisted.
     pub fn new(trusted_pub_hex: Vec<String>) -> RegistryIndex {
         RegistryIndex {
             trusted_pub_hex,
             by_id: HashMap::new(),
+            reserved: HashMap::new(),
+            store: None,
         }
+    }
+
+    /// An index backed by `data_dir` (created if missing). It is rebuilt from the
+    /// records already there, each re-verified against `trusted_pub_hex`, and every
+    /// later accepted publish is written there before it is applied. Fails if
+    /// another index (in this or another process) holds the directory.
+    pub fn open(
+        trusted_pub_hex: Vec<String>,
+        data_dir: impl AsRef<Path>,
+    ) -> io::Result<RegistryIndex> {
+        let dir = data_dir.as_ref().to_path_buf();
+        fs::create_dir_all(&dir)?;
+        let lock = Store::lock(&dir)?;
+        let mut idx = RegistryIndex::new(trusted_pub_hex);
+        idx.load(&dir)?;
+        idx.store = Some(Store {
+            dir,
+            _lock: lock,
+            failed: None,
+        });
+        Ok(idx)
+    }
+
+    /// Rebuild the index from `dir`. Temp files (an interrupted write) and dotfiles
+    /// (the lock, OS metadata) are skipped. A record that does not pass the same
+    /// gate as a publish is NOT served, and its id is RESERVED: publishable by no
+    /// key until an operator acts. Fail closed, because once a record fails to
+    /// verify we cannot tell a revoked publisher from a tampered or corrupt file,
+    /// nor trust its owner/version fields — and freeing the id would let any other
+    /// trusted key claim it, which is exactly what ownership exists to prevent.
+    fn load(&mut self, dir: &Path) -> io::Result<()> {
+        let mut names = Vec::new();
+        for ent in fs::read_dir(dir)? {
+            match ent?.file_name().into_string() {
+                Ok(n) => names.push(n),
+                Err(n) => warn(&format!("ignoring {n:?} in the data dir: not UTF-8")),
+            }
+        }
+        names.sort(); // deterministic load order and warnings
+        for name in names {
+            if name.starts_with('.') {
+                continue;
+            }
+            if name.ends_with(TEMP_SUFFIX) {
+                warn(&format!(
+                    "ignoring leftover temp file {name}: an interrupted write that was \
+                     never acknowledged (the previous record, if any, is intact)"
+                ));
+                continue;
+            }
+            let path = dir.join(&name);
+            let Some(id) = name.strip_suffix(RECORD_EXT).filter(|id| is_safe_id(id)) else {
+                warn(&format!(
+                    "ignoring {}: not an `<integration-id>{RECORD_EXT}` record",
+                    path.display()
+                ));
+                continue;
+            };
+            match self.load_record(&path, id) {
+                Ok(entry) => {
+                    self.by_id.insert(id.to_string(), entry);
+                }
+                Err(why) => {
+                    warn(&format!(
+                        "NOT serving {id}: {}. The id stays reserved (no key can \
+                         publish it) until an operator restores or removes {}",
+                        why.trim_end_matches('.'),
+                        path.display()
+                    ));
+                    self.reserved.insert(id.to_string(), why);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// One stored record through the same gate a publish passes (`verified`, with
+    /// the CURRENT trusted keys), plus the checks that tie it to its file: the
+    /// bundle is for `id` and was signed by the recorded owner. The latest bundle
+    /// of an id is always signed by its owner (only the owner may publish upgrades
+    /// and there is no rotation), so the two can never legitimately differ.
+    fn load_record(&self, path: &Path, id: &str) -> Result<Entry, String> {
+        let text = fs::read_to_string(path).map_err(|e| format!("unreadable record: {e}"))?;
+        let (owner_hex, wire_json) = parse_record(&text)?;
+        let (bundle_id, entry) = self
+            .verified(&wire_json)
+            .map_err(|e| format!("stored bundle does not verify: {e}"))?;
+        if bundle_id != id {
+            return Err(format!(
+                "the record file is for {id:?} but its bundle is for {bundle_id:?}"
+            ));
+        }
+        if entry.owner_hex != owner_hex {
+            return Err(format!(
+                "recorded owner {owner_hex} is not the bundle's signer {}",
+                entry.owner_hex
+            ));
+        }
+        Ok(entry)
+    }
+
+    /// Ids held back at startup because their stored record did not load (sorted).
+    pub fn reserved_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.reserved.keys().cloned().collect();
+        ids.sort();
+        ids
     }
 
     /// Publish a signed bundle (the JSON `ubilink-sign sign` produces). Accepted iff it
     /// verifies against a trusted publisher with a schema-valid manifest, the id is
     /// new or owned by the same signer, AND it is strictly newer than any existing
     /// version for the same id. Reuses ubilink-core's crypto verbatim (no reimpl).
+    /// With a data directory, the record is persisted BEFORE the index changes; if
+    /// that fails the publish fails and the index is untouched.
     pub fn publish(&mut self, wire_json: &str) -> Result<(), String> {
-        // 1) crypto + trusted-publisher + manifest-schema check (the R3/R8 proven
-        //    path; `Installer::verify` runs `Manifest::validate`, and serde refuses
-        //    unknown manifest fields).
+        self.try_publish(wire_json).map_err(PublishError::message)
+    }
+
+    fn try_publish(&mut self, wire_json: &str) -> Result<(), PublishError> {
+        // 1) + 2) signature, trusted publisher, manifest schema; parse.
+        let (id, entry) = self.verified(wire_json).map_err(PublishError::Rejected)?;
+        // 3) an id whose stored record did not load is publishable by no one.
+        if let Some(why) = self.reserved.get(&id) {
+            return Err(PublishError::Rejected(format!(
+                "integration id {id:?} is reserved: its stored record did not load at \
+                 startup ({why}); an operator must restore or remove that record before \
+                 this id can be published again"
+            )));
+        }
+        if let Some(cur) = self.by_id.get(&id) {
+            // 4) ownership: only the key that first published an id may update it.
+            if cur.owner_hex != entry.owner_hex {
+                return Err(PublishError::Rejected(format!(
+                    "integration id {id:?} is owned by publisher key {}; a bundle signed by \
+                     {} cannot replace it (ids are bound to their first publisher; key \
+                     rotation is not supported yet)",
+                    cur.owner_hex, entry.owner_hex
+                )));
+            }
+            // 5) monotonicity: never replace a published version with an older/equal one.
+            if entry.version <= cur.version {
+                return Err(PublishError::Rejected(format!(
+                    "version {} is not newer than the published version {}",
+                    entry.version, cur.version
+                )));
+            }
+        }
+        // 6) durability: write the record first, so memory never holds a publish
+        //    the disk lacks. On failure nothing below runs and the index is unchanged.
+        if let Some(store) = self.store.as_mut() {
+            store.persist(&id, &entry).map_err(PublishError::Storage)?;
+        }
+        self.by_id.insert(id, entry);
+        Ok(())
+    }
+
+    /// The gate every bundle passes, on publish and again on load: crypto +
+    /// trusted publisher + manifest schema (the R3/R8 proven path;
+    /// `Installer::verify` runs `Manifest::validate`, and serde refuses unknown
+    /// manifest fields), then a parse for id/version/name/app/signer.
+    fn verified(&self, wire_json: &str) -> Result<(String, Entry), String> {
         ubilink_core::verify_json(wire_json, &self.trusted_pub_hex).map_err(|e| e.message())?;
-        // 2) parse for id/version/name/app (WireBundle is the public wire format).
         let wire: ubilink_core::WireBundle =
             serde_json::from_str(wire_json).map_err(|e| format!("malformed bundle JSON: {e}"))?;
         // verify_json accepted signer_hex as 64 hex chars (surrounding whitespace
         // tolerated, either case) — normalise so ownership compares key bytes.
-        let signer_hex = wire.signer_hex.trim().to_ascii_lowercase();
-        if let Some(cur) = self.by_id.get(&wire.manifest.id) {
-            // 3) ownership: only the key that first published an id may update it.
-            if cur.owner_hex != signer_hex {
-                return Err(format!(
-                    "integration id {:?} is owned by publisher key {}; a bundle signed by \
-                     {} cannot replace it (ids are bound to their first publisher; key \
-                     rotation is not supported yet)",
-                    wire.manifest.id, cur.owner_hex, signer_hex
-                ));
-            }
-            // 4) monotonicity: never replace a published version with an older/equal one.
-            if wire.version <= cur.version {
-                return Err(format!(
-                    "version {} is not newer than the published version {}",
-                    wire.version, cur.version
-                ));
-            }
-        }
-        self.by_id.insert(
-            wire.manifest.id.clone(),
+        let owner_hex = wire.signer_hex.trim().to_ascii_lowercase();
+        let m = wire.manifest;
+        Ok((
+            m.id,
             Entry {
                 wire_json: wire_json.to_string(),
                 version: wire.version,
-                name: wire.manifest.name.clone(),
-                app: wire.manifest.app.clone(),
-                owner_hex: signer_hex,
+                name: m.name,
+                app: m.app,
+                owner_hex,
             },
-        );
-        Ok(())
+        ))
     }
 
     /// The publisher key (lowercase hex) that owns an id, i.e. its first signer.
@@ -213,9 +371,10 @@ pub fn handle_request(method: &str, path: &str, body: &str, idx: &mut RegistryIn
                 Resp::not_found("unknown route")
             }
         }
-        "POST" if path == "/publish" => match idx.publish(body) {
+        "POST" if path == "/publish" => match idx.try_publish(body) {
             Ok(()) => Resp::created(r#"{"published":true}"#.to_string()),
-            Err(e) => Resp::bad(&e),
+            Err(PublishError::Rejected(e)) => Resp::bad(&e),
+            Err(PublishError::Storage(e)) => Resp::error(500, &e),
         },
         _ => Resp::not_found("unknown route"),
     }
@@ -565,6 +724,7 @@ fn reason(status: u16) -> &'static str {
         413 => "Content Too Large",
         414 => "URI Too Long",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         501 => "Not Implemented",
         503 => "Service Unavailable",
         _ => "Error",
@@ -585,7 +745,16 @@ fn write_response<W: Write>(w: &mut W, resp: &Resp) -> io::Result<()> {
 
 /// Serve ONE HTTP/1.1 request on a stream: read and parse it with every size
 /// bounded and NO lock held, take the index lock only to apply the parsed
-/// operation, release it, then write the response. Generic over Read+Write so it
+/// operation, release it, then write the response.
+///
+/// With a data directory, an accepted publish writes (and fsyncs) its record while
+/// the lock is held. That is deliberate: check-ownership, persist and apply must be
+/// one atomic step, or two concurrent first publishes of an id by different keys
+/// could both pass the check and the later rename would silently replace the first
+/// owner on disk. The write is one small file (a bundle is a few KiB, capped at
+/// 1 MiB), so the lock is held for roughly one fsync; reads wait that long at
+/// most, which suits a low-traffic registry. Socket I/O still never happens under
+/// the lock. Generic over Read+Write so it
 /// is unit-tested with an in-memory stream; `serve` passes a deadline-bounded
 /// `TcpStream`.
 pub fn handle_stream<S: Read + Write>(
@@ -598,12 +767,194 @@ pub fn handle_stream<S: Read + Write>(
         ReadOutcome::Reject(resp) => resp,
         ReadOutcome::Request(req) => {
             // A poisoned lock still serves safely: publish mutates only after
-            // every check has passed, in a single insert.
+            // every check has passed and the record is persisted, in a single insert.
             let mut guard = idx.lock().unwrap_or_else(PoisonError::into_inner);
             handle_request(&req.method, &req.path, &req.body, &mut guard)
         } // lock released here, before any socket write
     };
     write_response(stream, &resp)
+}
+
+// ── durable store ──
+//
+// Layout: one file per integration id, `<data-dir>/<id>.json`:
+//   {"format": 1, "owner_hex": "<64 lowercase hex>", "wire_json": "<signed bundle>"}
+// `wire_json` is the exact published bytes as a JSON string (served back verbatim).
+// Ids are schema-checked lowercase reverse-DNS names, so they are safe and
+// case-unambiguous file names; `record_path` re-checks that anyway. `.lock` holds
+// the single-writer lock; `<id>.json.tmp` exists only while a write is in flight.
+//
+// Write protocol (`Store::persist`): write `<id>.json.tmp` and `sync_all` it,
+// `rename` it over `<id>.json` (atomic on POSIX: a reader or a crash sees the whole
+// old record or the whole new one), then fsync the directory so the rename itself
+// survives a power loss.
+
+const STORE_FORMAT: u64 = 1;
+const RECORD_EXT: &str = ".json";
+const TEMP_SUFFIX: &str = ".tmp";
+const LOCK_FILE: &str = ".lock";
+
+struct Store {
+    dir: PathBuf,
+    /// Exclusive advisory lock on `<dir>/.lock` for the store's life (released on
+    /// drop or process exit): one writer per directory, so no second index can
+    /// make ownership decisions from a stale memory and overwrite an owner.
+    _lock: File,
+    /// Set once a record reached the directory but the directory fsync failed, so
+    /// memory (unchanged) and disk (new record) may differ. Every later publish is
+    /// refused until a restart reloads from disk.
+    failed: Option<String>,
+}
+
+impl Store {
+    fn lock(dir: &Path) -> io::Result<File> {
+        let f = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(LOCK_FILE))?;
+        match f.try_lock() {
+            Ok(()) => Ok(f),
+            Err(fs::TryLockError::WouldBlock) => Err(io::Error::other(format!(
+                "data directory {} is already in use by another registry index (it \
+                 holds {LOCK_FILE})",
+                dir.display()
+            ))),
+            Err(fs::TryLockError::Error(e)) => Err(e),
+        }
+    }
+
+    /// Durably write `id`'s record. Errors are client-facing (no paths); details go
+    /// to stderr.
+    fn persist(&mut self, id: &str, entry: &Entry) -> Result<(), String> {
+        if let Some(why) = &self.failed {
+            return Err(format!(
+                "publishing is disabled until the registry restarts: an earlier write \
+                 could not be confirmed durable ({why})"
+            ));
+        }
+        let path = record_path(&self.dir, id)?;
+        let tmp = self.dir.join(format!("{id}{RECORD_EXT}{TEMP_SUFFIX}"));
+        let record = serde_json::json!({
+            "format": STORE_FORMAT,
+            "owner_hex": entry.owner_hex,
+            "wire_json": entry.wire_json,
+        });
+        let bytes = format!("{record:#}\n");
+        if let Err(e) = write_synced(&tmp, bytes.as_bytes()).and_then(|()| fs::rename(&tmp, &path))
+        {
+            // Nothing was replaced: the old record (if any) is intact.
+            let _ = fs::remove_file(&tmp);
+            warn(&format!("could not persist {}: {e}", path.display()));
+            return Err(format!("could not persist {id}: {e}"));
+        }
+        // The new record is in place. Until the directory is synced, a power loss
+        // could still undo the rename.
+        if let Err(e) = sync_dir(&self.dir) {
+            let why = format!("fsync of the data dir after writing {id} failed: {e}");
+            warn(&format!("{why}; refusing further publishes until restart"));
+            self.failed = Some(why.clone());
+            return Err(format!("could not persist {id}: {why}"));
+        }
+        Ok(())
+    }
+}
+
+/// Create `path` afresh (a stale file, or a symlink planted in its place, is
+/// removed first; `create_new` never follows one), write `bytes`, and flush them to
+/// stable storage (`sync_all`; `F_FULLFSYNC` on Apple platforms).
+fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
+}
+
+/// fsync a directory so a rename inside it is durable. On Unix std opens a
+/// directory as a read-only `File` and `sync_all` fsyncs it (`F_FULLFSYNC` on
+/// Apple platforms). A filesystem that cannot fsync a directory at all
+/// (EINVAL/ENOTSUP) leaves nothing more to do.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    match File::open(dir)?.sync_all() {
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported
+            ) =>
+        {
+            Ok(())
+        }
+        r => r,
+    }
+}
+
+/// std cannot open a directory handle on Windows (that needs
+/// FILE_FLAG_BACKUP_SEMANTICS), so there is no portable directory fsync; NTFS
+/// journals the rename's metadata.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// The record file for `id` inside `dir`. Anything that is not a plain
+/// reverse-DNS id is refused, so a path built from it can never leave `dir`.
+fn record_path(dir: &Path, id: &str) -> Result<PathBuf, String> {
+    let name = format!("{id}{RECORD_EXT}");
+    let mut parts = Path::new(&name).components();
+    match (is_safe_id(id), parts.next(), parts.next()) {
+        (true, Some(std::path::Component::Normal(n)), None) if n == name.as_str() => {
+            Ok(dir.join(name))
+        }
+        _ => Err(format!(
+            "refusing to store integration id {id:?}: not a lowercase reverse-DNS id"
+        )),
+    }
+}
+
+/// The schema's id pattern `^[a-z0-9]+(\.[a-z0-9-]+)+$`, re-checked here because
+/// the id becomes a file name (`Manifest::validate` already enforced it on publish;
+/// this guards load and any future caller). Path separators and `..` are refused
+/// explicitly as well, though the pattern already excludes them.
+fn is_safe_id(id: &str) -> bool {
+    if id.contains(['/', '\\']) || id.contains("..") {
+        return false;
+    }
+    let label_ok = |l: &str, dash: bool| {
+        !l.is_empty()
+            && l.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || (dash && b == b'-'))
+    };
+    let mut labels = id.split('.');
+    let first_ok = labels.next().is_some_and(|l| label_ok(l, false));
+    let rest: Vec<&str> = labels.collect();
+    first_ok && !rest.is_empty() && rest.iter().all(|l| label_ok(l, true))
+}
+
+/// `(owner_hex, wire_json)` from a stored record.
+fn parse_record(text: &str) -> Result<(String, String), String> {
+    let v: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("corrupt record: {e}"))?;
+    let format = v.get("format").and_then(serde_json::Value::as_u64);
+    if format != Some(STORE_FORMAT) {
+        return Err(format!(
+            "unsupported record format {format:?} (this registry reads {STORE_FORMAT})"
+        ));
+    }
+    let field = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| format!("corrupt record: missing string field `{k}`"))
+    };
+    Ok((field("owner_hex")?, field("wire_json")?))
+}
+
+fn warn(msg: &str) {
+    eprintln!("[ubilink-registry] warning: {msg}");
 }
 
 // ── tiny dependency-free helpers ──
@@ -1150,9 +1501,11 @@ mod tests {
         }
     }
     fn spawn_server(cfg: ServerConfig) -> SocketAddr {
+        spawn_server_with(Arc::new(Mutex::new(index_trusting(7))), cfg)
+    }
+    fn spawn_server_with(idx: Arc<Mutex<RegistryIndex>>, cfg: ServerConfig) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let idx = Arc::new(Mutex::new(index_trusting(7)));
         std::thread::spawn(move || serve(listener, idx, cfg));
         addr
     }
@@ -1322,6 +1675,375 @@ mod tests {
         assert_eq!(
             handle_request("DELETE", "/whatever", "", &mut idx).status,
             404
+        );
+    }
+
+    // ── durable store ──
+
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn pubkey(seed: u8) -> String {
+        public_hex(&signing_key_from_hex(&key_hex(seed)).unwrap())
+    }
+    fn trusting(seeds: &[u8]) -> Vec<String> {
+        seeds.iter().map(|s| pubkey(*s)).collect()
+    }
+
+    /// A unique scratch directory per test, removed on drop (even if a test turned
+    /// it into a plain file).
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> TempDir {
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let p = std::env::temp_dir().join(format!(
+                "ubilink-registry-test-{}-{}-{tag}",
+                std::process::id(),
+                N.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+        fn record(&self, id: &str) -> PathBuf {
+            self.0.join(format!("{id}.json"))
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            if fs::remove_dir_all(&self.0).is_err() {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+    }
+
+    fn open(seeds: &[u8], dir: &TempDir) -> RegistryIndex {
+        RegistryIndex::open(trusting(seeds), dir.path()).unwrap()
+    }
+    fn edit_record(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+        let mut rec: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        change(&mut rec);
+        fs::write(path, rec.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_published_entry_and_its_owner_survive_a_reload() {
+        let dir = TempDir::new("reload");
+        let bundle = signed(7, "com.x.obsidian", "Obsidian", "Obsidian Linker", 1);
+        let mut idx = open(&[7], &dir);
+        idx.publish(&bundle).unwrap();
+        drop(idx);
+
+        // One file per id: the owner key next to the verbatim signed bundle.
+        let rec: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.record("com.x.obsidian")).unwrap())
+                .unwrap();
+        assert_eq!(rec["owner_hex"], pubkey(7));
+        assert_eq!(rec["wire_json"], bundle.as_str());
+
+        let idx = open(&[7], &dir);
+        assert_eq!(idx.get("com.x.obsidian"), Some(bundle.as_str()));
+        assert_eq!(idx.owner("com.x.obsidian"), Some(pubkey(7).as_str()));
+        let list = idx.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Obsidian Linker");
+        assert_eq!(list[0].version, 1);
+    }
+
+    #[test]
+    fn after_a_reload_a_second_trusted_key_still_cannot_take_over_an_id() {
+        // The PR #9 ownership rule must survive a restart: before persistence, the
+        // reloaded index was empty and key 8's first publish claimed the id.
+        let dir = TempDir::new("takeover");
+        let original = signed(7, "com.x.app", "App", "App", 1);
+        open(&[7, 8], &dir).publish(&original).unwrap();
+
+        let mut idx = open(&[7, 8], &dir); // a restart
+        for version in [1, 2, 99] {
+            let err = idx
+                .publish(&signed(8, "com.x.app", "App", "Hijacked", version))
+                .expect_err("after a restart a different trusted key took over the id");
+            assert!(err.contains("owned by"), "unclear error: {err}");
+        }
+        assert_eq!(idx.get("com.x.app"), Some(original.as_str()));
+        assert_eq!(idx.owner("com.x.app"), Some(pubkey(7).as_str()));
+        drop(idx);
+
+        // The refused attempts never reached disk.
+        let idx = open(&[7, 8], &dir);
+        assert_eq!(idx.get("com.x.app"), Some(original.as_str()));
+        assert_eq!(idx.owner("com.x.app"), Some(pubkey(7).as_str()));
+    }
+
+    #[test]
+    fn after_a_reload_the_owner_can_publish_upgrades_and_the_newest_wins() {
+        let dir = TempDir::new("upgrade");
+        open(&[7, 8], &dir)
+            .publish(&signed(7, "com.x.app", "App", "App", 1))
+            .unwrap();
+
+        let mut idx = open(&[7, 8], &dir);
+        let v2 = signed(7, "com.x.app", "App", "App v2", 2);
+        idx.publish(&v2).unwrap();
+        assert_eq!(idx.list()[0].version, 2);
+        drop(idx);
+
+        let mut idx = open(&[7, 8], &dir);
+        assert_eq!(idx.get("com.x.app"), Some(v2.as_str()));
+        assert_eq!(idx.list()[0].name, "App v2");
+        // monotonicity is enforced against the reloaded version too.
+        for old in [1, 2] {
+            assert!(idx
+                .publish(&signed(7, "com.x.app", "App", "App", old))
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn a_leftover_temp_file_from_an_interrupted_write_is_ignored() {
+        let dir = TempDir::new("tmp");
+        let v1 = signed(7, "com.x.app", "App", "App", 1);
+        open(&[7, 8], &dir).publish(&v1).unwrap();
+
+        // A crash mid-write leaves `<id>.json.tmp`: a torn one for an existing id,
+        // and a complete one for an id whose publish died before the rename (so it
+        // was never acknowledged, and never happened).
+        fs::write(
+            dir.path().join("com.x.app.json.tmp"),
+            r#"{"format":1,"owner_hex":"ab"#,
+        )
+        .unwrap();
+        let never_acked = serde_json::json!({
+            "format": 1,
+            "owner_hex": pubkey(7),
+            "wire_json": signed(7, "com.y.other", "O", "O", 1),
+        });
+        fs::write(
+            dir.path().join("com.y.other.json.tmp"),
+            never_acked.to_string(),
+        )
+        .unwrap();
+
+        let mut idx = open(&[7, 8], &dir);
+        assert_eq!(idx.get("com.x.app"), Some(v1.as_str()));
+        assert_eq!(idx.list().len(), 1);
+        assert!(idx.get("com.y.other").is_none());
+        // Not reserved either: the unacknowledged claim gives key 7 nothing.
+        idx.publish(&signed(8, "com.y.other", "O", "O", 1)).unwrap();
+        // The owner's next write replaces the stale temp file cleanly.
+        let v2 = signed(7, "com.x.app", "App", "App", 2);
+        idx.publish(&v2).unwrap();
+        drop(idx);
+
+        let idx = open(&[7, 8], &dir);
+        assert_eq!(idx.get("com.x.app"), Some(v2.as_str()));
+        assert_eq!(idx.owner("com.y.other"), Some(pubkey(8).as_str()));
+        assert!(!dir.path().join("com.x.app.json.tmp").exists());
+        assert!(!dir.path().join("com.y.other.json.tmp").exists());
+    }
+
+    #[test]
+    fn a_stored_record_that_no_longer_verifies_is_not_served_and_its_id_stays_reserved() {
+        type Tamper = fn(&Path);
+        let cases: [(&str, &[u8], Tamper); 6] = [
+            ("edited wire_json", &[7, 8], |p| {
+                edit_record(p, |r| {
+                    let w = r["wire_json"].as_str().unwrap();
+                    r["wire_json"] = w.replace("run(){}", "run(){steal()}").into();
+                })
+            }),
+            ("truncated file", &[7, 8], |p| {
+                fs::write(p, r#"{"format":1,"owner_"#).unwrap()
+            }),
+            ("owner is not the signer", &[7, 8], |p| {
+                edit_record(p, |r| r["owner_hex"] = pubkey(8).into())
+            }),
+            ("file holds another id's bundle", &[7, 8], |p| {
+                edit_record(p, |r| {
+                    r["wire_json"] = signed(7, "com.x.other", "App", "App", 1).into()
+                })
+            }),
+            ("unknown record format", &[7, 8], |p| {
+                edit_record(p, |r| r["format"] = 2.into())
+            }),
+            // Revoking trust hides the owner's bundle but must not free its id.
+            ("owner key removed from trust", &[8], |_| {}),
+        ];
+        for (what, trust, tamper) in cases {
+            let dir = TempDir::new("tamper");
+            open(&[7, 8], &dir)
+                .publish(&signed(7, "com.x.app", "App", "App", 1))
+                .unwrap();
+            let file = dir.record("com.x.app");
+            tamper(&file);
+            let evidence = fs::read(&file).unwrap();
+
+            let mut idx = open(trust, &dir);
+            assert!(idx.get("com.x.app").is_none(), "{what}: served");
+            assert!(idx.list().is_empty(), "{what}: listed");
+            assert_eq!(idx.owner("com.x.app"), None, "{what}");
+            for seed in [7u8, 8] {
+                let err = idx
+                    .publish(&signed(seed, "com.x.app", "App", "Claimed", 2))
+                    .expect_err(&format!("{what}: key {seed} published a reserved id"));
+                if trust.contains(&seed) {
+                    assert!(err.contains("reserved"), "{what}: {err}");
+                }
+            }
+            assert_eq!(
+                fs::read(&file).unwrap(),
+                evidence,
+                "{what}: the stored record was overwritten"
+            );
+            // Other ids are unaffected.
+            idx.publish(&signed(8, "com.y.other", "O", "O", 1)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_failed_persist_fails_the_publish_and_leaves_memory_unchanged() {
+        // (a) The data dir vanishes and a plain file takes its place.
+        let dir = TempDir::new("persist-fail");
+        let v1 = signed(7, "com.x.app", "App", "App", 1);
+        let mut idx = open(&[7], &dir);
+        idx.publish(&v1).unwrap();
+        fs::remove_dir_all(dir.path()).unwrap();
+        fs::write(dir.path(), "not a directory").unwrap();
+
+        let err = idx
+            .publish(&signed(7, "com.x.app", "App", "App v2", 2))
+            .expect_err("an upgrade was accepted without being persisted");
+        assert!(err.contains("persist"), "{err}");
+        assert_eq!(idx.get("com.x.app"), Some(v1.as_str()));
+        assert_eq!(idx.list()[0].version, 1);
+        // Over HTTP a storage failure is the server's fault: 500, not 400.
+        let r = handle_request(
+            "POST",
+            "/publish",
+            &signed(7, "com.y.new", "N", "N", 1),
+            &mut idx,
+        );
+        assert_eq!(r.status, 500, "{r:?}");
+        assert!(idx.get("com.y.new").is_none());
+        assert_eq!(idx.list().len(), 1);
+
+        // (b) The record path is taken by a directory, so the rename fails.
+        let dir = TempDir::new("persist-fail-rename");
+        let mut idx = open(&[7, 8], &dir);
+        let blocker = dir.record("com.x.app");
+        fs::create_dir(&blocker).unwrap();
+        fs::write(blocker.join("keep"), "x").unwrap();
+        assert!(idx
+            .publish(&signed(7, "com.x.app", "App", "App", 1))
+            .is_err());
+        assert!(idx.get("com.x.app").is_none());
+        assert_eq!(idx.owner("com.x.app"), None);
+        assert!(
+            !dir.path().join("com.x.app.json.tmp").exists(),
+            "temp file left behind"
+        );
+        // The failed claim reserved nothing.
+        fs::remove_dir_all(&blocker).unwrap();
+        idx.publish(&signed(8, "com.x.app", "App", "App", 1))
+            .unwrap();
+        assert_eq!(idx.owner("com.x.app"), Some(pubkey(8).as_str()));
+    }
+
+    #[test]
+    fn record_paths_never_leave_the_data_dir() {
+        let dir = Path::new("/srv/registry-data");
+        let p = record_path(dir, "com.x-y.app2").unwrap();
+        assert_eq!(p, dir.join("com.x-y.app2.json"));
+        assert_eq!(p.parent(), Some(dir));
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../com.x.app",
+            "com.x/../../etc",
+            "com.x.app/..",
+            "com.x/app",
+            "/etc/passwd.x",
+            "com\\x.app",
+            "..\\com.x",
+            "c:\\x.y",
+            "com..x",
+            ".com.x",
+            "com.x.",
+            "COM.X.APP",
+            "com",
+            "-com.x",
+            "com.x.app\0",
+            "com.x app",
+        ] {
+            assert!(record_path(dir, bad).is_err(), "{bad:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn a_data_dir_is_used_by_one_index_at_a_time() {
+        // Two live indexes on one directory would each decide ownership from their
+        // own memory, and the second could overwrite the first's owner on disk.
+        let dir = TempDir::new("lock");
+        let first = open(&[7], &dir);
+        let err = RegistryIndex::open(trusting(&[7]), dir.path())
+            .err()
+            .expect("two indexes opened the same data dir");
+        assert!(err.to_string().contains("in use"), "{err}");
+        drop(first);
+        open(&[7], &dir);
+    }
+
+    fn post(bundle: &str) -> String {
+        format!(
+            "POST /publish HTTP/1.1\r\nContent-Length: {}\r\n\r\n{bundle}",
+            bundle.len()
+        )
+    }
+    fn http(addr: SocketAddr, req: &str) -> String {
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(req.as_bytes()).unwrap();
+        let mut out = String::new();
+        c.read_to_string(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn serve_keeps_published_bundles_across_a_restart_on_the_same_data_dir() {
+        let dir = TempDir::new("e2e");
+        let bundle = signed(7, "com.x.app", "App", "Appy", 1);
+        let first = Arc::new(Mutex::new(open(&[7, 8], &dir)));
+        let addr = spawn_server_with(Arc::clone(&first), test_config());
+        let resp = http(addr, &post(&bundle));
+        assert!(resp.starts_with("HTTP/1.1 201 "), "{resp}");
+
+        // Stop the first server: drop its index (and its data-dir lock), so nothing
+        // it held in memory can reach the second one.
+        drop(std::mem::replace(
+            &mut *first.lock().unwrap(),
+            RegistryIndex::new(vec![]),
+        ));
+
+        let second = Arc::new(Mutex::new(open(&[7, 8], &dir)));
+        let addr = spawn_server_with(second, test_config());
+        let resp = http(addr, "GET /integrations/com.x.app HTTP/1.1\r\n\r\n");
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+        assert!(
+            resp.ends_with(&bundle),
+            "bundle not served verbatim: {resp}"
+        );
+        // ...and ownership came back with it.
+        let hijack = signed(8, "com.x.app", "App", "Hijacked", 2);
+        let resp = http(addr, &post(&hijack));
+        assert!(
+            resp.starts_with("HTTP/1.1 400 ") && resp.contains("owned by"),
+            "{resp}"
         );
     }
 }
