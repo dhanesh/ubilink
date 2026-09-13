@@ -18,8 +18,9 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use ubilink_core::{
-    AdapterRegistry, BrowseEntry, CommandRunner, ConfiguredAdapter, LinkGraph, OsaScriptRunner,
-    PanelBackend, PanelView, PermissionState, Support, UbilinkService, FRONTMOST_APP_SCRIPT,
+    AdapterRegistry, BrowseEntry, CapabilityMatrix, CommandRunner, ConfiguredAdapter, LinkGraph,
+    OsaScriptRunner, PanelBackend, PanelView, PermissionState, Support, UbilinkService,
+    FRONTMOST_APP_SCRIPT,
 };
 
 /// App state: the link-graph-backed panel backend + the declarative adapter registry.
@@ -498,11 +499,16 @@ fn main() {
             // The bounded API (S5) must trust the schemes the adapters declare
             // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
             let schemes = adapters.declared_schemes();
+            // O2: disclose what THIS registry (defaults + user adapters) can link.
+            let matrix = CapabilityMatrix::from_registry(&adapters);
             // Which non-built-in adapters has the user turned off? Persisted across launches.
             let disabled = load_disabled(&data_dir);
             app.manage(AppState {
                 backend: Mutex::new(PanelBackend::new(
-                    UbilinkService::new(graph).with_permission(permission).allow_schemes(schemes),
+                    UbilinkService::new(graph)
+                        .with_permission(permission)
+                        .allow_schemes(schemes)
+                        .with_capabilities(matrix),
                 )),
                 adapters,
                 disabled: Mutex::new(disabled),
