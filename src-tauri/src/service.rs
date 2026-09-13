@@ -406,6 +406,44 @@ mod tests {
     }
 
     #[test]
+    fn import_refuses_a_file_link_to_a_remote_host() {
+        // The shared policy's local-file rule holds at the import boundary: a shared
+        // export can't plant `file://server/share` (SMB on Windows) links.
+        for uri in [
+            "file://evil.example/share/x.docx",
+            "file:////evil.example/s",
+        ] {
+            let mut svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+            let err = svc
+                .import(&crafted_export("Evil", uri))
+                .expect_err(uri)
+                .message();
+            assert!(err.contains("resources[1]"), "{uri}: {err}");
+            assert!(err.contains("this computer"), "{uri}: {err}");
+            assert_eq!(svc.stats().unwrap(), (0, 0), "{uri}: graph unchanged");
+        }
+    }
+
+    #[test]
+    fn open_refuses_a_file_link_to_a_remote_host_without_running_anything() {
+        // The same rule at the open boundary: a stored remote `file:` link is never
+        // handed to the OS opener (which would contact the host).
+        struct MustNotRun;
+        impl crate::live_capture::CommandRunner for MustNotRun {
+            fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
+                panic!("opener must not run: {program} {args:?}");
+            }
+        }
+        let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap());
+        let err = svc
+            .open_link(&MustNotRun, "file://server/share/x.docx")
+            .unwrap_err()
+            .message();
+        assert!(err.contains("Refusing to open"), "{err}");
+        assert!(err.contains("this computer"), "{err}");
+    }
+
+    #[test]
     fn own_export_round_trips_through_validated_import() {
         // Regression guard: whatever capture accepted, import must accept too —
         // including config-declared schemes (bear:) and awkward names.

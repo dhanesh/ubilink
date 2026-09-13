@@ -486,6 +486,24 @@ mod tests {
     }
 
     #[test]
+    fn builtin_finder_links_pass_the_local_file_policy() {
+        // Regression guard for the local-`file:` rule: the shipped Finder adapter
+        // renders `file://{path}` from a POSIX path (leading `/`), i.e. an empty
+        // host, so its links must keep validating.
+        let spec = AdapterRegistry::defaults()
+            .for_app("Finder")
+            .expect("Finder ships")
+            .clone();
+        let policy = crate::api::LinkPolicy::new();
+        for path in ["/Users/me/Docs/Report.pdf", "/Volumes/USB/My Doc.pdf", "/"] {
+            let id = ConfiguredAdapter::new(spec.clone(), FakeRunner(Ok(path.into())))
+                .capture()
+                .unwrap();
+            assert_eq!(policy.validate(&id.uri, &id.name), Ok(()), "{}", id.uri);
+        }
+    }
+
+    #[test]
     fn bear_spec_urlencodes_the_title_into_the_scheme() {
         let spec = AdapterSpec {
             app: "Bear".into(),
