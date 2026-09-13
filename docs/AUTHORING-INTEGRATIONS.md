@@ -59,9 +59,11 @@ even `read:link-graph` / `read:*` is denied (S1). Declare the least you need.
    increase with every release (downgrade protection and the registry's
    monotonicity check use it). A registry binds your integration `id` to the key
    that first publishes it, so sign every release with the same key.
-4. **Install** — the user installs `my-integration.signed.json`. ubilink's `Installer`
-   verifies the signature, the trusted publisher, and version monotonicity, then
-   loads it (R3 / S3). No rebuild of ubilink is involved.
+4. **Install** — ubilink's `Installer` accepts `my-integration.signed.json` only after
+   verifying the signature, the trusted publisher, the manifest schema and version
+   monotonicity (R3 / S3). No rebuild of ubilink is involved. *Not wired yet:* the
+   desktop app has no install flow and does not run integrations, so today this path
+   is exercised by tests, `ubilink-sign verify` and the registry.
 
 ## Why this satisfies B3 without touching core
 

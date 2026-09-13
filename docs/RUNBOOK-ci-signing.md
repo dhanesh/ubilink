@@ -9,7 +9,8 @@ secret — this runbook enables that.
 
 ## What is already proven (no CI needed)
 - `sign_to_json` → `verify_json` roundtrip; tamper → `BadSignature`; untrusted key
-  → `UntrustedSigner`; malformed key/hex/JSON → typed `SignError` (7 unit tests).
+  → `UntrustedSigner`; malformed key/hex/JSON → typed `SignError` (unit tests in
+  `release.rs`).
 - The `ubilink-sign` CLI end-to-end: `sign`/`pubkey`/`verify` exit 0 on a trusted
   artifact and exit 1 on an untrusted or tampered one.
 - The real `plugins/examples/benign` manifest+source sign and verify through the CLI.

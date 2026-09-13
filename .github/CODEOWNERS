@@ -1,8 +1,7 @@
-# CODEOWNERS — R6 review gate. Listed owners are auto-requested for review and,
-# with branch protection ("Require review from Code Owners"), must approve before
-# merge. INERT until this repo has a GitHub remote + branch protection configured
-# (see CONTRIBUTING.md § Human checkpoints). Confirm the @handle is correct once
-# the remote exists.
+# CODEOWNERS — R6 review gate. Listed owners are auto-requested for review on PRs
+# that touch their paths. Branch protection on `main` currently requires the
+# `verify` CI check but not Code Owner approval, so this requests a review; it
+# does not block merge (see CONTRIBUTING.md § Human checkpoints).
 
 # Default owner for everything.
 *                       @dhanesh
