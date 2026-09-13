@@ -574,9 +574,21 @@ D10's hardening paragraph records the mechanism. This decision records its limit
   that id signed by any other key, even a trusted one, is refused.
 - **No rotation yet.** An owner who loses or rotates their key cannot publish that
   id again without operator intervention.
-- **Ownership is not persisted.** The index is in memory, so a restart forgets every
-  owner, and the first trusted publish after it claims the id. A hosted instance
-  must persist owners alongside bundles (`docs/RUNBOOK-registry.md`).
+- **Ownership is persisted.** With a data directory (`UBILINK_REGISTRY_DATA`) each id
+  is one `<id>.json` record holding `owner_hex` and the verbatim bundle. A publish is
+  written before it is applied or acknowledged: temp file, `sync_all`, `rename`, then
+  a directory fsync. If the write fails, the publish fails (500) and memory is
+  unchanged. A `.lock` keeps a second index off the same directory. Without a data
+  directory the index is in memory and a restart forgets every owner; the binary
+  warns about this.
+- **Load re-verifies.** At startup every record passes the publish gate again
+  against the *current* trusted keys. Its bundle must be for the file's id and signed
+  by the recorded owner. A record that fails (key removed from trust, tampering,
+  corruption) is not served, and its id stays **reserved**: no key can publish it
+  until an operator restores or removes the file. We fail closed because a failed
+  record's owner and version can no longer be trusted, and freeing the id would let
+  another trusted key claim it. Leftover `*.tmp` files are ignored.
+  (`docs/RUNBOOK-registry.md`)
 - The manifest schema is enforced in `Installer::verify` (`Manifest::validate` plus
   `#[serde(deny_unknown_fields)]`, i.e. `additionalProperties: false`). That is the
   one gate shared by on-device install, CI self-verify (`release::verify_json`) and
