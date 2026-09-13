@@ -17,7 +17,8 @@ use std::time::Instant;
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
 
 /// Default scheme allowlist (SC-1). Extend via `LinkPolicy::allow`. `file` stays
-/// on it because the built-in Finder adapter produces `file://` links.
+/// on it because the built-in Finder adapter produces `file://` links; `validate`
+/// admits only LOCAL ones (no remote host, no UNC path).
 const DEFAULT_SCHEMES: &[&str] = &[
     "file",
     "http",
@@ -41,6 +42,10 @@ pub enum ApiError {
     DisallowedScheme { scheme: String },
     /// URI/name malformed (no scheme, control characters, empty).
     Malformed { reason: String },
+    /// A `file:` URI names another machine (`file://server/…`, or a UNC spelling
+    /// such as `file:////server/…`). Opening it contacts that host — SMB on
+    /// Windows (NTLM credential leak), a share mount on macOS.
+    RemoteFile { host: String },
 }
 
 impl ApiError {
@@ -54,6 +59,17 @@ impl ApiError {
                 format!("URI scheme `{scheme}:` is not allowed.")
             }
             ApiError::Malformed { reason } => format!("Malformed link request: {reason}."),
+            ApiError::RemoteFile { host } => {
+                let target = if host.is_empty() {
+                    "a network location".to_string()
+                } else {
+                    format!("the network host `{host}`")
+                };
+                format!(
+                    "`file:` links must point at this computer, but this one names \
+                     {target}; opening it would connect to that machine."
+                )
+            }
         }
     }
 }
@@ -147,6 +163,50 @@ fn is_valid_scheme(s: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
+fn is_path_separator(c: char) -> bool {
+    c == '/' || c == '\\'
+}
+
+/// The first segment of a UNC-style path (`\\server\share` / `//server/share`).
+fn unc_host(s: &str) -> String {
+    s.trim_start_matches(is_path_separator)
+        .split(is_path_separator)
+        .next()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The remote host a `file:` URI names, or `None` if it names this computer.
+/// `after_scheme` is everything after `file:`. Local means: no authority, an empty
+/// one (`file:///p`), or `localhost` in any case (`file://localhost/p`), AND a path
+/// that does not itself start with two separators — `file:////server/share`,
+/// `file:\\server\share` and `file:///%2F%2Fserver` are UNC paths that Windows
+/// resolves over the network. The authority is compared as written (an encoded or
+/// port-qualified `localhost` is refused); the path is percent-decoded first.
+fn remote_file_host(after_scheme: &str) -> Option<String> {
+    let rest = after_scheme.split(['?', '#']).next().unwrap_or("");
+    let (authority, path) = match rest.strip_prefix("//") {
+        Some(a) => {
+            let end = a.find('/').unwrap_or(a.len());
+            (&a[..end], &a[end..])
+        }
+        None => ("", rest),
+    };
+    if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+        return Some(if authority.starts_with(is_path_separator) {
+            unc_host(authority)
+        } else {
+            authority.to_string()
+        });
+    }
+    let path = crate::adapter::percent_decode(path);
+    let mut lead = path.chars();
+    match (lead.next(), lead.next()) {
+        (Some(a), Some(b)) if is_path_separator(a) && is_path_separator(b) => Some(unc_host(&path)),
+        _ => None,
+    }
+}
+
 fn check_size(field: &str, value: &str) -> Result<(), ApiError> {
     if value.len() > MAX_INPUT_BYTES {
         return Err(ApiError::InputTooLarge {
@@ -196,7 +256,9 @@ impl LinkPolicy {
     /// normalize do so first, so what is validated is what is stored or launched).
     /// `name` may be empty (open has no name to check). Checks, in order: size caps,
     /// non-empty uri, forbidden characters, leading `-`, scheme syntax, the hard
-    /// deny-list, then the allowlist.
+    /// deny-list, the allowlist, then — for `file:` — that the link names this
+    /// computer (empty host or `localhost`; no remote host, no UNC path). Because
+    /// this policy is shared, the local-file rule holds for capture, import and open.
     pub fn validate(&self, uri: &str, name: &str) -> Result<(), ApiError> {
         check_size("uri", uri)?;
         check_size("name", name)?;
@@ -216,12 +278,9 @@ impl LinkPolicy {
                 reason: "uri must not start with '-'".into(),
             });
         }
-        let scheme = uri
-            .split_once(':')
-            .map(|(s, _)| s)
-            .ok_or_else(|| ApiError::Malformed {
-                reason: "uri has no scheme".into(),
-            })?;
+        let (scheme, after_scheme) = uri.split_once(':').ok_or_else(|| ApiError::Malformed {
+            reason: "uri has no scheme".into(),
+        })?;
         if !is_valid_scheme(scheme) {
             return Err(ApiError::Malformed {
                 reason: "uri scheme is not valid".into(),
@@ -230,6 +289,11 @@ impl LinkPolicy {
         let scheme = scheme.to_ascii_lowercase();
         if DENIED_SCHEMES.contains(&scheme.as_str()) || !self.schemes.iter().any(|s| s == &scheme) {
             return Err(ApiError::DisallowedScheme { scheme });
+        }
+        if scheme == "file" {
+            if let Some(host) = remote_file_host(after_scheme) {
+                return Err(ApiError::RemoteFile { host });
+            }
         }
         Ok(())
     }
@@ -500,6 +564,57 @@ mod tests {
             policy.validate("https://x", &"n".repeat(MAX_INPUT_BYTES + 1)),
             Err(ApiError::InputTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn file_links_must_point_at_this_computer() {
+        // A `file:` link with a host is a network share: on Windows opening
+        // `file://server/share/x` (or `file:////server/share`) goes over SMB and can
+        // leak NTLM credentials; on macOS it can mount a share. Only an empty host
+        // or `localhost` names this computer.
+        let policy = LinkPolicy::new();
+        for local in [
+            "file:///Users/me/a.md",
+            "file://localhost/Users/me/a.md",
+            "file://LocalHost/Users/me/a.md",
+            "file:///C:/x.txt",
+            "file:/Users/me/a.md",
+            "file:///Users/me/My%20Note.md?x=1#y",
+            "FILE:///Users/me/a.md",
+        ] {
+            assert_eq!(policy.validate(local, ""), Ok(()), "{local} is local");
+        }
+        for remote in [
+            "file://server/share/x",
+            "file://SERVER",
+            "file://evil.example/share/x?q",
+            "file://user@server/x",
+            "file://localhost:445/x",
+            "file://127.0.0.1/x",
+            // UNC spellings: extra slashes, backslashes, and encoded separators
+            "file:////server/share/x",
+            "file://///server/share/x",
+            "file://\\\\server\\share\\x",
+            "file:\\\\server\\share\\x",
+            "file:/\\server\\share",
+            "file://localhost//server/share",
+            "file:///%2F%2Fserver/share",
+            "file:///%5C%5Cserver/share",
+            "file:%2F%2Fserver/share",
+        ] {
+            let err = policy
+                .validate(remote, "")
+                .expect_err(&format!("{remote} names a remote host"));
+            let msg = err.message();
+            assert!(
+                msg.contains("this computer"),
+                "{remote}: unclear message {msg:?}"
+            );
+        }
+        // …and allowing `file` again (e.g. from adapter config) doesn't lift it.
+        let mut p = LinkPolicy::new();
+        p.allow("file");
+        assert!(p.validate("file://server/share/x", "").is_err());
     }
 
     #[test]
