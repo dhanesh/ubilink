@@ -24,7 +24,9 @@ the heavy Tauri build), `make test-desktop`, `make fmt` (auto-format).
 
 ## House style (enforced, not aspirational)
 
-- **Formatting:** `cargo fmt` — checked by `verify-fmt`. Run `make fmt` to fix.
+- **Formatting:** `cargo fmt` — checked by `verify-fmt` for all three crates. `make fmt`
+  fixes the core and registry; for the desktop crate run
+  `cargo fmt --manifest-path desktop/Cargo.toml`.
 - **Lints:** `cargo clippy --all-targets -- -D warnings` — warnings are errors.
 - **Crate boundaries are load-bearing.** `ubilink-core` (`src-tauri/`) is
   deliberately Tauri-free and network-free (constraint S2). `registry/` and
@@ -45,17 +47,19 @@ the heavy Tauri build), `make test-desktop`, `make fmt` (auto-format).
   (a data migration, a published signed release), call it out explicitly.
 - **Branch per change.** Never commit straight to `main` for non-trivial work;
   branch, open a PR, let CI + a reviewer gate it. The PR template
-  (`.github/PULL_REQUEST_TEMPLATE.md`) is the checklist; `CODEOWNERS` names the
-  required reviewers for security-critical files.
+  (`.github/PULL_REQUEST_TEMPLATE.md`) is the checklist; `CODEOWNERS` names who is
+  asked to review security-critical files.
 - **Rollback:** `git revert <sha>` for a landed change; `git reset --hard` only
   on a local branch you own (it's in the agent `ask` list for a reason).
 
-> **No remote yet.** This repo currently has no Git remote, so the PR/CI/CODEOWNERS
-> gate can't actually run. Until a GitHub remote + branch protection exist, the
-> interim checkpoint is: **branch → `make verify` green → self-review the full diff
-> → then commit.** To activate the full gate: add the remote, push, and enable
-> branch protection on `main` ("Require status checks: ci", "Require review from
-> Code Owners"). Confirm the `@dhanesh` handle in `CODEOWNERS` is correct.
+> **The gate on GitHub.** `origin` is `github.com/dhanesh/ubilink`. Branch protection
+> on `main` requires the `verify` status check (the CI job above) and requires a
+> branch to be up to date with `main` before it merges; force-pushes and deleting
+> `main` are blocked. It does not require an approving review (and admins can
+> bypass it), so the `CODEOWNERS` review is requested, not enforced. The workflow:
+> **branch → `make verify` green locally → push + open a PR → CI `verify` green
+> (rebase onto `main` first if it moved) → merge.** PRs so far have been
+> rebase-merged, which keeps `main` linear.
 
 ## For coding agents: the loop this repo runs
 

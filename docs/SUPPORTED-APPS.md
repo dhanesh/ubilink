@@ -12,7 +12,7 @@ file (see below).
 | Safari | AppleScript (current tab) | the page URL |
 | Google Chrome, Arc, Brave Browser, Microsoft Edge, Vivaldi, Opera | AppleScript (active tab) | the page URL |
 | Finder | AppleScript (POSIX path) | `file://…` |
-| Bear | window title via System Events | `bear://x-callback-url/open-note?title=…` |
+| Bear | its **Note › Copy Link** menu item via System Events (needs Accessibility); the title is read from Bear's local database | Bear's own id-based link, `bear://x-callback-url/open-note?id=…` |
 | Things3 | AppleScript (selected to-do) | `things:///show?id=…` |
 
 These follow patterns ubilink can verify; the broader
@@ -41,7 +41,16 @@ adapter you can switch off, not a built-in); new apps are added. Restart ubilink
 - `script` — the `osascript` that reads the active resource.
 - `fields` — names bound to the script's output.
 - `delimiter` — splits the output into `fields` (omit for a single field).
-- `uri`, `name`, `path` — templates over the fields. Transforms: `{x|urlencode}`, `{x|basename}`.
+- `uri`, `name`, `path` — templates over the fields. Transforms: `{x|urlencode}`,
+  `{x|basename}`, and `{x|mdurl}` / `{x|mdtext}` (the URL or the text of a Markdown
+  `[text](url)` value; a plain value passes through).
+- `schemes` — URI schemes the adapter may emit when `uri` has no literal scheme (e.g.
+  Bear's `{link|mdurl}` declares `bear`). Declared schemes are added to the link
+  allowlist, but a deny-listed scheme (`javascript:`, `data:`, …) is refused anyway.
+- `needs_permission` — defaults to `true` (capture waits for the Automation grant).
+
+Every captured link, from any adapter, passes the same validation as the rest of
+Ubilink (see [`DECISIONS.md`](../DECISIONS.md) D16).
 
 ### Example — Apple Notes
 ```json
