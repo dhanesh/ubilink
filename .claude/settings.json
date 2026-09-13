@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "//": "Shared, portable agent config (R5 scoped trusted tools). Least-privilege: auto-allow the safe verify loop; ASK before anything external or hard-to-reverse (breaks the lethal-trifecta exfil leg); DENY the irrecoverable. Personal/machine-specific hooks live in .claude/settings.local.json (gitignored).",
+  "//": "Shared, portable agent config (R5 scoped trusted tools). Least-privilege: auto-allow the safe verify loop; ASK before anything external or hard-to-reverse (breaks the lethal-trifecta exfil leg); DENY the irrecoverable. Personal/machine-specific hooks live in .claude/settings.local.json (gitignored). Rules are evaluated deny, then ask, then allow; a matching ask prompts even when a broader allow also matches. So `make`, `git stash` and `git branch` stay allowed while their risky forms (make bundle/run*, stash drop/clear/pop, branch -D/-f/-M/--force) ask. Bash rules match command text only (not /bin/rm, sh -c, git -C . push, combined short flags like -uf/-df); they are a guardrail, not a security boundary. File rules use Edit(...): Claude Code never consults Write(path) rules.",
   "permissions": {
     "allow": [
       "Bash(make:*)",
@@ -9,7 +9,6 @@
       "Bash(cargo check:*)",
       "Bash(cargo clippy:*)",
       "Bash(cargo fmt:*)",
-      "Bash(cargo run:*)",
       "Bash(node --test:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
@@ -21,25 +20,55 @@
       "Bash(git commit:*)"
     ],
     "ask": [
+      "Bash(make bundle*)",
+      "Bash(make * bundle*)",
+      "Bash(make run*)",
+      "Bash(make * run*)",
+      "Bash(cargo run:*)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(git stash pop*)",
+      "Bash(git branch -D*)",
+      "Bash(git branch * -D*)",
+      "Bash(git branch -M*)",
+      "Bash(git branch * -M*)",
+      "Bash(git branch -f*)",
+      "Bash(git branch * -f*)",
+      "Bash(git branch *--force*)",
       "Bash(git push:*)",
       "Bash(git reset --hard:*)",
       "Bash(git clean:*)",
       "Bash(gh:*)",
       "Bash(curl:*)",
       "Bash(wget:*)",
+      "Edit(/.github/**)",
+      "Edit(/Makefile)",
+      "Edit(/.claude/**)",
       "WebFetch"
     ],
     "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(git push --force:*)",
-      "Bash(git push -f:*)",
+      "Bash(rm -rf*)",
+      "Bash(rm -fr*)",
+      "Bash(rm -Rf*)",
+      "Bash(rm -fR*)",
+      "Bash(rm -r -f*)",
+      "Bash(rm -f -r*)",
+      "Bash(rm --recursive --force*)",
+      "Bash(rm --force --recursive*)",
+      "Bash(rm * -rf*)",
+      "Bash(rm * -fr*)",
+      "Bash(git push --force*)",
+      "Bash(git push * --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * +*)",
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Read(**/*.pem)",
       "Read(**/*.key)",
       "Read(**/id_rsa)",
       "Read(**/id_ed25519)",
-      "Write(**/.env)"
+      "Edit(**/.env)"
     ]
   }
 }
