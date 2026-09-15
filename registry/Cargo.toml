@@ -8,7 +8,7 @@
 # (no axum/hyper/warp) — zero added supply-chain surface, matching the project ethos.
 [package]
 name = "ubilink-registry"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Signed-integration registry service for ubilink (O4). std-only HTTP, reuses ubilink-core's ed25519 trust model."

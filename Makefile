@@ -28,6 +28,7 @@ UI_PORT  ?= 1420
 .DEFAULT_GOAL := help
 .PHONY: help build build-release build-desktop bundle test test-rust test-js test-desktop \
         validate verify verify-fmt verify-clippy verify-spec check \
+        verify-version test-scripts dist \
         run run-desktop run-ui run-registry fmt clean
 
 help: ## Show available targets
@@ -48,7 +49,7 @@ build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
 bundle: ## Build a signed macOS ubilink.app (stable path so TCC grants persist)
 	bash scripts/bundle-macos.sh
 
-test: test-rust test-js ## Run the fast suites (Rust core + registry, then JS panel)
+test: test-rust test-js test-scripts ## Run the fast suites (Rust core + registry, JS panel, script tests)
 
 test-rust: ## cargo test for the core and registry crates
 	$(CARGO) test $(LOCKED) --manifest-path $(CORE)
@@ -58,6 +59,9 @@ test-js: ## node --test for the panel view-state reducer (zero deps)
 	@# node --test exits 0 when the glob matches nothing — fail loudly instead.
 	@set -- $(UI_DIR)/*.test.mjs; [ -e "$$1" ] || { echo "test-js: no $(UI_DIR)/*.test.mjs found" >&2; exit 1; }
 	$(NODE) --test '$(UI_DIR)/*.test.mjs'
+
+test-scripts: ## Run the shell tests for the release scripts (scripts/test-*.sh)
+	@set -e; for t in scripts/test-*.sh; do bash "$$t"; done
 
 test-desktop: ## cargo test for the Tauri desktop crate (heavy: pulls the Tauri dep tree)
 	$(CARGO) test $(LOCKED) --manifest-path $(DESKTOP)
@@ -69,7 +73,7 @@ validate: ## Validate the Manifold spec (needs the `manifold` CLI)
 # clippy(-D warnings) + all tests across EVERY crate (core, registry, desktop) and
 # the JS panel + optional spec validation. This is the merge gate — CI runs the
 # SAME target (with LOCKED=--locked), so "green locally" means "green in CI".
-verify: verify-fmt verify-clippy test test-desktop verify-spec ## Full agent/CI gate: fmt+lint+test all crates + JS + spec
+verify: verify-fmt verify-clippy verify-version test test-desktop verify-spec ## Full agent/CI gate: fmt+lint+version+test all crates + JS + spec
 	@echo "[verify] all checks passed ✓"
 
 verify-fmt: ## Fail if any crate is unformatted (non-mutating; run 'make fmt' to fix)
@@ -81,6 +85,9 @@ verify-clippy: ## Lint every crate; warnings are errors
 	$(CARGO) clippy $(LOCKED) --manifest-path $(CORE) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(REGISTRY) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(DESKTOP) --all-targets -- -D warnings
+
+verify-version: ## Fail if crate versions, tauri.conf.json or CHANGELOG.md disagree with desktop/Cargo.toml
+	bash scripts/check-version.sh
 
 verify-spec: ## Validate the Manifold spec IF the CLI is present (skips cleanly in a bare env)
 	@if command -v manifold >/dev/null 2>&1; then \
