@@ -337,7 +337,7 @@ resources (10 s socket idle, 30 s request deadline, 64 connections → 503).
 
 **O4 MISSING → PARTIAL, not SATISFIED.** The registry mechanism and the documented
 review process exist and are proven; what remains is *operating a hosted, governed
-instance* (public host, TLS, durable storage, a standing review team) — genuinely
+instance* (public host, TLS, a standing review team; durable storage landed in #14, see D19) — genuinely
 ENV-blocked. Unlike B3 (a purely structural claim), O4 implies a running governed
 channel, so it stays PARTIAL. `satisfied_count` stays 9. 75 cargo + 8 node tests green.
 

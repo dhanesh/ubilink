@@ -251,6 +251,7 @@ async function openSettings(stats) {
   await renderPlugins();
   // stats (use the pushed payload, else fetch)
   renderSettingsStats(stats ?? (await invoke('graph_stats').catch(() => null)));
+  await renderVersion();
   $('set-reset-confirm').hidden = true;
   $('set-feedback').hidden = true;
   fitWindow();
@@ -302,6 +303,17 @@ async function renderPlugins() {
     li.append(label, toggle);
     ul.appendChild(li);
   }
+}
+
+// Settings footer: "Ubilink <version>" so bug reports can name the build. The version
+// comes from Tauri (desktop/Cargo.toml); in a plain-browser preview there is none.
+async function renderVersion() {
+  const el = $('set-version');
+  if (!el) return;
+  let v = null;
+  try { v = await window.__TAURI__?.app?.getVersion?.(); } catch { v = null; }
+  el.hidden = !v;
+  if (v) el.textContent = `Ubilink ${v}`;
 }
 async function settingsExport() {
   try {
