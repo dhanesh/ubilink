@@ -100,8 +100,8 @@ check: verify ## Alias for 'verify' (the full gate)
 
 run: run-desktop ## Run the local OS app (the Tauri desktop panel; needs a desktop session)
 
-run-desktop: ## Build + launch the ubilink desktop app (global hotkey: Cmd/Ctrl+Shift+K)
-	@echo "Launching Ubilink. Summon the panel with Cmd/Ctrl+Shift+K."
+run-desktop: ## Build + launch the ubilink desktop app (global hotkey: Cmd+Shift+K)
+	@echo "Launching Ubilink. Summon the panel with Cmd+Shift+K."
 	@echo "(Grant Automation access on first capture — see docs/RUNBOOK-gui-panel.md.)"
 	$(CARGO) run --manifest-path $(DESKTOP)
 
@@ -118,10 +118,12 @@ run-registry: build ## Run the integration registry server (set UBILINK_TRUSTED_
 	@echo "Starting ubilink-registry on 127.0.0.1:8787 (set UBILINK_TRUSTED_KEYS to allow publishes)"
 	./registry/target/debug/ubilink-registry
 
-fmt: ## Format Rust code in both crates
+fmt: ## Format Rust code in every crate
 	$(CARGO) fmt --manifest-path $(CORE)
 	$(CARGO) fmt --manifest-path $(REGISTRY)
+	$(CARGO) fmt --manifest-path $(DESKTOP)
 
-clean: ## Remove build artifacts from both crates
+clean: ## Remove build artifacts from every crate
 	$(CARGO) clean --manifest-path $(CORE)
 	$(CARGO) clean --manifest-path $(REGISTRY)
+	$(CARGO) clean --manifest-path $(DESKTOP)
