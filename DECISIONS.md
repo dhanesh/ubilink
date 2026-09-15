@@ -612,3 +612,20 @@ built-in registry. `docs/CAPABILITIES.md` is generated from it and pinned by
 (defaults + `adapters.json`) through `UbilinkService::with_capabilities`, so the
 `capabilities` command reports user adapters too. Off macOS, `capability()` explains that the
 adapter needs macOS AppleScript and offers the file-path fallback.
+
+## D21 — Release packaging: Apple-native tools, three modes, draft-only releases
+
+**Date:** 2026-09-14 · **Constraints:** O3, S2 · **Source:** v0.1.0 release design (`docs/superpowers/specs/2026-09-14-v0.1-release-design.md`)
+
+Ubilink ships as a Developer ID–signed, notarized, universal DMG built by
+`scripts/bundle-macos.sh` with Apple's own tools (`lipo`, `codesign --options runtime
+--timestamp`, `hdiutil`, `notarytool`, `stapler`) rather than the Tauri bundler, so the
+job that holds the signing credentials installs no extra tooling and the dev and
+release builds share one script. Modes: `dev` (self-signed, stable TCC grants),
+`dry-run` (ad-hoc, `…-UNNOTARIZED.dmg`) and `release` (notarized + stapled app and DMG).
+The only entitlement is `com.apple.security.automation.apple-events`.
+`scripts/release-mode.sh` picks the mode: all six Apple secrets → release; an rc tag or
+a manual run → dry-run; a final tag without secrets → fail, so an un-notarized build
+can't ship as a final release. `desktop/Cargo.toml` is the only version source
+(`make verify-version`). The pipeline only creates **draft** releases; a maintainer
+publishes after the RC checklist in `docs/RUNBOOK-release.md`.
