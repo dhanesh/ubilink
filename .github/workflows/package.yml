@@ -1,0 +1,54 @@
+# Dry-run packaging (spec §4): on PRs that touch packaging, build the universal,
+# hardened-runtime, ad-hoc-signed DMG and run the packaging script's verify stage, so
+# a broken release is caught before a tag. Never has Apple credentials.
+name: package-dry-run
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "desktop/**"
+      - "Makefile"
+      - "rust-toolchain.toml"
+      - ".github/workflows/**"
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package-dry-run:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust + both macOS targets
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
+        with:
+          toolchain: "1.92.0"
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop
+
+      - name: Script tests
+        run: make test-scripts
+
+      - name: Package (dry run)
+        run: make dist
+
+      - name: Upload the UNNOTARIZED DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ubilink-dmg-dry-run
+          path: desktop/target/bundle/*.dmg
+          if-no-files-found: error
+          retention-days: 7
