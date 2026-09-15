@@ -102,25 +102,6 @@ Not done yet:
   owner to a data directory (`UBILINK_REGISTRY_DATA`), but no public, governed
   instance runs yet ([`docs/RUNBOOK-registry.md`](docs/RUNBOOK-registry.md)).
 
-## Build & test
-
-Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, and Node ≥ 22.13.
-
-```sh
-make verify                  # the merge gate: fmt + clippy + every crate's tests + JS tests
-make verify LOCKED=--locked  # exactly what CI runs
-make test                    # faster loop: core + registry + JS (skips the Tauri build)
-make run                     # build + launch the desktop app
-```
-
-**Node:** the sandbox tests spawn a real `node --permission` process, which needs
-Node ≥ 22.13 (CI uses Node 22). The plugin host runs with an empty environment, so
-the core resolves `node` to an absolute path from the absolute entries on your
-`PATH`. The first `node` found there must be a real binary: a version-manager shim
-that needs `PATH`/`HOME` to find the real `node` will fail.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
-
 ## Install
 
 **Requirements:** macOS 10.15 or later, on Apple silicon or Intel.
@@ -140,6 +121,25 @@ Press **Cmd+Shift+K** to capture, **Cmd+Shift+L** to browse your links, and
 
 **Uninstall:** quit Ubilink, delete it from Applications, and delete
 `~/Library/Application Support/org.dhanesh.ubilink` to remove your link database.
+
+## Build & test
+
+Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, and Node ≥ 22.13.
+
+```sh
+make verify                  # the merge gate: fmt + clippy + every crate's tests + JS tests
+make verify LOCKED=--locked  # exactly what CI runs
+make test                    # faster loop: core + registry + JS (skips the Tauri build)
+make run                     # build + launch the desktop app
+```
+
+**Node:** the sandbox tests spawn a real `node --permission` process, which needs
+Node ≥ 22.13 (CI uses Node 22). The plugin host runs with an empty environment, so
+the core resolves `node` to an absolute path from the absolute entries on your
+`PATH`. The first `node` found there must be a real binary: a version-manager shim
+that needs `PATH`/`HOME` to find the real `node` will fail.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
 
 ## Extending Ubilink
 
