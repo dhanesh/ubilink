@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements for Ubilink.app (spec §3). Every capture sends
+     Apple Events to other apps through `osascript`; a hardened-runtime app cannot
+     do that without this entitlement. Nothing else is granted: no JIT, no unsigned
+     executable memory, no App Sandbox (web content runs in WebKit's own processes). -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>

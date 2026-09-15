@@ -1,118 +1,257 @@
 #!/usr/bin/env bash
-# Build a macOS .app bundle for ubilink WITHOUT tauri-cli — just the release binary
-# (Tauri embeds the frontend at compile time, so it's self-contained) wrapped in a
-# standard bundle, with an .icns icon and an ad-hoc code signature.
+# Build Ubilink.app — and, for the dist modes, a DMG — with Apple's own tools only
+# (no tauri-cli: Tauri embeds the frontend at compile time, so the binary is
+# self-contained). Design: docs/superpowers/specs/2026-09-14-v0.1-release-design.md §3.
 #
-# Why a bundle: macOS TCC (Accessibility / Automation grants) keys on a stable app
-# at a stable path with a stable identity. Granting a bare `cargo run` binary is
-# finicky and re-prompts on rebuild; a signed .app at a fixed path makes the grant
-# stick. Re-running this rebuilds in place, preserving the grant.
+#   bundle-macos.sh dev      host-arch app signed with a stable self-signed identity, so
+#                            macOS keeps Accessibility/Automation grants across rebuilds
+#                            (what `make bundle` runs)
+#   bundle-macos.sh dry-run  universal app + DMG, hardened runtime, ad-hoc signed, named
+#                            …-UNNOTARIZED.dmg (`make dist` without Apple credentials)
+#   bundle-macos.sh release  universal app + DMG, Developer ID, notarized and stapled
+#                            (`make dist` with all six APPLE_* variables — see
+#                            docs/RUNBOOK-release.md)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="ubilink"
+MODE="${1:-dev}"
+# shellcheck source=scripts/release-mode.sh
+. "$ROOT/scripts/release-mode.sh"
+
+APP_NAME="Ubilink"
+EXE="ubilink"
 BUNDLE_ID="org.dhanesh.ubilink"
-VERSION="0.0.1"
-BIN="$ROOT/desktop/target/release/$APP_NAME"
-OUT="$ROOT/desktop/target/release/bundle"
-APP="$OUT/$APP_NAME.app"
+VERSION="$(bash "$ROOT/scripts/version.sh")"
+ENTITLEMENTS="$ROOT/desktop/Ubilink.entitlements"
 SRC_ICON="$ROOT/desktop/icons/icon.png"
+OUT="$ROOT/desktop/target/bundle"
+APP="$OUT/$APP_NAME.app"
+BIN=""
+DMG=""
+KEYCHAIN=""
+WORK="$(mktemp -d)"
 
-echo "[bundle] building release binary…"
-cargo build --release --manifest-path "$ROOT/desktop/Cargo.toml"
-[ -x "$BIN" ] || { echo "error: release binary not found at $BIN" >&2; exit 1; }
+log() { echo "[bundle:$MODE] $*" >&2; }
+die() { echo "[bundle:$MODE] error: $*" >&2; exit 1; }
+cleanup() {
+  if [ -n "$KEYCHAIN" ]; then security delete-keychain "$KEYCHAIN" 2>/dev/null || true; fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
-echo "[bundle] assembling $APP_NAME.app…"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/$APP_NAME"
+case "$MODE" in
+  dev | dry-run) ;;
+  release)
+    n="$(credential_count)"
+    [ "$n" -eq "${#APPLE_VARS[@]}" ] ||
+      die "release mode needs all ${#APPLE_VARS[@]} APPLE_* variables ($n set) — see docs/RUNBOOK-release.md"
+    ;;
+  *) die "unknown mode '$MODE' (expected dev, dry-run or release)" ;;
+esac
 
-# .icns from the source PNG (flat color upscales cleanly to every size).
-if command -v iconutil >/dev/null 2>&1 && [ -f "$SRC_ICON" ]; then
-  ICONSET="$(mktemp -d)/$APP_NAME.iconset"
-  mkdir -p "$ICONSET"
+build_binary() {
+  if [ "$MODE" = dev ]; then
+    log "building the release binary for this Mac…"
+    cargo build --release --manifest-path "$ROOT/desktop/Cargo.toml"
+    BIN="$ROOT/desktop/target/release/$EXE"
+  else
+    local t
+    for t in aarch64-apple-darwin x86_64-apple-darwin; do
+      log "building for ${t}…"
+      cargo build --release --locked --target "$t" --manifest-path "$ROOT/desktop/Cargo.toml"
+    done
+    mkdir -p "$OUT"
+    BIN="$WORK/$EXE-universal"
+    lipo -create -output "$BIN" \
+      "$ROOT/desktop/target/aarch64-apple-darwin/release/$EXE" \
+      "$ROOT/desktop/target/x86_64-apple-darwin/release/$EXE"
+  fi
+  [ -x "$BIN" ] || die "binary not found at $BIN"
+}
+
+assemble_app() {
+  log "assembling $APP_NAME.app ${VERSION}…"
+  [ -f "$SRC_ICON" ] || die "icon source missing: $SRC_ICON"
+  rm -rf "$APP"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+  cp "$BIN" "$APP/Contents/MacOS/$EXE"
+
+  local iconset="$WORK/$APP_NAME.iconset" spec px name
+  mkdir -p "$iconset"
   for spec in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" \
-              "128:128x128" "256:128x128@2x" "256:256x256" "512:256x256@2x" \
-              "512:512x512" "1024:512x512@2x"; do
-    px="${spec%%:*}"; name="${spec##*:}"
-    sips -z "$px" "$px" "$SRC_ICON" --out "$ICONSET/icon_${name}.png" >/dev/null
+    "128:128x128" "256:128x128@2x" "256:256x256" "512:256x256@2x" \
+    "512:512x512" "1024:512x512@2x"; do
+    px="${spec%%:*}"
+    name="${spec##*:}"
+    sips -z "$px" "$px" "$SRC_ICON" --out "$iconset/icon_${name}.png" >/dev/null
   done
-  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
-else
-  echo "[bundle] (no iconutil/icon source — bundling without a custom icon)"
-fi
+  iconutil -c icns "$iconset" -o "$APP/Contents/Resources/icon.icns"
 
-cat > "$APP/Contents/Info.plist" <<PLIST
+  cat >"$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Ubilink</string>
-  <key>CFBundleDisplayName</key><string>Ubilink</string>
+  <key>CFBundleName</key><string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-  <key>CFBundleExecutable</key><string>$APP_NAME</string>
+  <key>CFBundleExecutable</key><string>$EXE</string>
   <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>10.15</string>
   <key>NSHighResolutionCapable</key><true/>
-  <!-- Required so macOS shows a reason on the Automation (Apple Events) prompt
-       instead of killing the app when it scripts Safari/Finder/System Events. -->
+  <!-- Shown on the Automation (Apple Events) prompt when Ubilink scripts another app. -->
   <key>NSAppleEventsUsageDescription</key>
-  <string>ubilink reads the link (URL or file path) of the app you're in, to create a link.</string>
+  <string>Ubilink reads the link (URL or file path) of the app you're in, to create a link.</string>
 </dict>
 </plist>
 PLIST
+  plutil -lint "$APP/Contents/Info.plist" >/dev/null
+}
 
-# Validate the plist, then sign with a STABLE self-signed identity so macOS TCC
-# (Accessibility/Automation) keeps the grant across rebuilds. Ad-hoc signing
-# (`--sign -`) gives a fresh code-hash each rebuild with no stable "designated
-# requirement", so TCC drops the grant whenever the binary changes. A self-signed
-# cert — created once in the login keychain, reused forever — gives the app a
-# consistent identity, so you grant permissions ONCE and they persist.
-plutil -lint "$APP/Contents/Info.plist" >/dev/null
-
-SIGN_IDENTITY="Ubilink Self-Signed"
-if ! security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
-  echo "[bundle] creating a one-time self-signed code-signing identity ($SIGN_IDENTITY)…"
-  # Build a code-signing cert non-interactively and import it into the login keychain.
-  TMP="$(mktemp -d)"
-  cat > "$TMP/req.cnf" <<CNF
+# A stable self-signed identity for dev builds: macOS keys Accessibility/Automation
+# grants to the signing identity, so ad-hoc dev builds would lose them on every
+# rebuild. Prints the identity name (or "-" for ad-hoc if it can't be created).
+ensure_dev_identity() {
+  local id="Ubilink Self-Signed" tmp
+  if ! security find-certificate -c "$id" >/dev/null 2>&1; then
+    log "creating a one-time self-signed code-signing identity ($id)…"
+    tmp="$WORK/dev-identity"
+    mkdir -p "$tmp"
+    cat >"$tmp/req.cnf" <<CNF
 [ req ]
 distinguished_name = dn
 prompt = no
 x509_extensions = v3
 [ dn ]
-CN = $SIGN_IDENTITY
+CN = $id
 [ v3 ]
 keyUsage = critical, digitalSignature
 extendedKeyUsage = critical, codeSigning
 basicConstraints = critical, CA:false
 CNF
-  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-    -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/req.cnf" >/dev/null 2>&1
-  # -legacy + a transport password: Apple's `security` can't verify the PKCS12 MAC
-  # that OpenSSL 3.x writes by default, and rejects an empty-password p12. A legacy
-  # MAC with a throwaway password imports cleanly (the password only protects the
-  # temp file, never stored).
-  openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -name "$SIGN_IDENTITY" -out "$TMP/id.p12" -passout pass:ubilink-bundle >/dev/null 2>&1
-  # -T /usr/bin/codesign pre-authorizes codesign to use the key (first sign may show
-  # a one-time keychain prompt — click "Always Allow").
-  security import "$TMP/id.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
-    -P "ubilink-bundle" -T /usr/bin/codesign >/dev/null 2>&1
-  rm -rf "$TMP"
-fi
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -keyout "$tmp/key.pem" -out "$tmp/cert.pem" -config "$tmp/req.cnf" >/dev/null 2>&1
+    # -legacy + a throwaway transport password: Apple's `security` rejects OpenSSL 3's
+    # default PKCS12 MAC and empty-password p12s.
+    openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+      -name "$id" -out "$tmp/id.p12" -passout pass:ubilink-bundle >/dev/null 2>&1
+    security import "$tmp/id.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
+      -P "ubilink-bundle" -T /usr/bin/codesign >/dev/null 2>&1
+  fi
+  if security find-certificate -c "$id" >/dev/null 2>&1; then
+    echo "$id"
+  else
+    log "WARNING: self-signed identity unavailable; signing ad-hoc (grants reset on rebuild)"
+    echo "-"
+  fi
+}
 
-if security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
-  codesign --force --sign "$SIGN_IDENTITY" "$APP"
-  echo "[bundle] signed with stable identity '$SIGN_IDENTITY' — TCC grants persist across rebuilds."
-else
-  echo "[bundle] WARNING: self-signed identity unavailable; falling back to ad-hoc (grants reset on rebuild)."
-  codesign --force --sign - "$APP"
-fi
+# Import the Developer ID certificate into a temporary keychain that is deleted on exit.
+import_developer_id() {
+  local kc_pass p12="$WORK/cert.p12"
+  KEYCHAIN="$WORK/ubilink-signing.keychain-db"
+  kc_pass="$(openssl rand -hex 24)"
+  security create-keychain -p "$kc_pass" "$KEYCHAIN"
+  security set-keychain-settings -lut 3600 "$KEYCHAIN"
+  security unlock-keychain -p "$kc_pass" "$KEYCHAIN"
+  printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode >"$p12"
+  security import "$p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+  rm -f "$p12"
+  security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$KEYCHAIN" >/dev/null
+  # Search the temporary keychain first so codesign finds the identity.
+  # shellcheck disable=SC2046
+  security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+}
 
-echo "[bundle] done: $APP"
-echo "[bundle] grant Accessibility + Automation to THIS app once (drag it into the"
-echo "         System Settings panes, or launch it and use the in-app onboarding)."
+sign_app() { # IDENTITY
+  local args=(--force --options runtime --entitlements "$ENTITLEMENTS" --sign "$1")
+  if [ "$MODE" = release ]; then args+=(--timestamp); fi
+  codesign "${args[@]}" "$APP"
+}
+
+notarize() { # FILE (a .zip of the app, or the .dmg)
+  local key="$WORK/AuthKey_${APPLE_API_KEY_ID}.p8" result status id
+  result="$WORK/notary-$(basename "$1").json"
+  [ -f "$key" ] || printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode >"$key"
+  log "notarizing $(basename "$1") (waits for Apple)…"
+  xcrun notarytool submit "$1" --key "$key" --key-id "$APPLE_API_KEY_ID" \
+    --issuer "$APPLE_API_ISSUER" --wait --timeout 30m --output-format json >"$result" || true
+  status="$(plutil -extract status raw -o - "$result" 2>/dev/null || echo "unknown")"
+  if [ "$status" != "Accepted" ]; then
+    id="$(plutil -extract id raw -o - "$result" 2>/dev/null || echo "unknown")"
+    xcrun notarytool log "$id" --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" >&2 || true
+    die "notarization of $(basename "$1") returned '$status' (submission $id)"
+  fi
+}
+
+make_dmg() {
+  local stage="$WORK/dmg"
+  if [ "$MODE" = release ]; then
+    DMG="$OUT/$APP_NAME-$VERSION-universal.dmg"
+  else
+    DMG="$OUT/$APP_NAME-$VERSION-universal-UNNOTARIZED.dmg"
+  fi
+  log "creating $(basename "$DMG")…"
+  mkdir -p "$stage"
+  cp -R "$APP" "$stage/"
+  ln -s /Applications "$stage/Applications"
+  rm -f "$DMG"
+  hdiutil create -volname "$APP_NAME" -srcfolder "$stage" -ov -format UDZO "$DMG" >/dev/null
+  if [ "$MODE" = release ]; then
+    codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+  else
+    codesign --force --sign - "$DMG"
+  fi
+}
+
+verify_outputs() {
+  log "verifying…"
+  local exe="$APP/Contents/MacOS/$EXE" archs ents keys plist="$APP/Contents/Info.plist"
+  if [ "$MODE" != dev ]; then
+    archs="$(lipo -archs "$exe")"
+    case " $archs " in *" arm64 "*) ;; *) die "no arm64 slice (have: $archs)" ;; esac
+    case " $archs " in *" x86_64 "*) ;; *) die "no x86_64 slice (have: $archs)" ;; esac
+  fi
+  codesign --verify --deep --strict --verbose=2 "$APP"
+  ents="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
+  keys="$(printf '%s' "$ents" | grep -o '<key>[^<]*</key>' || true)"
+  [ "$keys" = "<key>com.apple.security.automation.apple-events</key>" ] ||
+    die "entitlements must be exactly the Apple Events entitlement, got: ${keys:-none}"
+  [ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" = "$VERSION" ] ||
+    die "Info.plist version is not $VERSION"
+  plutil -extract NSAppleEventsUsageDescription raw -o - "$plist" >/dev/null ||
+    die "Info.plist has no NSAppleEventsUsageDescription"
+  if [ -n "$DMG" ]; then hdiutil verify "$DMG" >/dev/null; fi
+  if [ "$MODE" = release ]; then
+    spctl -a -t exec -vv "$APP"
+    xcrun stapler validate "$APP"
+    xcrun stapler validate "$DMG"
+  fi
+}
+
+build_binary
+assemble_app
+case "$MODE" in
+  dev) sign_app "$(ensure_dev_identity)" ;;
+  dry-run) sign_app - ;;
+  release)
+    import_developer_id
+    sign_app "$APPLE_SIGNING_IDENTITY"
+    ditto -c -k --keepParent "$APP" "$WORK/$APP_NAME.zip"
+    notarize "$WORK/$APP_NAME.zip"
+    xcrun stapler staple "$APP"
+    ;;
+esac
+if [ "$MODE" != dev ]; then make_dmg; fi
+if [ "$MODE" = release ]; then
+  notarize "$DMG"
+  xcrun stapler staple "$DMG"
+fi
+verify_outputs
+log "done: $APP${DMG:+ and $DMG}"
+if [ "$MODE" = dev ]; then
+  log "grant Accessibility + Automation to THIS app once (or use the in-app onboarding)."
+fi
