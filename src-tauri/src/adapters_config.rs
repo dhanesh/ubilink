@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn bear_spec_urlencodes_the_title_into_the_scheme() {
+    fn urlencode_transform_escapes_a_title_into_a_scheme_uri() {
         let spec = AdapterSpec {
             app: "Bear".into(),
             script: "…".into(),
