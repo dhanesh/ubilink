@@ -46,8 +46,11 @@ build-release: ## Build all crates optimized (release)
 build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
 	$(CARGO) build $(LOCKED) --manifest-path $(DESKTOP)
 
-bundle: ## Build a signed macOS ubilink.app (stable path so TCC grants persist)
-	bash scripts/bundle-macos.sh
+bundle: ## Build Ubilink.app for local use (stable self-signed identity so macOS keeps permission grants)
+	bash scripts/bundle-macos.sh dev
+
+dist: ## Universal DMG: notarized when all six APPLE_* credentials are set, else an UNNOTARIZED dry run
+	@mode="$$(bash scripts/release-mode.sh "$${GITHUB_REF:-}")" && bash scripts/bundle-macos.sh "$$mode"
 
 test: test-rust test-js test-scripts ## Run the fast suites (Rust core + registry, JS panel, script tests)
 

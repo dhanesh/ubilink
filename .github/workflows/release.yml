@@ -1,26 +1,21 @@
-# Satisfies: O3 (CI signed builds). On a release tag, this pipeline runs the full
-# `make verify` gate, then SIGNS each release integration bundle with the org's
-# ed25519 signing key (a CI secret, never a dev laptop) and SELF-VERIFIES the
-# artifact before uploading it. The signing/verify logic is `ubilink_core::release`,
-# proven by unit tests in src/release.rs; this workflow is the operational wiring
-# O3 needs. Setup (one-time) is in docs/RUNBOOK-ci-signing.md.
-#
-# Hardening (this job holds UBILINK_SIGNING_KEY):
-#   - every `uses:` pinned to a full commit SHA (same pins as ci.yml);
-#   - `environment: release` — the key lives in that environment, gated by
-#     required reviewers and a main/v* deployment rule (see the runbook);
-#   - manual runs only proceed from `main`; tag runs only for `v*` tags;
-#   - `make verify` (same gate as ci.yml, same macOS runner) must pass BEFORE
-#     the signing steps, which are the only steps that receive the secret;
-#   - no build cache is restored, so a poisoned cache can't reach the signer.
-name: release-signed-build
+# Release pipeline (spec §4; runbook: docs/RUNBOOK-release.md).
+#   verify ─┬─ build-app ─────────┬─ draft-release   (tags only)
+#           └─ sign-integrations ─┘
+# - A tag must equal the app version (desktop/Cargo.toml): vX.Y.Z or vX.Y.Z-rc.N.
+# - build-app is notarized when all six APPLE_* secrets exist in the `release`
+#   environment; an rc tag or a manual run may produce an UNNOTARIZED dry-run DMG; a
+#   final tag without credentials FAILS (scripts/release-mode.sh).
+# - The release is only ever a DRAFT; a maintainer publishes it after the RC checklist.
+# - Least privilege: everything is `contents: read` except draft-release. Every
+#   `uses:` is pinned to a commit SHA (same pins as ci.yml). No build cache in the
+#   signing jobs, so a poisoned cache can't reach a signer.
+name: release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch: {}
 
-# Serialize releases per ref and never cancel one mid-signing.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -29,16 +24,83 @@ permissions:
   contents: read
 
 jobs:
-  signed-build:
+  verify:
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    environment: release
-    # Same runner family as ci.yml: the product is macOS-only, and on Linux the
-    # sandbox-exec network-jail test passes vacuously.
     runs-on: macos-latest
-    # Cold build (no cache by design) of every crate incl. the Tauri desktop crate.
     timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust + rustfmt + clippy
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
+        with:
+          toolchain: "1.92.0"
+          components: rustfmt, clippy
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: App version
+        id: version
+        run: echo "version=$(bash scripts/version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/release-mode.sh --check-tag "$GITHUB_REF" "${{ steps.version.outputs.version }}"
+
+      - name: make verify
+        run: make verify LOCKED=--locked
+
+  build-app:
+    needs: verify
+    environment: release
+    runs-on: macos-latest
+    # Cold (uncached) builds for two architectures, plus notarization waits.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust + both macOS targets
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
+        with:
+          toolchain: "1.92.0"
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Mode from scripts/release-mode.sh: release (all six secrets) | dry-run (rc tag
+      # or manual run) | fail (final tag without secrets). The secrets are exposed to
+      # this step only.
+      - name: Package
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: make dist
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ubilink-dmg
+          path: desktop/target/bundle/*.dmg
+          if-no-files-found: error
+
+  sign-integrations:
+    needs: verify
+    environment: release
+    runs-on: macos-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: src-tauri
@@ -47,34 +109,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # Same pinned toolchain as ci.yml / rust-toolchain.toml (1.92.0). The action
-      # does not read rust-toolchain.toml, so the version is passed explicitly.
-      - name: Install pinned Rust + rustfmt + clippy
+      - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master @ 2026-09-12
         with:
           toolchain: "1.92.0"
-          components: rustfmt, clippy
-
-      # Same as ci.yml: the sandbox tests spawn `node --permission` (needs >= 22.13).
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-
-      # The full gate (fmt + clippy + every test suite incl. the S2 zero-egress dep
-      # guard) must be green before anything is signed.
-      - name: make verify
-        working-directory: ${{ github.workspace }}
-        run: make verify LOCKED=--locked
 
       - name: Build signer
         run: cargo build --locked --release --bin ubilink-sign
 
-      - name: Sign the release bundle
+      - name: Sign the release integration bundle
         env:
-          # 64-hex ed25519 signing key. Generate once with `openssl rand -hex 32`
-          # and store it as a `release` environment secret — see
-          # docs/RUNBOOK-ci-signing.md.
           UBILINK_SIGNING_KEY: ${{ secrets.UBILINK_SIGNING_KEY }}
         run: |
           set -euo pipefail
@@ -86,13 +130,11 @@ jobs:
             > dist/benign.signed.json
           echo "Signed by pubkey: $(./target/release/ubilink-sign pubkey)"
 
-      - name: Self-verify the signed artifact (fail the build if it doesn't validate)
+      - name: Self-verify the signed bundle
         env:
           UBILINK_SIGNING_KEY: ${{ secrets.UBILINK_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          # Trust exactly the key we just signed with; a real consumer would pin the
-          # published release pubkey here instead.
           UBILINK_TRUSTED_KEYS="$(./target/release/ubilink-sign pubkey)" \
             ./target/release/ubilink-sign verify --bundle dist/benign.signed.json
 
@@ -102,3 +144,48 @@ jobs:
           name: signed-bundles
           path: src-tauri/dist/*.signed.json
           if-no-files-found: error
+
+  draft-release:
+    needs: [verify, build-app, sign-integrations]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the draft release
+      actions: read # gh run download (this run's artifacts)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Collect artifacts and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir artifacts
+          mkdir -p out
+          find artifacts -type f \( -name '*.dmg' -o -name '*.signed.json' \) -exec cp {} out/ \;
+          (cd out && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          bash scripts/changelog-section.sh "${{ needs.verify.outputs.version }}" > notes.md
+          cat >> notes.md <<'NOTES'
+
+          ---
+          **Install:** download the `.dmg`, check it with `shasum -a 256 -c SHA256SUMS`,
+          open it and drag Ubilink to Applications. A `-UNNOTARIZED` DMG is a pre-release
+          dry run: macOS will warn before opening it.
+          NOTES
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pre=()
+          case "$GITHUB_REF_NAME" in *-*) pre=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft "${pre[@]}" \
+            --title "Ubilink $GITHUB_REF_NAME" --notes-file notes.md out/*
