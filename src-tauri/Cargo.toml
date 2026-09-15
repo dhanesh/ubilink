@@ -8,7 +8,7 @@
 # Dep tree kept tiny (serde + serde_json only) so `cargo test` builds fast.
 [package]
 name = "ubilink-core"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Capability broker + separate-process plugin sandbox spike for ubilink (Linking Manifesto app)."

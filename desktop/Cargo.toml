@@ -7,7 +7,7 @@
 # shell; all logic lives in ubilink-core and is unit-tested without a display.
 [package]
 name = "ubilink-desktop"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Tauri desktop shell for ubilink — wires the panel UI to ubilink-core's command contract."
