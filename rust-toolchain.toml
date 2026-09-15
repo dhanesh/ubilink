@@ -6,3 +6,5 @@
 [toolchain]
 channel = "1.92.0"
 components = ["rustfmt", "clippy"]
+# Both macOS architectures, for the universal release build (scripts/bundle-macos.sh).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
