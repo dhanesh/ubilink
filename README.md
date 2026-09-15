@@ -18,8 +18,9 @@ all locally, privately, and extensibly. It is a clean-room, open implementation 
 2. **API** — a programmatic way to obtain or construct a link (its address + name).
 
 Plus what makes it a *tool*: a stored, bidirectional link graph (open A → see B as a
-backlink, and vice-versa), best-effort link survival when resources move, and a
-third-party integration system so anyone can add support for new apps.
+backlink, and vice-versa), best-effort link survival when resources move, and app
+adapters you can extend yourself. A sandboxed third-party integration system is built
+and tested, and is coming to the app in a later release.
 
 ## Architecture
 
@@ -120,11 +121,36 @@ that needs `PATH`/`HOME` to find the real `node` will fail.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
 
+## Install
+
+**Requirements:** macOS 10.15 or later, on Apple silicon or Intel.
+
+1. Download the latest `Ubilink-<version>-universal.dmg` and `SHA256SUMS` from
+   [Releases](https://github.com/dhanesh/ubilink/releases).
+2. Check the download: `shasum -a 256 -c SHA256SUMS` (the `.dmg` line should say `OK`).
+3. Open the DMG and drag **Ubilink** to **Applications**, then launch it.
+
+**First run:** Ubilink asks for two macOS permissions — **Automation** (so it can read
+the link of the app you're in) and **Accessibility** (for the global shortcuts). The
+in-app onboarding walks you through both. If you ran a development build before, macOS
+asks once more for the released app.
+
+Press **Cmd+Shift+K** to capture, **Cmd+Shift+L** to browse your links, and
+**Cmd+Shift+,** for settings.
+
+**Uninstall:** quit Ubilink, delete it from Applications, and delete
+`~/Library/Application Support/org.dhanesh.ubilink` to remove your link database.
+
 ## Extending Ubilink
 
-Add support for a new app by writing an **integration**: a manifest (declaring the
-capabilities it needs) plus sandboxed JS. See [`plugins/README.md`](plugins/README.md)
-and the manifest schema at [`schema/integration.manifest.schema.json`](schema/integration.manifest.schema.json).
+Today you add support for a new app with an **app adapter**: a JSON entry in your own
+`adapters.json` (see [`docs/SUPPORTED-APPS.md`](docs/SUPPORTED-APPS.md)). Adapters are
+trusted local config that run with your permissions.
+
+Sandboxed third-party **integrations** — a manifest declaring the capabilities they
+need plus JS that runs in the Node sandbox — are built and tested but not yet enabled
+in the app. See [`plugins/README.md`](plugins/README.md) and the manifest schema at
+[`schema/integration.manifest.schema.json`](schema/integration.manifest.schema.json).
 
 ## License
 
