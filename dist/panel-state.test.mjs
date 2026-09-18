@@ -90,3 +90,48 @@ test('H3: toggle failed but Accessibility IS granted -> conflict case names the 
   assert.match(msg, /another app/i);
   assert.match(msg, /tray/i);
 });
+
+// Round 2: hotkeyWarning used to only look at `toggle`. hotkeysRegistered()
+// (panel.js) blocks onboarding on ANY of the three failing, so browse/settings
+// failing alone left the user stuck on onboarding with an EMPTY warning — the
+// exact bug this feature exists to remove, just moved to a different shortcut.
+
+test('H4: browse (⌘⇧L) fails alone, Accessibility granted -> names ⌘⇧L, not ⌘⇧K', () => {
+  const hotkeys = { toggle: true, browse: false, settings: true, error: 'already registered' };
+  const report = { accessibility: true, automation: 'granted' };
+  const msg = hotkeyWarning(hotkeys, report);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /⌘⇧L/);
+  assert.doesNotMatch(msg, /⌘⇧K/);
+  assert.match(msg, /another app/i);
+  assert.match(msg, /tray/i);
+});
+
+test('H5: settings (⌘⇧,) fails alone, Accessibility not granted -> names ⌘⇧, and needs Accessibility', () => {
+  const hotkeys = { toggle: true, browse: true, settings: false, error: 'not permitted' };
+  const report = { accessibility: false, automation: 'granted' };
+  const msg = hotkeyWarning(hotkeys, report);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /⌘⇧,/);
+  assert.doesNotMatch(msg, /⌘⇧K/);
+  assert.doesNotMatch(msg, /⌘⇧L/);
+  assert.match(msg, /accessibility/i);
+});
+
+test('H6: toggle plus one other (browse) both fail -> both are named, one coherent message', () => {
+  const hotkeys = { toggle: false, browse: false, settings: true, error: 'already registered' };
+  const report = { accessibility: true, automation: 'granted' };
+  const msg = hotkeyWarning(hotkeys, report);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /⌘⇧K/);
+  assert.match(msg, /⌘⇧L/);
+  assert.doesNotMatch(msg, /⌘⇧,/);
+  // One sentence naming both, not three stacked warnings.
+  assert.equal((msg.match(/another app/gi) || []).length, 1);
+});
+
+test('H7: all three registered -> no warning, even if permissions are incomplete', () => {
+  const hotkeys = { toggle: true, browse: true, settings: true, error: null };
+  const report = { accessibility: false, automation: 'granted' };
+  assert.equal(hotkeyWarning(hotkeys, report), '');
+});

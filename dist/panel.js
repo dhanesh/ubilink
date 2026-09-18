@@ -439,7 +439,11 @@ function renderPermStatuses(report, hotkeys) {
   setPerm('accessibility', report.accessibility === true, report.accessibility ? 'granted' : 'not granted');
   const autoOk = report.automation === 'granted';
   setPerm('automation', autoOk, report.automation.replace('_', ' '));
-  $('onboarding-hint').textContent = permissionsComplete(report)
+  // Round 2: this used to say "All set" whenever permissions alone were
+  // complete, even while a hotkey was still dead (e.g. browse/settings failed
+  // to register) — the same "stuck with no explanation" bug the warning above
+  // exists to fix, just in the hint text instead of an empty warning.
+  $('onboarding-hint').textContent = permissionsComplete(report) && hotkeysRegistered(hotkeys)
     ? 'All set — press ⌘⇧K from any supported app.'
     : 'Grant the items above, then press Re-check.';
   const warning = hotkeyWarning(hotkeys, report);
