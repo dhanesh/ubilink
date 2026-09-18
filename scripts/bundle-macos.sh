@@ -115,11 +115,21 @@ PLIST
 # grants to the signing identity, so ad-hoc dev builds would lose them on every
 # rebuild. Prints the identity name (or "-" for ad-hoc if it can't be created).
 ensure_dev_identity() {
-  local id="Ubilink Self-Signed" tmp
-  if ! security find-certificate -c "$id" >/dev/null 2>&1; then
+  local id="Ubilink Self-Signed" tmp err=""
+  # Look for an IDENTITY (certificate + private key), not just a certificate:
+  # find-certificate succeeds on a cert whose private key never imported, which
+  # still leaves codesign unable to sign with it — a false success that sends the
+  # build down the signed path and then fails confusingly.
+  # NOT `find-identity -v`: -v lists only identities macOS considers VALID, and a
+  # self-signed certificate has no trust chain, so it is reported as
+  # CSSMERR_TP_NOT_TRUSTED and omitted — even though codesign signs with it fine.
+  # Using -v here silently recreated and re-imported the identity on every build,
+  # stacking duplicate certificates in the login keychain and still signing ad-hoc.
+  if ! security find-identity -p codesigning 2>/dev/null | grep -Fq "$id"; then
     log "creating a one-time self-signed code-signing identity ($id)…"
     tmp="$WORK/dev-identity"
     mkdir -p "$tmp"
+    err="$tmp/openssl.log"
     cat >"$tmp/req.cnf" <<CNF
 [ req ]
 distinguished_name = dn
@@ -133,18 +143,31 @@ extendedKeyUsage = critical, codeSigning
 basicConstraints = critical, CA:false
 CNF
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-      -keyout "$tmp/key.pem" -out "$tmp/cert.pem" -config "$tmp/req.cnf" >/dev/null 2>&1
-    # -legacy + a throwaway transport password: Apple's `security` rejects OpenSSL 3's
-    # default PKCS12 MAC and empty-password p12s.
+      -keyout "$tmp/key.pem" -out "$tmp/cert.pem" -config "$tmp/req.cnf" >>"$err" 2>&1
+    # A throwaway transport password, because Apple's `security` rejects
+    # empty-password p12s. OpenSSL 3 additionally needs -legacy (its default PKCS12
+    # MAC is rejected too), but LibreSSL — which IS /usr/bin/openssl on a stock Mac —
+    # has no such flag and fails outright when given it. So try -legacy, then fall
+    # back, rather than assuming a build: assuming OpenSSL 3 silently produced ad-hoc
+    # dev builds on every machine without Homebrew's openssl first on PATH, and an
+    # ad-hoc signature makes macOS discard the app's Accessibility/Automation grants
+    # on every single rebuild.
     openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
-      -name "$id" -out "$tmp/id.p12" -passout pass:ubilink-bundle >/dev/null 2>&1
+      -name "$id" -out "$tmp/id.p12" -passout pass:ubilink-bundle >>"$err" 2>&1 ||
+      openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+        -name "$id" -out "$tmp/id.p12" -passout pass:ubilink-bundle >>"$err" 2>&1
     security import "$tmp/id.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
-      -P "ubilink-bundle" -T /usr/bin/codesign >/dev/null 2>&1
+      -P "ubilink-bundle" -T /usr/bin/codesign >>"$err" 2>&1
   fi
-  if security find-certificate -c "$id" >/dev/null 2>&1; then
+  if security find-identity -p codesigning 2>/dev/null | grep -Fq "$id"; then
     echo "$id"
   else
     log "WARNING: self-signed identity unavailable; signing ad-hoc (grants reset on rebuild)"
+    # Say WHY. This fallback used to discard every error, so a stock-Mac failure was
+    # undiagnosable from the build log and looked like a deliberate choice.
+    if [ -n "$err" ] && [ -s "$err" ]; then
+      log "  cause: $(tail -3 "$err" | tr '\n' ' ')"
+    fi
     echo "-"
   fi
 }
