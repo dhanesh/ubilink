@@ -174,8 +174,15 @@ import_developer_id() {
     line="${line#\"}"; line="${line%\"}"      # strip the surrounding quotes
     [ -n "$line" ] && existing+=("$line")
   done < <(security list-keychains -d user)
-  # Search the temporary keychain first so codesign finds the identity.
-  security list-keychains -d user -s "$KEYCHAIN" "${existing[@]}"
+  # Search the temporary keychain first so codesign finds the identity. Guarded:
+  # under bash 3.2 (macOS's /bin/bash) with `set -u`, expanding an EMPTY array as
+  # "${existing[@]}" is itself an unbound-variable error (fixed only in bash
+  # 4.4+), so branch instead of relying on that expansion when the list is empty.
+  if [ "${#existing[@]}" -gt 0 ]; then
+    security list-keychains -d user -s "$KEYCHAIN" "${existing[@]}"
+  else
+    security list-keychains -d user -s "$KEYCHAIN"
+  fi
 }
 
 sign_app() { # IDENTITY
