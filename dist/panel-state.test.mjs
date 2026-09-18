@@ -2,7 +2,7 @@
 // node's built-in runner: `node --test dist/`. Keeps S2 honest (no third-party JS).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
+import { reduce, canConfirm, copyPayload, explanation, permissionsComplete, hotkeyWarning } from './panel-state.mjs';
 
 test('U1: open() resolves to capturing synchronously, without capture data', () => {
   const s = reduce({ phase: 'idle' }, { type: 'open' });
@@ -64,4 +64,29 @@ test('S4: onboarding is complete only when BOTH permissions are in place', () =>
   assert.equal(permissionsComplete({ accessibility: true, automation: 'denied' }), false);
   assert.equal(permissionsComplete({ accessibility: true, automation: 'not_determined' }), false);
   assert.equal(permissionsComplete(null), false);
+});
+
+test('H1: no warning when every hotkey registered', () => {
+  const hotkeys = { toggle: true, browse: true, settings: true, error: null };
+  const report = { accessibility: true, automation: 'granted' };
+  assert.equal(hotkeyWarning(hotkeys, report), '');
+});
+
+test('H2: toggle failed and Accessibility is not granted -> says the hotkey needs it', () => {
+  const hotkeys = { toggle: false, browse: true, settings: true, error: 'not permitted' };
+  const report = { accessibility: false, automation: 'granted' };
+  const msg = hotkeyWarning(hotkeys, report);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /accessibility/i);
+});
+
+test('H3: toggle failed but Accessibility IS granted -> conflict case names the tray', () => {
+  const hotkeys = { toggle: false, browse: true, settings: true, error: 'already registered' };
+  const report = { accessibility: true, automation: 'granted' };
+  const msg = hotkeyWarning(hotkeys, report);
+  assert.ok(msg.length > 0);
+  // Must not blame a missing permission the user already granted.
+  assert.doesNotMatch(msg, /needs? accessibility/i);
+  assert.match(msg, /another app/i);
+  assert.match(msg, /tray/i);
 });

@@ -74,3 +74,27 @@ export function explanation(state) {
 export function permissionsComplete(report) {
   return !!report && report.accessibility === true && report.automation === 'granted';
 }
+
+/**
+ * Defect 1/2 (hotkey registration is invisible + never retried): decide what, if
+ * anything, to tell the user about the global hotkeys. Pure — `hotkeys` is the
+ * Rust `HotkeyReport` ({toggle, browse, settings}: bool, `error`: string|null) and
+ * `report` is the `PermissionReport`. Onboarding keys off PERMISSIONS, not
+ * registration, so this is what tells the user when permissions are fine but the
+ * hotkey is still dead (e.g. another app already owns ⌘⇧K).
+ *
+ * Returns '' when every shortcut registered; otherwise a specific, actionable
+ * message. ⌘⇧K (`toggle`) is the one users actually feel missing, so it drives
+ * the message even if `browse`/`settings` also failed.
+ */
+export function hotkeyWarning(hotkeys, report) {
+  if (!hotkeys) return '';
+  if (hotkeys.toggle && hotkeys.browse && hotkeys.settings) return '';
+  if (!permissionsComplete(report) || report.accessibility !== true) {
+    return 'The ⌘⇧K hotkey needs Accessibility permission to work. Grant it above, then it will start working — no relaunch needed.';
+  }
+  if (!hotkeys.toggle) {
+    return "⌘⇧K didn't register — another app is likely already using it. Use the tray icon (\"Show ubilink\") to open the panel, then free up the shortcut and press Re-check.";
+  }
+  return '';
+}
