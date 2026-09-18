@@ -32,6 +32,9 @@ struct AppState {
     disabled: Mutex<std::collections::HashSet<String>>,
     /// Where plugins-state.json lives (so toggles persist across launches).
     data_dir: std::path::PathBuf,
+    /// Latest hotkey registration outcome (Defect 1/2): set at startup, and again
+    /// by `retry_hotkeys`; read by `hotkey_status`.
+    hotkeys: Mutex<HotkeyReport>,
 }
 
 /// One row in the plugin manager: a supported app, whether it's a built-in
@@ -80,15 +83,24 @@ fn save_disabled(
     std::fs::write(data_dir.join("plugins-state.json"), body.to_string()).map_err(|e| e.to_string())
 }
 
-/// Capture the resource of whatever app is frontmost RIGHT NOW: detect it, look up
-/// its declarative adapter (adapters_config), capture+validate+surface-backlinks.
-/// Called from the hotkey handler (before the panel steals focus) and the
-/// `capture_current` command. U3 explains an unsupported app instead of failing.
-fn capture_now(state: &AppState) -> Result<PanelView, String> {
-    let frontmost = OsaScriptRunner
+/// Detect the frontmost application RIGHT NOW (osascript). Split out of
+/// `capture_now` (Defect 3 — the panel used to be shown before it was focused)
+/// so the ⌘⇧K handler can detect first, focus the panel immediately, and only
+/// then do the slower per-app capture work — WITHOUT moving `set_focus()` ahead
+/// of detection itself, which would risk the panel becoming key window before we
+/// know which app to capture from and breaking the product's core feature.
+fn detect_frontmost() -> Result<String, String> {
+    OsaScriptRunner
         .run("osascript", &["-e", FRONTMOST_APP_SCRIPT])
-        .map_err(|e| format!("Couldn't tell which app is active: {e}"))?;
-    let spec = state.adapters.for_app(&frontmost).ok_or_else(|| {
+        .map_err(|e| format!("Couldn't tell which app is active: {e}"))
+}
+
+/// Capture the resource of `frontmost`: look up its declarative adapter
+/// (adapters_config), capture+validate+surface-backlinks. Everything `capture_now`
+/// used to do once it had a frontmost-app name in hand. U3 explains an unsupported
+/// app instead of failing silently.
+fn capture_from(state: &AppState, frontmost: &str) -> Result<PanelView, String> {
+    let spec = state.adapters.for_app(frontmost).ok_or_else(|| {
         format!(
             "Linking from \u{201c}{}\u{201d} isn't supported yet.",
             frontmost.trim()
@@ -116,6 +128,16 @@ fn capture_now(state: &AppState) -> Result<PanelView, String> {
     // Takes the backend lock only around its fast reads/writes, never across the
     // (possibly stalled) osascript call, so other commands stay responsive.
     PanelBackend::capture_current(&state.backend, &adapter, now)
+}
+
+/// Capture the resource of whatever app is frontmost right now: detect it, then
+/// capture from it. Kept as the composition of `detect_frontmost` + `capture_from`
+/// so the `capture_current` command's synchronous behavior is unchanged; the ⌘⇧K
+/// handler calls the two halves separately so it can focus the panel in between
+/// (see the `with_handler` closure in `main`).
+fn capture_now(state: &AppState) -> Result<PanelView, String> {
+    let frontmost = detect_frontmost()?;
+    capture_from(state, &frontmost)
 }
 
 #[tauri::command]
@@ -351,6 +373,106 @@ fn dismiss_panel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Defect 1: a failed hotkey registration used to be invisible (only `eprintln!`'d,
+/// which a packaged .app has no terminal to show). This is the report the frontend
+/// can actually query — per shortcut, whether it registered, plus a human-readable
+/// error for the FIRST failure (the important one — an app with 3 dead shortcuts and
+/// one already-explained cause doesn't need three redundant error strings).
+#[derive(serde::Serialize, Clone, Default, Debug, PartialEq)]
+struct HotkeyReport {
+    toggle: bool,
+    browse: bool,
+    settings: bool,
+    error: Option<String>,
+}
+
+/// Pure: fold three registration attempts into one `HotkeyReport`. Kept free of any
+/// Tauri/global-shortcut types so it's unit-testable without spinning up the plugin.
+fn build_hotkey_report(
+    toggle: Result<(), String>,
+    browse: Result<(), String>,
+    settings: Result<(), String>,
+) -> HotkeyReport {
+    let mut error = None;
+    for (label, result) in [
+        ("Cmd+Shift+K", &toggle),
+        ("Cmd+Shift+L", &browse),
+        ("Cmd+Shift+,", &settings),
+    ] {
+        if error.is_none() {
+            if let Err(e) = result {
+                error = Some(format!("{label}: {e}"));
+            }
+        }
+    }
+    HotkeyReport {
+        toggle: toggle.is_ok(),
+        browse: browse.is_ok(),
+        settings: settings.is_ok(),
+        error,
+    }
+}
+
+/// The three global shortcuts ubilink registers. A single source of truth so both
+/// startup registration (`.setup()`) and `retry_hotkeys` build identical values.
+fn hotkey_shortcuts() -> (Shortcut, Shortcut, Shortcut) {
+    (
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK),
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyL),
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Comma),
+    )
+}
+
+/// Register the three global shortcuts. IDEMPOTENT: unregisters each first, so
+/// calling this again on an already-registered shortcut (Defect 2 — retrying after
+/// the user grants Accessibility mid-session) neither errors nor double-fires the
+/// handler. Used at startup AND from `retry_hotkeys`.
+fn register_hotkeys(
+    app: &AppHandle,
+    toggle: Shortcut,
+    browse: Shortcut,
+    settings: Shortcut,
+) -> HotkeyReport {
+    let gs = app.global_shortcut();
+    // Best-effort: an unregistered shortcut errors here, which we ignore — the
+    // point is only to clear any prior registration before re-adding it.
+    let _ = gs.unregister(toggle);
+    let _ = gs.unregister(browse);
+    let _ = gs.unregister(settings);
+    let report = build_hotkey_report(
+        gs.register(toggle).map_err(|e| e.to_string()),
+        gs.register(browse).map_err(|e| e.to_string()),
+        gs.register(settings).map_err(|e| e.to_string()),
+    );
+    if let Some(err) = &report.error {
+        eprintln!("[ubilink] hotkey registration issue: {err}");
+    }
+    report
+}
+
+/// Current hotkey registration state, for the onboarding screen (Defect 1: made
+/// queryable instead of only ever `eprintln!`'d where a packaged .app can't show it).
+#[tauri::command]
+fn hotkey_status(state: State<'_, AppState>) -> HotkeyReport {
+    state.hotkeys.lock().map(|g| g.clone()).unwrap_or_default()
+}
+
+/// Re-attempt hotkey registration (Defect 2): registration otherwise only ever runs
+/// once, in `.setup()`, so granting Accessibility mid-session never revives a dead
+/// hotkey without a full relaunch. Called from the frontend right after the user
+/// grants Accessibility (and from Re-check), before it re-reads permission status.
+#[tauri::command]
+fn retry_hotkeys(app: AppHandle) -> HotkeyReport {
+    let (toggle, browse, settings) = hotkey_shortcuts();
+    let report = register_hotkeys(&app, toggle, browse, settings);
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut guard) = state.hotkeys.lock() {
+            *guard = report.clone();
+        }
+    }
+    report
+}
+
 /// The two macOS permissions ubilink needs, and their current state — so the
 /// onboarding screen can tell the user exactly what's left to do (S4/RT-2/U3).
 #[derive(serde::Serialize, Clone)]
@@ -490,11 +612,20 @@ fn main() {
             let user_adapters = data_dir.join("adapters.json");
             if let Ok(json) = std::fs::read_to_string(&user_adapters) {
                 match adapters.extend_from_json(&json) {
-                    Ok(n) => eprintln!("[ubilink] loaded {n} user adapter(s) from {}", user_adapters.display()),
-                    Err(e) => eprintln!("[ubilink] ignoring invalid {}: {e}", user_adapters.display()),
+                    Ok(n) => eprintln!(
+                        "[ubilink] loaded {n} user adapter(s) from {}",
+                        user_adapters.display()
+                    ),
+                    Err(e) => eprintln!(
+                        "[ubilink] ignoring invalid {}: {e}",
+                        user_adapters.display()
+                    ),
                 }
             }
-            eprintln!("[ubilink] {} app adapter(s) available", adapters.apps().len());
+            eprintln!(
+                "[ubilink] {} app adapter(s) available",
+                adapters.apps().len()
+            );
 
             // The bounded API (S5) must trust the schemes the adapters declare
             // (bear:, things:, …) — otherwise a captured bear:// link is rejected.
@@ -513,6 +644,7 @@ fn main() {
                 adapters,
                 disabled: Mutex::new(disabled),
                 data_dir,
+                hotkeys: Mutex::new(HotkeyReport::default()),
             });
 
             // U1 render-first: run as an Accessory app (overlay-style, like Spotlight/
@@ -528,7 +660,9 @@ fn main() {
             // surface (--ui-bg, a translucent tint) sits on top of this real blur.
             #[cfg(target_os = "macos")]
             if let Some(w) = app.get_webview_window("panel") {
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                use window_vibrancy::{
+                    apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+                };
                 let _ = apply_vibrancy(
                     &w,
                     NSVisualEffectMaterial::HudWindow,
@@ -579,13 +713,11 @@ fn main() {
             // before we show the panel and steal focus — then pushes the result to
             // the webview and reveals the panel. So it links the app you were IN, and
             // re-captures on every press. (Esc dismisses; see panel.js.)
-            let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
+            // (Cmd+Shift+L opens the link-browser, K = capture, L = browse; Cmd+Shift+Comma
+            // opens Settings — ⌘, is reserved by macOS for the app menu.)
+            let (toggle, browse, settings) = hotkey_shortcuts();
             let toggle_for_handler = toggle;
-            // Cmd+Shift+L opens the link-browser (K = capture, L = browse).
-            let browse = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyL);
             let browse_for_handler = browse;
-            // Cmd+Shift+Comma opens Settings (⌘, is reserved by macOS for the menu).
-            let settings = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Comma);
             let settings_for_handler = settings;
             let plugin = tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -599,7 +731,10 @@ fn main() {
                             // latency U1 governs (NOT hotkey->link-ready, which is bounded by
                             // osascript and can't go sub-200ms). Same machine = same wall clock.
                             let t0: Option<u64> = if std::env::var_os("UBILINK_PERF").is_some() {
-                                SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
+                                SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .ok()
+                                    .map(|d| d.as_millis() as u64)
                             } else {
                                 None
                             };
@@ -613,24 +748,42 @@ fn main() {
                             // Enter (U2) works.
                             let app = app.clone();
                             std::thread::spawn(move || {
-                                let result = {
+                                // Defect 3: the panel was shown (above) but not focused, and
+                                // used to stay that way until the WHOLE capture finished —
+                                // a window where keystrokes still went to the previous app.
+                                // Fix: detect the frontmost app FIRST (capture_now's old first
+                                // step), focus the panel immediately, THEN do the slower
+                                // per-app work (document-URL scripts, graph writes) with the
+                                // app name already in hand. Detection must stay ahead of
+                                // set_focus() — reordering it would risk the panel becoming
+                                // key window before we know which app to capture from, which
+                                // would break capture itself.
+                                let result = detect_frontmost().and_then(|frontmost| {
+                                    if let Some(w) = app.get_webview_window("panel") {
+                                        let _ = w.set_focus();
+                                    }
                                     let state = app.state::<AppState>();
-                                    capture_now(state.inner())
-                                };
+                                    capture_from(state.inner(), &frontmost)
+                                });
                                 match result {
                                     Ok(view) => {
                                         let _ = app.emit("capture-ok", view);
                                     }
                                     Err(msg) => {
+                                        // Detection itself can fail before focus ever happens
+                                        // above; make sure the panel is focused regardless so
+                                        // U3's error message is legible either way.
+                                        if let Some(w) = app.get_webview_window("panel") {
+                                            let _ = w.set_focus();
+                                        }
                                         let _ = app.emit("capture-err", msg);
                                     }
                                 }
-                                if let Some(w) = app.get_webview_window("panel") {
-                                    let _ = w.set_focus();
-                                }
                             });
                         }
-                    } else if shortcut == &browse_for_handler && event.state() == ShortcutState::Pressed {
+                    } else if shortcut == &browse_for_handler
+                        && event.state() == ShortcutState::Pressed
+                    {
                         if let Some(w) = app.get_webview_window("panel") {
                             // Cmd+Shift+L: open the link-browser. Graph reads are local
                             // SQLite (fast), so list synchronously, push it, and reveal.
@@ -653,7 +806,9 @@ fn main() {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
-                    } else if shortcut == &settings_for_handler && event.state() == ShortcutState::Pressed {
+                    } else if shortcut == &settings_for_handler
+                        && event.state() == ShortcutState::Pressed
+                    {
                         if let Some(w) = app.get_webview_window("panel") {
                             // Cmd+Shift+, : open Settings. Push the current graph stats.
                             let stats = {
@@ -673,15 +828,20 @@ fn main() {
                 .build();
             if let Err(e) = app.handle().plugin(plugin) {
                 eprintln!("[ubilink] global-shortcut plugin failed to load: {e}");
+                let report = HotkeyReport {
+                    error: Some(format!("global-shortcut plugin failed to load: {e}")),
+                    ..HotkeyReport::default()
+                };
+                if let Ok(mut guard) = app.state::<AppState>().hotkeys.lock() {
+                    *guard = report;
+                }
             } else {
-                if let Err(e) = app.global_shortcut().register(toggle) {
-                    eprintln!("[ubilink] couldn't register Cmd+Shift+K (grant Accessibility permission): {e}");
-                }
-                if let Err(e) = app.global_shortcut().register(browse) {
-                    eprintln!("[ubilink] couldn't register Cmd+Shift+L (browse): {e}");
-                }
-                if let Err(e) = app.global_shortcut().register(settings) {
-                    eprintln!("[ubilink] couldn't register Cmd+Shift+, (settings): {e}");
+                // Defect 1: registration failures used to be eprintln!-only, invisible in a
+                // packaged .app. Route them through the same report the frontend can query
+                // (hotkey_status) and retry (retry_hotkeys) later.
+                let report = register_hotkeys(app.handle(), toggle, browse, settings);
+                if let Ok(mut guard) = app.state::<AppState>().hotkeys.lock() {
+                    *guard = report;
                 }
             }
             Ok(())
@@ -704,7 +864,9 @@ fn main() {
             dismiss_panel,
             permission_status,
             open_settings,
-            request_accessibility
+            request_accessibility,
+            hotkey_status,
+            retry_hotkeys
         ])
         .run(tauri::generate_context!())
         .expect("error while running ubilink desktop");
@@ -712,7 +874,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_disabled, save_disabled};
+    use super::{build_hotkey_report, load_disabled, save_disabled};
     use std::collections::HashSet;
 
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
@@ -749,5 +911,42 @@ mod tests {
         std::fs::write(dir.join("plugins-state.json"), b"{ not json").unwrap();
         assert!(load_disabled(&dir).is_empty());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hotkey_report_all_registered_has_no_error() {
+        let report = build_hotkey_report(Ok(()), Ok(()), Ok(()));
+        assert!(report.toggle);
+        assert!(report.browse);
+        assert!(report.settings);
+        assert!(report.error.is_none());
+    }
+
+    #[test]
+    fn hotkey_report_records_only_the_first_failure() {
+        // toggle (Cmd+Shift+K) is the important one users actually feel missing;
+        // it fails here, and browse also fails, but only the FIRST failure's
+        // message should surface (Defect 1: one clear cause, not three).
+        let report = build_hotkey_report(
+            Err("already registered by another application".to_string()),
+            Err("boom".to_string()),
+            Ok(()),
+        );
+        assert!(!report.toggle);
+        assert!(!report.browse);
+        assert!(report.settings);
+        assert_eq!(
+            report.error.as_deref(),
+            Some("Cmd+Shift+K: already registered by another application")
+        );
+    }
+
+    #[test]
+    fn hotkey_report_a_later_failure_is_reported_when_earlier_ones_succeed() {
+        let report = build_hotkey_report(Ok(()), Ok(()), Err("nope".to_string()));
+        assert!(report.toggle);
+        assert!(report.browse);
+        assert!(!report.settings);
+        assert_eq!(report.error.as_deref(), Some("Cmd+Shift+,: nope"));
     }
 }
