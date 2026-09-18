@@ -161,9 +161,21 @@ import_developer_id() {
   security import "$p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
   rm -f "$p12"
   security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$KEYCHAIN" >/dev/null
+  # Read the current per-user search list one path per line and rebuild it as
+  # separate array entries (bash 3.2 — macOS's /bin/bash — has no mapfile/readarray,
+  # so a manual read loop is the portable way). Quoting matters here: a keychain path
+  # can contain spaces, and unlike everything else this script touches, the result of
+  # `-s` is written into the user's *persistent* login search list — an unquoted
+  # $(...) word-splits those paths and corrupts that list for every app and every
+  # future login, not just this script's own temporary state.
+  local existing=() line
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"  # strip the leading whitespace `security` prints
+    line="${line#\"}"; line="${line%\"}"      # strip the surrounding quotes
+    [ -n "$line" ] && existing+=("$line")
+  done < <(security list-keychains -d user)
   # Search the temporary keychain first so codesign finds the identity.
-  # shellcheck disable=SC2046
-  security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+  security list-keychains -d user -s "$KEYCHAIN" "${existing[@]}"
 }
 
 sign_app() { # IDENTITY
@@ -199,7 +211,13 @@ make_dmg() {
   cp -R "$APP" "$stage/"
   ln -s /Applications "$stage/Applications"
   rm -f "$DMG"
-  hdiutil create -volname "$APP_NAME" -srcfolder "$stage" -ov -format UDZO "$DMG" >/dev/null
+  # `hdiutil create -srcfolder ... -format UDZO` is deprecated on current macOS
+  # ("please use 'diskutil image create from/blank --volumeName --format ...'
+  # instead"). Verified `diskutil image create from` produces the same artifact:
+  # a read-only, UDIF/UDZO (zlib-compressed) image with identical contents, and
+  # `hdiutil verify` / `codesign --sign` both still work on it unchanged — with no
+  # deprecation warning.
+  diskutil image create from --format UDZO --volumeName "$APP_NAME" "$stage" "$DMG" >/dev/null
   if [ "$MODE" = release ]; then
     codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
   else
@@ -209,7 +227,7 @@ make_dmg() {
 
 verify_outputs() {
   log "verifying…"
-  local exe="$APP/Contents/MacOS/$EXE" archs ents keys plist="$APP/Contents/Info.plist"
+  local exe="$APP/Contents/MacOS/$EXE" archs ents keys nkeys entval plist="$APP/Contents/Info.plist"
   if [ "$MODE" != dev ]; then
     archs="$(lipo -archs "$exe")"
     case " $archs " in *" arm64 "*) ;; *) die "no arm64 slice (have: $archs)" ;; esac
@@ -218,8 +236,16 @@ verify_outputs() {
   codesign --verify --deep --strict --verbose=2 "$APP"
   ents="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
   keys="$(printf '%s' "$ents" | grep -o '<key>[^<]*</key>' || true)"
-  [ "$keys" = "<key>com.apple.security.automation.apple-events</key>" ] ||
+  nkeys="$(printf '%s' "$ents" | grep -c '<key>' || true)"
+  [ "$nkeys" = 1 ] && [ "$keys" = "<key>com.apple.security.automation.apple-events</key>" ] ||
     die "entitlements must be exactly the Apple Events entitlement, got: ${keys:-none}"
+  # Check the VALUE too, not just the key's presence — a stray <false/> would
+  # otherwise pass. `plutil -extract … raw` reads the XML entitlements straight off
+  # stdin; plutil keypaths treat "." as a path separator, so the key's own literal
+  # dots must be escaped or the lookup silently fails to find it.
+  entval="$(printf '%s' "$ents" | plutil -extract 'com\.apple\.security\.automation\.apple-events' raw -o - - 2>/dev/null || true)"
+  [ "$entval" = true ] ||
+    die "com.apple.security.automation.apple-events entitlement must be true, got: ${entval:-none}"
   [ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" = "$VERSION" ] ||
     die "Info.plist version is not $VERSION"
   plutil -extract NSAppleEventsUsageDescription raw -o - "$plist" >/dev/null ||
