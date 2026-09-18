@@ -108,6 +108,7 @@ button.open-settings, #setup-done {
 }
 .onboarding-actions { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
 #onboarding-hint { color: var(--text-2); font-size: var(--fs-meta); }
+#hotkey-warning { margin: 10px 0 0; color: var(--danger); font-size: var(--fs-meta); }
 
 /* Spinner */
 #status-line[data-phase="capturing"]::before {

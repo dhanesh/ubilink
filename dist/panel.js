@@ -4,7 +4,7 @@
 // (needs a real Tauri webview + the Rust command/event layer); verified via
 // docs/RUNBOOK-gui-panel.md. Capture is driven by 'capture-ok'/'capture-err' events
 // the Rust hotkey handler emits — so it links the app you were IN, every time.
-import { reduce, canConfirm, copyPayload, explanation, permissionsComplete } from './panel-state.mjs';
+import { reduce, canConfirm, copyPayload, explanation, permissionsComplete, hotkeyWarning } from './panel-state.mjs';
 import { initialBrowse, reduce as browseReduce, selectedItem, breadcrumb, atRoot, markedUri, visibleItems } from './browse-state.mjs';
 
 const invoke = (cmd, args) =>
@@ -419,22 +419,50 @@ async function checkPermissions() {
   catch { return null; }
 }
 
-/** Paint the per-permission ✓/✗ rows + the hint. Pure DOM. */
-function renderPermStatuses(report) {
+/** Query the Rust hotkey_status command; null if unavailable (browser preview,
+ * or an older build that lacks the command — treated the same as "no warning",
+ * never as a reason to block on an unknown state). */
+async function checkHotkeys() {
+  try { return await invoke('hotkey_status'); }
+  catch { return null; }
+}
+
+/** All three shortcuts registered? `null` (command unavailable) counts as OK — we
+ * only warn on a CONFIRMED failure, never on missing information. */
+function hotkeysRegistered(hotkeys) {
+  return !hotkeys || (hotkeys.toggle && hotkeys.browse && hotkeys.settings);
+}
+
+/** Paint the per-permission ✓/✗ rows + the hint, plus the hotkey warning (Defect
+ * 1/2) computed by the pure hotkeyWarning(). Pure DOM. */
+function renderPermStatuses(report, hotkeys) {
   setPerm('accessibility', report.accessibility === true, report.accessibility ? 'granted' : 'not granted');
   const autoOk = report.automation === 'granted';
   setPerm('automation', autoOk, report.automation.replace('_', ' '));
-  $('onboarding-hint').textContent = permissionsComplete(report)
+  // Round 2: this used to say "All set" whenever permissions alone were
+  // complete, even while a hotkey was still dead (e.g. browse/settings failed
+  // to register) — the same "stuck with no explanation" bug the warning above
+  // exists to fix, just in the hint text instead of an empty warning.
+  $('onboarding-hint').textContent = permissionsComplete(report) && hotkeysRegistered(hotkeys)
     ? 'All set — press ⌘⇧K from any supported app.'
     : 'Grant the items above, then press Re-check.';
+  const warning = hotkeyWarning(hotkeys, report);
+  const warningEl = $('hotkey-warning');
+  if (warningEl) {
+    warningEl.textContent = warning;
+    warningEl.hidden = !warning;
+  }
 }
 
 /** Check + switch view. `resetIdle` shows the idle prompt when complete. */
 async function refreshPermissions({ resetIdle = false } = {}) {
-  const report = await checkPermissions();
+  const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
   if (!report) { showCaptureView(); render(); return false; } // browser preview
-  renderPermStatuses(report);
-  const done = permissionsComplete(report);
+  renderPermStatuses(report, hotkeys);
+  // Onboarding used to key off permissions alone; a hotkey can fail to register
+  // even with every permission granted (another app already owns ⌘⇧K), so gate
+  // on both — the warning painted above explains why onboarding is still showing.
+  const done = permissionsComplete(report) && hotkeysRegistered(hotkeys);
   if (done) {
     showCaptureView();
     if (resetIdle && state.phase !== 'ready') dispatch({ type: 'reset' });
@@ -447,8 +475,8 @@ async function refreshPermissions({ resetIdle = false } = {}) {
 
 /** Always open the setup screen (the "Permissions" affordance), even when complete. */
 async function openSetup() {
-  const report = await checkPermissions();
-  if (report) renderPermStatuses(report);
+  const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
+  if (report) renderPermStatuses(report, hotkeys);
   showOnboarding();
   fitWindow();
 }
@@ -459,9 +487,16 @@ for (const b of document.querySelectorAll('.open-settings')) {
 }
 $('grant-accessibility').addEventListener('click', async () => {
   await invoke('request_accessibility').catch(() => {}); // shows the macOS dialog
+  // Defect 2: registration otherwise only ever runs once at startup, so granting
+  // the very permission the hotkey needs wouldn't revive it without a relaunch.
+  // Retry BEFORE re-reading status so the UI reflects the outcome immediately.
+  await invoke('retry_hotkeys').catch(() => {});
   refreshPermissions(); // reflect the new state
 });
-$('recheck').addEventListener('click', () => refreshPermissions({ resetIdle: true }));
+$('recheck').addEventListener('click', async () => {
+  await invoke('retry_hotkeys').catch(() => {}); // Defect 2: same — retry before re-reading.
+  refreshPermissions({ resetIdle: true });
+});
 $('setup-done').addEventListener('click', () => refreshPermissions({ resetIdle: true }));
 $('open-setup').addEventListener('click', openSetup);
 $('copy').addEventListener('click', confirmCopy);
