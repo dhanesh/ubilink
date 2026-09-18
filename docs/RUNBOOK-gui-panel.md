@@ -30,12 +30,12 @@ Run them: `make test-js` and `cargo test --manifest-path src-tauri/Cargo.toml pa
 re-prompts for Accessibility/Automation each time. For a stable experience:
 
 ```sh
-make bundle     # -> desktop/target/release/bundle/ubilink.app (ad-hoc signed, fixed path)
-open desktop/target/release/bundle/ubilink.app
+make bundle     # -> desktop/target/bundle/Ubilink.app (stable self-signed identity, fixed path)
+open desktop/target/bundle/Ubilink.app
 ```
 
-Grant Accessibility + Automation to **ubilink.app** once; re-running `make bundle`
-rebuilds in place, so the grant sticks. (Optionally drag `ubilink.app` to /Applications
+Grant Accessibility + Automation to **Ubilink.app** once; re-running `make bundle`
+rebuilds in place, so the grant sticks. (Optionally drag `Ubilink.app` to /Applications
 for an even more stable location.)
 
 ## On a real Mac

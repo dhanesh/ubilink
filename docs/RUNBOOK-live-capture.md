@@ -43,7 +43,7 @@ Automation grant. This runbook confirms that seam.
    a Finder window, a Bear note (needs Accessibility: the adapter clicks
    *Note › Copy Link*) and a selected Things3 to-do.
 4. **Seam check without the panel (optional):** run an adapter's script directly.
-   The grant belongs to your terminal here, not to `ubilink.app`:
+   The grant belongs to your terminal here, not to `Ubilink.app`:
    ```sh
    osascript -e 'tell application "Safari" to return (URL of current tab of front window) & tab & (name of current tab of front window)'
    ```
