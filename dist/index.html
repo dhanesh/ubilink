@@ -40,6 +40,11 @@
             </div>
           </li>
         </ul>
+        <!-- Defect 1/2: permissions can be complete while a hotkey still failed to
+             register (e.g. another app already owns ⌘⇧K) — this is what tells the
+             user, since onboarding otherwise only checks permissions. Hidden when
+             every hotkey registered; see hotkeyWarning() in panel-state.mjs. -->
+        <p id="hotkey-warning" class="hint" hidden aria-live="polite"></p>
         <div class="onboarding-actions">
           <button id="recheck" type="button">Re-check</button>
           <button id="setup-done" type="button">Done</button>
