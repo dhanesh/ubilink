@@ -411,7 +411,6 @@
     "README.md": "20e2f2d9e4cce8a98d409a5159528e9e385864ef8403b6cf03b4e9424c386136",
     "LICENSE": "124a48c9e3408397fd22adbc1dc7f5a1df9a08fe8aa6edc869d0e3fe7bf4b1e5",
     "src-tauri/Cargo.toml": "ede4fb4f7ac14938a86a92a5dcf1cfc6999c5336cfccf39fcc376e9d4ef3a397",
-    "src-tauri/tauri.conf.json": "93e0541af3b537bacb068dab448d45a7346413ee8dc907bd72d8a6a8c1227c52",
     "src-tauri/src/service.rs": "065bb2bc0a0af46b2d1a736a0ab0dc83a60c26ca3f15c7f88f4e31567783de66",
     "src-tauri/src/live_capture.rs": "b14621b9f896224639c8b9a76135893767e24ae0bdacb298074264a7e226044f",
     "src-tauri/src/release.rs": "4c0360afdcd2b076f427deaf0c6974c484f8694eb31ab17b1d5763434ce90e85",

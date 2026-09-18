@@ -1267,16 +1267,6 @@
         ],
         "status": "generated",
         "artifact_class": "structural"
-      },
-      {
-        "path": "src-tauri/tauri.conf.json",
-        "type": "config",
-        "satisfies": [
-          "U1",
-          "S2"
-        ],
-        "status": "generated",
-        "artifact_class": "structural"
       }
     ],
     "coverage": {
