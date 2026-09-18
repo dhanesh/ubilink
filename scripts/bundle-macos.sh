@@ -218,13 +218,16 @@ make_dmg() {
   cp -R "$APP" "$stage/"
   ln -s /Applications "$stage/Applications"
   rm -f "$DMG"
-  # `hdiutil create -srcfolder ... -format UDZO` is deprecated on current macOS
+  # `hdiutil create -srcfolder ... -format UDZO` prints a deprecation warning
   # ("please use 'diskutil image create from/blank --volumeName --format ...'
-  # instead"). Verified `diskutil image create from` produces the same artifact:
-  # a read-only, UDIF/UDZO (zlib-compressed) image with identical contents, and
-  # `hdiutil verify` / `codesign --sign` both still work on it unchanged — with no
-  # deprecation warning.
-  diskutil image create from --format UDZO --volumeName "$APP_NAME" "$stage" "$DMG" >/dev/null
+  # instead") on recent macOS. Investigated switching to that: `diskutil image
+  # create from --format UDZO --volumeName ...` does work, but only on macOS 26
+  # (Tahoe) — it's undocumented in the installed man page (only in --help) and
+  # absent on macOS 15 and earlier. This project's dry-run path (`make dist`)
+  # needs to keep working for contributors on Sonoma/Sequoia, and a runtime
+  # version check with two code paths is more complexity than a release right
+  # before an rc warrants. So: kept `hdiutil create`, warning accepted for now.
+  hdiutil create -volname "$APP_NAME" -srcfolder "$stage" -ov -format UDZO "$DMG" >/dev/null
   if [ "$MODE" = release ]; then
     codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
   else
