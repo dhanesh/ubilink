@@ -234,7 +234,10 @@ verify_outputs() {
     case " $archs " in *" x86_64 "*) ;; *) die "no x86_64 slice (have: $archs)" ;; esac
   fi
   codesign --verify --deep --strict --verbose=2 "$APP"
-  ents="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
+  # `|| die` (rather than letting `set -e` abort silently) so a codesign failure here
+  # is reported by name, distinct from the entitlements-content checks below.
+  ents="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)" ||
+    die "codesign failed to read entitlements from $APP"
   keys="$(printf '%s' "$ents" | grep -o '<key>[^<]*</key>' || true)"
   nkeys="$(printf '%s' "$ents" | grep -c '<key>' || true)"
   [ "$nkeys" = 1 ] && [ "$keys" = "<key>com.apple.security.automation.apple-events</key>" ] ||
