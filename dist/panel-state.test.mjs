@@ -2,7 +2,16 @@
 // node's built-in runner: `node --test dist/`. Keeps S2 honest (no third-party JS).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reduce, canConfirm, copyPayload, explanation, permissionsComplete, hotkeyWarning } from './panel-state.mjs';
+import {
+  reduce,
+  canConfirm,
+  copyPayload,
+  explanation,
+  permissionsComplete,
+  hotkeyWarning,
+  accessibilityGuidance,
+  canUseCapture,
+} from './panel-state.mjs';
 
 test('U1: open() resolves to capturing synchronously, without capture data', () => {
   const s = reduce({ phase: 'idle' }, { type: 'open' });
@@ -68,22 +77,29 @@ test('S4: onboarding is complete only when BOTH permissions are in place', () =>
 
 test('H1: no warning when every hotkey registered', () => {
   const hotkeys = { toggle: true, browse: true, settings: true, error: null };
-  const report = { accessibility: true, automation: 'granted' };
-  assert.equal(hotkeyWarning(hotkeys, report), '');
+  assert.equal(hotkeyWarning(hotkeys), '');
 });
 
-test('H2: toggle failed and Accessibility is not granted -> says the hotkey needs it', () => {
+// Round 3 (Defect 5): hotkeyWarning used to blame Accessibility whenever it
+// wasn't granted. That was FALSE — macOS global hotkeys register via Carbon
+// RegisterEventHotKey, which needs no TCC grant at all (unlike AX-based
+// menu-scripting adapters, e.g. Bear). A hotkey that fails to register is a
+// NAME CONFLICT with another app, full stop, regardless of permission state —
+// the message must say that and must never send anyone chasing Accessibility
+// for a problem it cannot fix.
+
+test('H2: toggle fails to register while Accessibility also happens to be ungranted -> still a conflict, never blames Accessibility', () => {
   const hotkeys = { toggle: false, browse: true, settings: true, error: 'not permitted' };
-  const report = { accessibility: false, automation: 'granted' };
-  const msg = hotkeyWarning(hotkeys, report);
+  const msg = hotkeyWarning(hotkeys);
   assert.ok(msg.length > 0);
-  assert.match(msg, /accessibility/i);
+  assert.doesNotMatch(msg, /accessibility/i);
+  assert.match(msg, /another app/i);
+  assert.match(msg, /tray/i);
 });
 
-test('H3: toggle failed but Accessibility IS granted -> conflict case names the tray', () => {
+test('H3: toggle failed (Accessibility granted too) -> conflict case names the tray', () => {
   const hotkeys = { toggle: false, browse: true, settings: true, error: 'already registered' };
-  const report = { accessibility: true, automation: 'granted' };
-  const msg = hotkeyWarning(hotkeys, report);
+  const msg = hotkeyWarning(hotkeys);
   assert.ok(msg.length > 0);
   // Must not blame a missing permission the user already granted.
   assert.doesNotMatch(msg, /needs? accessibility/i);
@@ -96,10 +112,9 @@ test('H3: toggle failed but Accessibility IS granted -> conflict case names the 
 // failing alone left the user stuck on onboarding with an EMPTY warning — the
 // exact bug this feature exists to remove, just moved to a different shortcut.
 
-test('H4: browse (⌘⇧L) fails alone, Accessibility granted -> names ⌘⇧L, not ⌘⇧K', () => {
+test('H4: browse (⌘⇧L) fails alone -> names ⌘⇧L, not ⌘⇧K', () => {
   const hotkeys = { toggle: true, browse: false, settings: true, error: 'already registered' };
-  const report = { accessibility: true, automation: 'granted' };
-  const msg = hotkeyWarning(hotkeys, report);
+  const msg = hotkeyWarning(hotkeys);
   assert.ok(msg.length > 0);
   assert.match(msg, /⌘⇧L/);
   assert.doesNotMatch(msg, /⌘⇧K/);
@@ -107,21 +122,20 @@ test('H4: browse (⌘⇧L) fails alone, Accessibility granted -> names ⌘⇧L, 
   assert.match(msg, /tray/i);
 });
 
-test('H5: settings (⌘⇧,) fails alone, Accessibility not granted -> names ⌘⇧, and needs Accessibility', () => {
+test('H5: settings (⌘⇧,) fails alone, even with Accessibility ungranted -> names ⌘⇧, as a conflict, not an Accessibility need', () => {
   const hotkeys = { toggle: true, browse: true, settings: false, error: 'not permitted' };
-  const report = { accessibility: false, automation: 'granted' };
-  const msg = hotkeyWarning(hotkeys, report);
+  const msg = hotkeyWarning(hotkeys);
   assert.ok(msg.length > 0);
   assert.match(msg, /⌘⇧,/);
   assert.doesNotMatch(msg, /⌘⇧K/);
   assert.doesNotMatch(msg, /⌘⇧L/);
-  assert.match(msg, /accessibility/i);
+  assert.doesNotMatch(msg, /accessibility/i);
+  assert.match(msg, /another app/i);
 });
 
 test('H6: toggle plus one other (browse) both fail -> both are named, one coherent message', () => {
   const hotkeys = { toggle: false, browse: false, settings: true, error: 'already registered' };
-  const report = { accessibility: true, automation: 'granted' };
-  const msg = hotkeyWarning(hotkeys, report);
+  const msg = hotkeyWarning(hotkeys);
   assert.ok(msg.length > 0);
   assert.match(msg, /⌘⇧K/);
   assert.match(msg, /⌘⇧L/);
@@ -132,6 +146,51 @@ test('H6: toggle plus one other (browse) both fail -> both are named, one cohere
 
 test('H7: all three registered -> no warning, even if permissions are incomplete', () => {
   const hotkeys = { toggle: true, browse: true, settings: true, error: null };
-  const report = { accessibility: false, automation: 'granted' };
-  assert.equal(hotkeyWarning(hotkeys, report), '');
+  assert.equal(hotkeyWarning(hotkeys), '');
+});
+
+// Defect 3 (S4 dead end): Accessibility trust is evaluated by macOS at PROCESS
+// LAUNCH. A process already running when the user grants it in System
+// Settings keeps seeing itself as untrusted until quit and reopened — so once
+// the user has been through the grant flow, a still-false reading needs to
+// say that plainly and offer a way out, instead of repeating "grant it above"
+// forever.
+
+test('A1: Accessibility still false after the user has been through the grant flow -> explains launch-time trust and offers relaunch', () => {
+  const msg = accessibilityGuidance({ accessibility: false, automation: 'granted' }, true);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /launch/i);
+  assert.match(msg, /reopen|relaunch|quit/i);
+  assert.match(msg, /different/i); // names the other-build cause too
+});
+
+test('A2: Accessibility granted but Automation still missing -> asks for Automation, not a relaunch', () => {
+  const msg = accessibilityGuidance({ accessibility: true, automation: 'not_determined' }, false);
+  assert.ok(msg.length > 0);
+  assert.match(msg, /automation/i);
+  assert.doesNotMatch(msg, /launch/i);
+});
+
+test('A3: everything granted -> no special guidance needed', () => {
+  assert.equal(accessibilityGuidance({ accessibility: true, automation: 'granted' }, true), '');
+});
+
+test('A0: Accessibility false but the user has not attempted a grant yet -> no premature relaunch talk', () => {
+  assert.equal(accessibilityGuidance({ accessibility: false, automation: 'granted' }, false), '');
+});
+
+// Defect 5 (wrong permission gate): capture from browsers/Finder goes through
+// osascript (Automation) only. Accessibility is solely for AX-based
+// menu-scripting adapters (e.g. Bear's "Copy Link") — gating the WHOLE app on
+// both permissions trapped a user with Automation granted and Accessibility
+// not on the setup screen, unable to use ubilink at all.
+
+test('S5: capture is reachable with Automation granted alone — Accessibility is not required to leave onboarding', () => {
+  assert.equal(canUseCapture({ accessibility: false, automation: 'granted' }), true);
+});
+
+test('S6: capture is NOT reachable without Automation, regardless of Accessibility', () => {
+  assert.equal(canUseCapture({ accessibility: true, automation: 'denied' }), false);
+  assert.equal(canUseCapture({ accessibility: true, automation: 'not_determined' }), false);
+  assert.equal(canUseCapture(null), false);
 });
