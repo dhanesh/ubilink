@@ -94,25 +94,66 @@ function joinNames(names) {
 /**
  * Defect 1/2 (hotkey registration is invisible + never retried): decide what, if
  * anything, to tell the user about the global hotkeys. Pure — `hotkeys` is the
- * Rust `HotkeyReport` ({toggle, browse, settings}: bool, `error`: string|null) and
- * `report` is the `PermissionReport`. Onboarding keys off PERMISSIONS, not
- * registration, so this is what tells the user when permissions are fine but a
- * hotkey is still dead (e.g. another app already owns ⌘⇧K).
+ * Rust `HotkeyReport` ({toggle, browse, settings}: bool, `error`: string|null).
  *
  * Returns '' only when EVERY shortcut registered. `hotkeysRegistered()` (panel.js)
  * blocks onboarding on any single failure, so this must name ALL of them — naming
  * only `toggle` left browse/settings failures stuck on onboarding with no
  * explanation at all (round 2 of this fix). Several failures at once are folded
  * into one coherent sentence rather than one line per shortcut.
+ *
+ * Round 3 (Defect 5): this used to blame Accessibility whenever it wasn't
+ * granted. That was FALSE — macOS global hotkeys register via Carbon
+ * `RegisterEventHotKey`, which needs no TCC grant at all (Accessibility is
+ * only for AX-based menu-scripting adapters, e.g. Bear). A hotkey that fails
+ * to register is always a name conflict with another app, regardless of
+ * permission state, so this no longer takes a `PermissionReport` at all.
  */
-export function hotkeyWarning(hotkeys, report) {
+export function hotkeyWarning(hotkeys) {
   if (!hotkeys) return '';
   const failed = HOTKEY_LABELS.filter((h) => !hotkeys[h.key]);
   if (failed.length === 0) return '';
   const names = joinNames(failed.map((h) => h.label));
   const plural = failed.length > 1;
-  if (!permissionsComplete(report) || report.accessibility !== true) {
-    return `The ${names} ${plural ? 'hotkeys need' : 'hotkey needs'} Accessibility permission to work. Grant it above, then ${plural ? "they'll" : "it'll"} start working — no relaunch needed.`;
-  }
   return `${names} didn't register — another app is likely already using ${plural ? 'them' : 'it'}. Use the tray icon ("Show ubilink") to open the panel, then free up the shortcut${plural ? 's' : ''} and press Re-check.`;
+}
+
+/**
+ * Defect 5 (wrong permission gate): capture from browsers/Finder goes through
+ * osascript — Automation only. Accessibility is solely for AX-based
+ * menu-scripting adapters (e.g. Bear's "Copy Link"). Gating the whole app
+ * behind BOTH permissions trapped a user with Automation granted and
+ * Accessibility not on the setup screen, unable to use ubilink at all.
+ * `permissionsComplete()` (both) still decides whether EVERYTHING, AX-based
+ * adapters included, is finished — this decides only whether the capture view
+ * is reachable at all.
+ */
+export function canUseCapture(report) {
+  return !!report && report.automation === 'granted';
+}
+
+/**
+ * Defect 3 (S4 dead end): macOS evaluates Accessibility trust at PROCESS
+ * LAUNCH. A process already running when the user grants it in System
+ * Settings keeps seeing `AXIsProcessTrusted() === false` until it is quit and
+ * reopened — the other cause of the identical symptom is that the entry
+ * enabled in Settings belongs to a DIFFERENT Ubilink build/signing identity.
+ * Pure decision of which message (if any) to show about Accessibility
+ * specifically, on top of the plain ✓/✗ row — tested without a real grant +
+ * relaunch cycle.
+ *
+ * `attemptedGrant`: has the user been through the grant flow this session
+ * (clicked "Grant Access…" or "Re-check" at least once)? Before that, a false
+ * reading is just the normal starting state — no relaunch talk yet.
+ */
+export function accessibilityGuidance(report, attemptedGrant) {
+  if (!report) return '';
+  if (report.accessibility !== true) {
+    if (!attemptedGrant) return '';
+    return "Still showing as not granted? macOS only checks Accessibility when Ubilink launches, so if you just enabled it in System Settings, quit and reopen Ubilink for it to take effect. (If you enabled a different Ubilink build, this one needs its own entry.) Use Relaunch below.";
+  }
+  if (report.automation !== 'granted') {
+    return 'Accessibility is granted. Automation still needs approval — click Open Settings above, allow Ubilink, then press Re-check.';
+  }
+  return '';
 }
