@@ -67,9 +67,15 @@ export function explanation(state) {
 }
 
 /**
- * Onboarding gate (S4/RT-2): are BOTH macOS permissions in place so the capture
- * flow can work? Accessibility must be trusted (the global hotkey needs it) and
- * automation must be granted (reading the active app). Pure, so it's testable.
+ * Are BOTH macOS permissions in place? Automation is needed to read the active
+ * app; Accessibility is needed only to script another app's MENUS (apps like Bear
+ * with no API). Accessibility is NOT required for the global hotkey — macOS
+ * registers those through Carbon, which needs no TCC grant, and a user proved it
+ * by pressing ⌘⇧K with Accessibility off.
+ *
+ * This is therefore "everything granted", NOT the gate for using the app: see
+ * canUseCapture(), which keys on Automation alone. Gating the app on this is what
+ * locked out a user who had Automation granted. Pure, so it's testable.
  */
 export function permissionsComplete(report) {
   return !!report && report.accessibility === true && report.automation === 'granted';

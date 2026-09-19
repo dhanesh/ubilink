@@ -674,7 +674,10 @@ onEvent('capture-err', async (e) => {
   // If the failure is because a permission is missing, route to setup so the user
   // knows what to fix (rather than just seeing an opaque error).
   const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
-  if (report && !permissionsComplete(report)) {
+  // canUseCapture (Automation), NOT permissionsComplete: a capture error is not a
+  // reason to re-trap an Automation-only user in onboarding — that is the exact
+  // dead end this branch removes, and a transient failure would re-arm it.
+  if (report && !canUseCapture(report)) {
     renderPermStatuses(report, hotkeys);
     showOnboarding();
     // Defect 4: switching views AFTER the last fitWindow() (from dispatch()'s
