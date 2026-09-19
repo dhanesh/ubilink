@@ -477,14 +477,21 @@ fn retry_hotkeys(app: AppHandle) -> HotkeyReport {
 /// onboarding screen can tell the user exactly what's left to do (S4/RT-2/U3).
 #[derive(serde::Serialize, Clone)]
 struct PermissionReport {
-    /// Accessibility (AXIsProcessTrusted) — required for the global hotkey to fire.
+    /// Accessibility (AXIsProcessTrusted) — lets Ubilink script another app's
+    /// menus (AX-based adapters, e.g. Bear's "Copy Link"). Defect 5: this is
+    /// NOT required for the global hotkey, which registers via Carbon
+    /// `RegisterEventHotKey` (see `register_hotkeys`) and needs no TCC grant
+    /// at all — nor for capture from browsers/Finder, which goes through
+    /// osascript (Automation) instead.
     accessibility: bool,
     /// Automation (System Events, via osascript): "granted" | "denied" | "not_determined".
     automation: &'static str,
 }
 
-/// Whether this process is trusted for the macOS Accessibility API (the global
-/// hotkey needs it). Direct FFI — no crate, keeping the dep tree honest.
+/// Whether this process is trusted for the macOS Accessibility API — needed for
+/// AX-based menu-scripting adapters (e.g. Bear), NOT the global hotkey (Defect
+/// 5: Carbon `RegisterEventHotKey` needs no TCC grant). Direct FFI — no crate,
+/// keeping the dep tree honest.
 #[cfg(target_os = "macos")]
 fn accessibility_trusted() -> bool {
     #[link(name = "ApplicationServices", kind = "framework")]
@@ -587,6 +594,15 @@ fn open_settings(pane: String) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("couldn't open System Settings: {e}"))?;
     Ok(())
+}
+
+/// Defect 3: macOS evaluates Accessibility trust at PROCESS LAUNCH, so a
+/// process already running when the user grants it in System Settings keeps
+/// reading itself as untrusted until it is quit and reopened. Rather than
+/// telling the user to do that by hand, offer a button that does it for them.
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
 }
 
 fn main() {
@@ -866,7 +882,8 @@ fn main() {
             open_settings,
             request_accessibility,
             hotkey_status,
-            retry_hotkeys
+            retry_hotkeys,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running ubilink desktop");
