@@ -109,6 +109,13 @@ button.open-settings, #setup-done {
 .onboarding-actions { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
 #onboarding-hint { color: var(--text-2); font-size: var(--fs-meta); }
 #hotkey-warning { margin: 10px 0 0; color: var(--danger); font-size: var(--fs-meta); }
+/* Defect 3: the launch-time-trust dead end — its explanation and relaunch button. */
+#accessibility-hint { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-meta); }
+#relaunch-app {
+  margin-top: 8px;
+  padding: 6px 14px; font-size: var(--fs-body); border-radius: var(--r-control); cursor: pointer;
+  color: #fff; background: var(--accent); border: 0;
+}
 
 /* Spinner */
 #status-line[data-phase="capturing"]::before {

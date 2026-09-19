@@ -20,15 +20,22 @@
            user always knows exactly what's left to do. -->
       <section id="onboarding" hidden aria-labelledby="onboarding-heading">
         <h1 id="onboarding-heading">Set up Ubilink</h1>
-        <p class="sub">Ubilink needs two macOS permissions to capture links from your apps.</p>
+        <p class="sub">Ubilink needs Automation to capture links from browsers, Finder, and more. Accessibility is optional, only for apps that need their menus scripted (like Bear).</p>
         <ul id="perm-list">
           <li class="perm" data-perm="accessibility">
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
-              <strong>Accessibility</strong>
-              <p>Lets Ubilink script an app's menus — needed for apps like Bear that have no API.</p>
+              <strong>Accessibility (optional)</strong>
+              <p>Lets Ubilink script an app's menus — needed only for apps like Bear that have no API. The hotkey and browser/Finder capture work without it.</p>
               <button type="button" id="grant-accessibility">Grant Access…</button>
               <button type="button" class="open-settings" data-pane="accessibility">Open Settings</button>
+              <!-- Defect 3: macOS evaluates Accessibility trust at process launch, so a
+                   process already running when the user grants it in System Settings
+                   keeps reading itself as untrusted until it's quit and reopened. Hidden
+                   until the user has actually been through the grant flow; see
+                   accessibilityGuidance() in panel-state.mjs. -->
+              <p id="accessibility-hint" class="hint" hidden aria-live="polite"></p>
+              <button type="button" id="relaunch-app" hidden>Relaunch Ubilink</button>
             </div>
           </li>
           <li class="perm" data-perm="automation">
