@@ -690,13 +690,25 @@ fn main() {
             // With no Dock icon, the menu-bar tray is the always-reachable home for the
             // app: Show (summon the panel) + Quit (the affordance the Dock used to give).
             let show_i = MenuItem::with_id(app, "show", "Show ubilink", true, Some("Cmd+Shift+K"))?;
+            // Settings was reachable only by ⌘⇧,, which nothing in the app showed.
+            let settings_i =
+                MenuItem::with_id(app, "settings", "Settings…", true, Some("Cmd+Shift+Comma"))?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit ubilink", true, Some("Cmd+Q"))?;
-            let tray_menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let tray_menu = Menu::with_items(app, &[&show_i, &settings_i, &quit_i])?;
             let mut tray = TrayIconBuilder::with_id("ubilink-tray")
                 .tooltip("Ubilink — ⌘⇧K to capture a link")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
+                    "settings" => {
+                        if let Some(w) = app.get_webview_window("panel") {
+                            // The same event the ⌘⇧, shortcut sends. With no stats in
+                            // the payload, the webview fetches them itself.
+                            let _ = w.emit("settings", ());
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
                     "show" => {
                         if let Some(w) = app.get_webview_window("panel") {
                             let _ = w.show();
