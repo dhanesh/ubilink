@@ -107,7 +107,11 @@ button.open-settings, #setup-done {
   color: #fff; background: var(--accent); border: 0;
 }
 .onboarding-actions { margin-top: 18px; display: flex; align-items: center; gap: 12px; }
-#onboarding-hint { color: var(--text-2); font-size: var(--fs-meta); }
+/* Buttons keep their natural width; the hint takes what's left and wraps instead.
+   Without this a long hint squeezed Re-check until its label broke onto two
+   lines ("Re-" / "check") and it stood taller than Done. */
+.onboarding-actions button { flex-shrink: 0; white-space: nowrap; }
+#onboarding-hint { color: var(--text-2); font-size: var(--fs-meta); flex: 1; min-width: 0; }
 #hotkey-warning { margin: 10px 0 0; color: var(--danger); font-size: var(--fs-meta); }
 /* Defect 3: the launch-time-trust dead end — its explanation and relaunch button. */
 #accessibility-hint { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-meta); }

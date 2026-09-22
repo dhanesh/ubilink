@@ -213,6 +213,54 @@ impl<R: CommandRunner> ConfiguredAdapter<R> {
     }
 }
 
+/// Strip osascript's framing from a script error so the user reads a sentence,
+/// not AppleScript internals: `77:82: execution error: <message> (-1700)` becomes
+/// `<message>`. Anything not in exactly that shape is returned untouched, so a
+/// plain runner error (a timeout, a missing binary) is never mangled.
+fn clean_script_error(raw: &str) -> String {
+    let all_digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let Some((offsets, rest)) = raw.trim().split_once(": execution error: ") else {
+        return raw.to_string();
+    };
+    let framed = offsets
+        .split_once(':')
+        .is_some_and(|(from, to)| all_digits(from) && all_digits(to));
+    if !framed {
+        return raw.to_string();
+    }
+    // Drop a trailing Apple event code like " (-1700)", and only that.
+    let message = match rest.rsplit_once(" (") {
+        Some((msg, code))
+            if code
+                .strip_suffix(')')
+                .and_then(|c| c.strip_prefix('-'))
+                .is_some_and(all_digits) =>
+        {
+            msg
+        }
+        _ => rest,
+    };
+    message.trim().to_string()
+}
+
+/// The user-facing explanation for a failed capture script. One failure gets its
+/// own message because it has a known fix: an adapter that UI-scripts an app
+/// through System Events (Bear) needs Accessibility, and macOS reports its absence
+/// as "osascript is not allowed assistive access" — accurate, but it never names
+/// the permission. Everything else gets the cleaned script error.
+fn explain_script_error(app: &str, raw: &str) -> String {
+    if raw.contains("not allowed assistive access") {
+        return format!(
+            "Capturing from {app} needs Accessibility permission, because Ubilink reads \
+             {app}'s menus. Grant it under Permissions."
+        );
+    }
+    format!(
+        "Couldn't read the active resource from {app}: {}",
+        clean_script_error(raw)
+    )
+}
+
 impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
     fn id(&self) -> &str {
         &self.spec.app
@@ -224,10 +272,7 @@ impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
         match self.runner.run("osascript", &["-e", &self.spec.script]) {
             Ok(out) => self.parse(&out),
             Err(e) => Err(CaptureFailure::AdapterError {
-                explanation: format!(
-                    "Couldn't read the active resource from {}: {e}",
-                    self.spec.app
-                ),
+                explanation: explain_script_error(&self.spec.app, &e),
             }),
         }
     }
@@ -749,6 +794,104 @@ mod tests {
         assert!(
             !reg.for_app("Finder").unwrap().user_defined,
             "untouched default"
+        );
+    }
+
+    #[test]
+    fn script_errors_lose_osascript_noise_but_keep_the_message() {
+        // Verbatim what a user saw capturing from Finder's Recents view: the
+        // offsets, the "execution error:" preamble and the Apple event code are
+        // AppleScript internals, not an explanation.
+        let raw = "77:82: execution error: Can’t make «class fvtg» of window 1 of application \"Finder\" into type alias. (-1700)";
+        assert_eq!(
+            clean_script_error(raw),
+            "Can’t make «class fvtg» of window 1 of application \"Finder\" into type alias."
+        );
+        // A script's own `error "…"` arrives wrapped the same way (code -2700).
+        assert_eq!(
+            clean_script_error("0:180: execution error: “Recents” isn’t a folder on disk. (-2700)"),
+            "“Recents” isn’t a folder on disk."
+        );
+    }
+
+    #[test]
+    fn script_errors_without_osascript_framing_are_left_alone() {
+        // Only osascript's exact framing is stripped: a parenthesised non-code
+        // like "(os error 2)" must survive, as must plain and empty messages.
+        for plain in ["osascript timed out", "No such file (os error 2)", ""] {
+            assert_eq!(clean_script_error(plain), plain);
+        }
+    }
+
+    #[test]
+    fn missing_accessibility_is_explained_as_a_permission_not_an_error() {
+        // What a user saw capturing from Bear with Accessibility off: accurate,
+        // but it never says the fix is the Accessibility permission — which the
+        // setup screen already describes as needed "only for apps like Bear".
+        let raw = "118:189: execution error: System Events got an error: osascript is not allowed assistive access. (-1719)";
+        let msg = explain_script_error("Bear", raw);
+        assert!(msg.contains("Bear"), "names the app: {msg}");
+        assert!(msg.contains("Accessibility"), "names the permission: {msg}");
+        assert!(
+            msg.contains("Permissions"),
+            "points at where to fix it: {msg}"
+        );
+        assert!(
+            !msg.contains("osascript"),
+            "no AppleScript internals: {msg}"
+        );
+        assert!(
+            !msg.contains("System Events"),
+            "no AppleScript internals: {msg}"
+        );
+    }
+
+    #[test]
+    fn other_script_errors_keep_the_cleaned_explanation() {
+        assert_eq!(
+            explain_script_error(
+                "Finder",
+                "0:9: execution error: “Recents” isn’t a folder on disk. (-2700)"
+            ),
+            "Couldn't read the active resource from Finder: “Recents” isn’t a folder on disk."
+        );
+    }
+
+    #[test]
+    fn capture_failure_explanation_is_cleaned() {
+        let spec = AdapterRegistry::defaults()
+            .for_app("Finder")
+            .expect("Finder ships")
+            .clone();
+        let raw = "0:120: execution error: “Recents” isn’t a folder on disk. Select a file in it, or open a real folder. (-2700)";
+        let err = ConfiguredAdapter::new(spec, FakeRunner(Err(raw.into())))
+            .capture()
+            .unwrap_err();
+        match err {
+            CaptureFailure::AdapterError { explanation } => assert_eq!(
+                explanation,
+                "Couldn't read the active resource from Finder: “Recents” isn’t a folder on disk. Select a file in it, or open a real folder."
+            ),
+            _ => panic!("expected AdapterError"),
+        }
+    }
+
+    #[test]
+    fn builtin_finder_script_handles_views_that_are_not_folders() {
+        // Regression guard: Recents, AirDrop, Network and search results have no
+        // folder on disk, so `target of front window as alias` fails in them. The
+        // shipped script must guard that lookup, fall back to the selection, and
+        // not assume a Finder window is open at all.
+        let reg = AdapterRegistry::defaults();
+        let script = &reg.for_app("Finder").expect("Finder ships").script;
+        assert!(script.contains("try"), "target lookup must be guarded");
+        assert!(
+            script.contains("selection"),
+            "must fall back to the selection"
+        );
+        assert!(
+            script.contains("count of Finder windows"),
+            "must handle no open window"
         );
     }
 }
