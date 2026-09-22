@@ -96,13 +96,13 @@
   },
   {
     "app": "Bear",
-    "script": "set theTitle to \"\"\ntell application \"System Events\" to tell process \"Bear\"\n\tset frontmost to true\n\t-- The window title IS the note title. Read it here, with the Accessibility\n\t-- grant this block already needs, rather than from Bear's database, which\n\t-- sits in a group container macOS now protects (\"authorization denied\").\n\ttry\n\t\tset theTitle to name of front window\n\tend try\n\tclick menu item \"Copy Link\" of menu \"Note\" of menu bar 1\nend tell\ndelay 0.2\nset theLink to (the clipboard as text)\nset AppleScript's text item delimiters to \"id=\"\nset idPart to last text item of theLink\nset AppleScript's text item delimiters to \"&\"\nset noteId to first text item of idPart\nset AppleScript's text item delimiters to \"\"\nset dbPath to (POSIX path of (path to home folder)) & \"Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear/Application Data/database.sqlite\"\nif theTitle is \"\" or theTitle is \"Bear\" then\n\ttry\n\t\tset theTitle to do shell script \"sqlite3 -readonly \" & quoted form of dbPath & \" \" & quoted form of (\"SELECT ZTITLE FROM ZSFNOTE WHERE ZUNIQUEIDENTIFIER='\" & noteId & \"' LIMIT 1;\")\n\tend try\nend if\nreturn theTitle & tab & theLink",
+    "script": "set bearcli to POSIX path of (path to application \"Bear\") & \"Contents/MacOS/bearcli\"\ntry\n\tdo shell script \"test -x \" & quoted form of bearcli\non error\n\terror \"This version of Bear has no bearcli. Update Bear to capture links from it.\"\nend try\n-- bearcli reads the note open in Bear directly: no Copy Link menu click (which\n-- replaced whatever the user had copied, and needed Accessibility) and no read of Bear's\n-- database, which sits in a group container macOS protects. The id comes\n-- first so a tab in a title cannot corrupt it.\nreturn do shell script quoted form of bearcli & \" app get-selection --fields id,title\"",
     "delimiter": "\t",
     "fields": [
-      "title",
-      "link"
+      "id",
+      "title"
     ],
-    "uri": "{link|mdurl}",
+    "uri": "bear://x-callback-url/open-note?id={id}",
     "name": "{title}",
     "schemes": [
       "bear"

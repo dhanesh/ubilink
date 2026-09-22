@@ -824,19 +824,44 @@ mod tests {
     }
 
     #[test]
-    fn bear_title_comes_from_the_window_not_only_the_protected_database() {
-        // Bear's database sits in a group container that macOS now protects —
-        // reading it returned "authorization denied", confirmed live — and the
-        // script swallowed that, so every Bear link was saved named by its URL.
-        // The window title IS the note title, and reading it needs only the
-        // Accessibility grant the Copy Link click already requires.
+    fn shipped_bear_adapter_builds_the_note_link_and_title_from_bearcli() {
+        // `bearcli app get-selection --fields id,title` prints "<id>\t<title>".
+        // Every earlier title source failed live: Bear's database is in a
+        // protected group container ("authorization denied"), and the window's
+        // accessibility name is just "Bear". A title containing a tab must not
+        // corrupt the id, which is why the id comes first.
+        let spec = AdapterRegistry::defaults()
+            .for_app("Bear")
+            .expect("Bear ships")
+            .clone();
+        let out = "FC025707-8906-4D1C-A8B2-F44A303471A7\tLocal AI Mini PC Watchlist — Subscription Killers\tpart two";
+        let id = ConfiguredAdapter::new(spec, FakeRunner(Ok(out.into())))
+            .capture()
+            .unwrap();
+        assert_eq!(
+            id.uri,
+            "bear://x-callback-url/open-note?id=FC025707-8906-4D1C-A8B2-F44A303471A7"
+        );
+        assert_eq!(
+            id.name,
+            "Local AI Mini PC Watchlist — Subscription Killers\tpart two"
+        );
+    }
+
+    #[test]
+    fn shipped_bear_adapter_leaves_the_clipboard_and_menus_alone() {
+        // The old script clicked Bear's Copy Link menu, overwriting whatever the
+        // user had copied on every capture, and needed Accessibility to do it.
         let reg = AdapterRegistry::defaults();
         let script = &reg.for_app("Bear").expect("Bear ships").script;
-        let window = script
-            .find("name of front window")
-            .expect("reads the note title from Bear's window");
-        let db = script.find("sqlite3").expect("keeps the database fallback");
-        assert!(window < db, "the window title is the primary source");
+        assert!(
+            script.contains("bearcli"),
+            "reads the open note via bearcli"
+        );
+        assert!(script.contains("get-selection"), "asks for the open note");
+        for gone in ["clipboard", "click menu item", "System Events", "sqlite3"] {
+            assert!(!script.contains(gone), "must not use {gone}");
+        }
     }
 
     #[test]
