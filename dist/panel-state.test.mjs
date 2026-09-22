@@ -7,9 +7,7 @@ import {
   canConfirm,
   copyPayload,
   explanation,
-  permissionsComplete,
   hotkeyWarning,
-  accessibilityGuidance,
   canUseCapture,
 } from './panel-state.mjs';
 
@@ -65,14 +63,6 @@ test('confirm is unavailable in capturing/error/idle states', () => {
 test('unknown events leave state unchanged', () => {
   const s = { phase: 'ready', resource: { uri: 'u' }, backlinks: [] };
   assert.deepEqual(reduce(s, { type: 'nonsense' }), s);
-});
-
-test('S4: onboarding is complete only when BOTH permissions are in place', () => {
-  assert.equal(permissionsComplete({ accessibility: true, automation: 'granted' }), true);
-  assert.equal(permissionsComplete({ accessibility: false, automation: 'granted' }), false);
-  assert.equal(permissionsComplete({ accessibility: true, automation: 'denied' }), false);
-  assert.equal(permissionsComplete({ accessibility: true, automation: 'not_determined' }), false);
-  assert.equal(permissionsComplete(null), false);
 });
 
 test('H1: no warning when every hotkey registered', () => {
@@ -155,29 +145,6 @@ test('H7: all three registered -> no warning, even if permissions are incomplete
 // the user has been through the grant flow, a still-false reading needs to
 // say that plainly and offer a way out, instead of repeating "grant it above"
 // forever.
-
-test('A1: Accessibility still false after the user has been through the grant flow -> explains launch-time trust and offers relaunch', () => {
-  const msg = accessibilityGuidance({ accessibility: false, automation: 'granted' }, true);
-  assert.ok(msg.length > 0);
-  assert.match(msg, /launch/i);
-  assert.match(msg, /reopen|relaunch|quit/i);
-  assert.match(msg, /different/i); // names the other-build cause too
-});
-
-test('A2: Accessibility granted but Automation still missing -> asks for Automation, not a relaunch', () => {
-  const msg = accessibilityGuidance({ accessibility: true, automation: 'not_determined' }, false);
-  assert.ok(msg.length > 0);
-  assert.match(msg, /automation/i);
-  assert.doesNotMatch(msg, /launch/i);
-});
-
-test('A3: everything granted -> no special guidance needed', () => {
-  assert.equal(accessibilityGuidance({ accessibility: true, automation: 'granted' }, true), '');
-});
-
-test('A0: Accessibility false but the user has not attempted a grant yet -> no premature relaunch talk', () => {
-  assert.equal(accessibilityGuidance({ accessibility: false, automation: 'granted' }, false), '');
-});
 
 // Defect 5 (wrong permission gate): capture from browsers/Finder goes through
 // osascript (Automation) only. Accessibility is solely for AX-based

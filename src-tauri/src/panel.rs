@@ -547,24 +547,24 @@ mod tests {
             "S4: onboarding screen must exist"
         );
         assert!(
-            html.contains("data-perm=\"accessibility\""),
-            "must surface the Accessibility permission"
-        );
-        assert!(
             html.contains("data-perm=\"automation\""),
             "must surface the Automation permission"
+        );
+        // S4 is least-privilege: request a permission only when something needs
+        // it. No built-in adapter needs Accessibility any more (Bear captures
+        // through bearcli, and the hotkey registers via Carbon with no grant), so
+        // onboarding must not ask for it.
+        assert!(
+            !html.contains("data-perm=\"accessibility\""),
+            "S4: must not request Accessibility, which nothing built in needs"
         );
         assert!(
             html.contains("id=\"recheck\""),
             "must offer a re-check action"
         );
         assert!(
-            html.contains("data-pane=\"accessibility\""),
-            "must offer to open the Accessibility pane"
-        );
-        assert!(
-            html.contains("id=\"grant-accessibility\""),
-            "must offer a native Accessibility prompt"
+            html.contains("data-pane=\"automation\""),
+            "must offer to open the Automation pane"
         );
         assert!(
             html.contains("id=\"open-setup\""),

@@ -315,5 +315,5 @@ fi
 verify_outputs
 log "done: $APP${DMG:+ and $DMG}"
 if [ "$MODE" = dev ]; then
-  log "grant Accessibility + Automation to THIS app once (or use the in-app onboarding)."
+  log "grant Automation to THIS app once (or use the in-app onboarding)."
 fi

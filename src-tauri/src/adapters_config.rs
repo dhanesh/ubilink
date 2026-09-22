@@ -245,14 +245,18 @@ fn clean_script_error(raw: &str) -> String {
 
 /// The user-facing explanation for a failed capture script. One failure gets its
 /// own message because it has a known fix: an adapter that UI-scripts an app
-/// through System Events (Bear) needs Accessibility, and macOS reports its absence
-/// as "osascript is not allowed assistive access" — accurate, but it never names
-/// the permission. Everything else gets the cleaned script error.
+/// through System Events needs Accessibility, and macOS reports its absence as
+/// "osascript is not allowed assistive access" — accurate, but it never names the
+/// permission. No built-in adapter does this any more (Bear uses bearcli), so it
+/// matters for user-defined adapters, and the app has no Accessibility row to
+/// point at — the message names System Settings instead. Everything else gets
+/// the cleaned script error.
 fn explain_script_error(app: &str, raw: &str) -> String {
     if raw.contains("not allowed assistive access") {
         return format!(
             "Capturing from {app} needs Accessibility permission, because Ubilink reads \
-             {app}'s menus. Grant it under Permissions."
+             {app}'s menus. Grant it in System Settings → Privacy & Security → \
+             Accessibility, then quit and reopen Ubilink."
         );
     }
     format!(
@@ -824,6 +828,47 @@ mod tests {
     }
 
     #[test]
+    fn shipped_bear_adapter_builds_the_note_link_and_title_from_bearcli() {
+        // `bearcli app get-selection --fields id,title` prints "<id>\t<title>".
+        // Every earlier title source failed live: Bear's database is in a
+        // protected group container ("authorization denied"), and the window's
+        // accessibility name is just "Bear". A title containing a tab must not
+        // corrupt the id, which is why the id comes first.
+        let spec = AdapterRegistry::defaults()
+            .for_app("Bear")
+            .expect("Bear ships")
+            .clone();
+        let out = "FC025707-8906-4D1C-A8B2-F44A303471A7\tLocal AI Mini PC Watchlist — Subscription Killers\tpart two";
+        let id = ConfiguredAdapter::new(spec, FakeRunner(Ok(out.into())))
+            .capture()
+            .unwrap();
+        assert_eq!(
+            id.uri,
+            "bear://x-callback-url/open-note?id=FC025707-8906-4D1C-A8B2-F44A303471A7"
+        );
+        assert_eq!(
+            id.name,
+            "Local AI Mini PC Watchlist — Subscription Killers\tpart two"
+        );
+    }
+
+    #[test]
+    fn shipped_bear_adapter_leaves_the_clipboard_and_menus_alone() {
+        // The old script clicked Bear's Copy Link menu, overwriting whatever the
+        // user had copied on every capture, and needed Accessibility to do it.
+        let reg = AdapterRegistry::defaults();
+        let script = &reg.for_app("Bear").expect("Bear ships").script;
+        assert!(
+            script.contains("bearcli"),
+            "reads the open note via bearcli"
+        );
+        assert!(script.contains("get-selection"), "asks for the open note");
+        for gone in ["clipboard", "click menu item", "System Events", "sqlite3"] {
+            assert!(!script.contains(gone), "must not use {gone}");
+        }
+    }
+
+    #[test]
     fn missing_accessibility_is_explained_as_a_permission_not_an_error() {
         // What a user saw capturing from Bear with Accessibility off: accurate,
         // but it never says the fix is the Accessibility permission — which the
@@ -833,8 +878,8 @@ mod tests {
         assert!(msg.contains("Bear"), "names the app: {msg}");
         assert!(msg.contains("Accessibility"), "names the permission: {msg}");
         assert!(
-            msg.contains("Permissions"),
-            "points at where to fix it: {msg}"
+            msg.contains("Privacy & Security"),
+            "points at where to fix it — the app itself no longer has an Accessibility row: {msg}"
         );
         assert!(
             !msg.contains("osascript"),

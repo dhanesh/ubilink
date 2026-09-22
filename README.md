@@ -111,9 +111,9 @@ Not done yet:
 2. Check the download: `shasum -a 256 -c SHA256SUMS` (the `.dmg` line should say `OK`).
 3. Open the DMG and drag **Ubilink** to **Applications**, then launch it.
 
-**First run:** Ubilink asks for two macOS permissions — **Automation** (so it can read
-the link of the app you're in) and **Accessibility** (for the global shortcuts). The
-in-app onboarding walks you through both. If you ran a development build before, macOS
+**First run:** Ubilink asks for one macOS permission, **Automation**, so it can read
+the link of the app you're in. The global shortcuts need no permission. The
+in-app onboarding walks you through it. If you ran a development build before, macOS
 asks once more for the released app.
 
 Press **Cmd+Shift+K** to capture, **Cmd+Shift+L** to browse your links, and
