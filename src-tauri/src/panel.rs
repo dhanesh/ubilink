@@ -566,9 +566,21 @@ mod tests {
             html.contains("data-pane=\"automation\""),
             "must offer to open the Automation pane"
         );
+        // Settings (export, import, reset, adapters, permissions) must be
+        // reachable without knowing ⌘⇧, — it used to be reachable ONLY by that
+        // shortcut, which the app never showed, while the footer link opened the
+        // permission setup instead. Permissions stay one step away, inside it.
         assert!(
-            html.contains("id=\"open-setup\""),
-            "permissions must be reachable from the capture view"
+            html.contains("id=\"open-settings-view\""),
+            "Settings must be reachable from the capture view"
+        );
+        assert!(
+            !html.contains("id=\"open-setup\""),
+            "the footer opens Settings, not the permission setup"
+        );
+        assert!(
+            html.contains("id=\"set-open-perms\""),
+            "permissions must be reachable from Settings"
         );
     }
 

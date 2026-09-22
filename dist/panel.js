@@ -528,7 +528,9 @@ $('setup-done').addEventListener('click', () => {
   // back in, so an incomplete setup is no reason to trap anyone here.
   invoke('dismiss_panel').catch(() => {});
 });
-$('open-setup').addEventListener('click', openSetup);
+// Settings used to be reachable only by ⌘⇧, (never shown in the app); the footer
+// link now opens it. Permission setup is one step further, inside Settings.
+$('open-settings-view').addEventListener('click', () => openSettings());
 $('copy').addEventListener('click', confirmCopy);
 $('browser-search').addEventListener('input', (e) => {
   browse = browseReduce(browse, { type: 'filter', text: e.target.value });
