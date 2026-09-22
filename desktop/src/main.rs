@@ -10,6 +10,8 @@
 // running needs a desktop session.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod placement;
+
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -364,6 +366,40 @@ fn resize_panel(app: AppHandle, height: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// Move the panel onto the display under the mouse cursor, so it opens where the
+/// user is looking rather than on whichever display it was created on. The maths
+/// (and the macOS coordinate-space conversions it depends on) live in
+/// `placement`, where they're unit-tested. Best effort: if any query fails the
+/// window stays where it was, which is the old behaviour.
+fn place_panel(app: &AppHandle, w: &tauri::WebviewWindow) {
+    let (Ok(cursor), Ok(monitors)) = (app.cursor_position(), app.available_monitors()) else {
+        return;
+    };
+    let primary = app.primary_monitor().ok().flatten();
+    let screen_of = |m: &tauri::Monitor| {
+        let (p, s) = (m.position(), m.size());
+        placement::Screen::from_physical(p.x, p.y, s.width, s.height, m.scale_factor())
+    };
+    // Primary first: it's where the panel goes if the cursor is on no display.
+    let mut screens: Vec<placement::Screen> = primary.iter().map(screen_of).collect();
+    for m in &monitors {
+        let s = screen_of(m);
+        if !screens.contains(&s) {
+            screens.push(s);
+        }
+    }
+    let (Ok(size), Ok(scale)) = (w.outer_size(), w.scale_factor()) else {
+        return;
+    };
+    let size = size.to_logical::<f64>(scale);
+    // tao reports the cursor scaled by the PRIMARY display's factor.
+    let primary_scale = primary.as_ref().map_or(1.0, |m| m.scale_factor());
+    let cursor = placement::cursor_points(cursor.x, cursor.y, primary_scale);
+    if let Some((x, y)) = placement::panel_origin(&screens, cursor, (size.width, size.height)) {
+        let _ = w.set_position(tauri::LogicalPosition::new(x, y));
+    }
+}
+
 /// Hide the panel — the flow is done (U2: 2 actions, then get out of the way).
 #[tauri::command]
 fn dismiss_panel(app: AppHandle) -> Result<(), String> {
@@ -711,6 +747,7 @@ fn main() {
                     }
                     "show" => {
                         if let Some(w) = app.get_webview_window("panel") {
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -733,6 +770,7 @@ fn main() {
             // Show the panel on launch so there is ALWAYS visible UI. On load the
             // webview checks permissions and shows onboarding if anything's missing.
             if let Some(w) = app.get_webview_window("panel") {
+                place_panel(app.handle(), &w);
                 let _ = w.show();
                 let _ = w.set_focus();
             }
@@ -767,6 +805,7 @@ fn main() {
                                 None
                             };
                             let _ = w.emit("capturing", t0);
+                            place_panel(app, &w);
                             let _ = w.show();
 
                             // Run the capture OFF the UI path so it never blocks first paint.
@@ -831,6 +870,7 @@ fn main() {
                                     let _ = w.emit("browse-err", msg);
                                 }
                             }
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -848,6 +888,7 @@ fn main() {
                                 }
                             };
                             let _ = w.emit("settings", stats);
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
