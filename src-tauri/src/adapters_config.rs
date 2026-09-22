@@ -824,6 +824,22 @@ mod tests {
     }
 
     #[test]
+    fn bear_title_comes_from_the_window_not_only_the_protected_database() {
+        // Bear's database sits in a group container that macOS now protects —
+        // reading it returned "authorization denied", confirmed live — and the
+        // script swallowed that, so every Bear link was saved named by its URL.
+        // The window title IS the note title, and reading it needs only the
+        // Accessibility grant the Copy Link click already requires.
+        let reg = AdapterRegistry::defaults();
+        let script = &reg.for_app("Bear").expect("Bear ships").script;
+        let window = script
+            .find("name of front window")
+            .expect("reads the note title from Bear's window");
+        let db = script.find("sqlite3").expect("keeps the database fallback");
+        assert!(window < db, "the window title is the primary source");
+    }
+
+    #[test]
     fn missing_accessibility_is_explained_as_a_permission_not_an_error() {
         // What a user saw capturing from Bear with Accessibility off: accurate,
         // but it never says the fix is the Accessibility permission — which the
