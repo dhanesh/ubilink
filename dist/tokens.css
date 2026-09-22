@@ -33,6 +33,18 @@
   /* ---- Spacing (4pt grid) ---- */
   --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
   --s-5: 20px; --s-6: 24px; --s-7: 32px; --s-8: 40px;
+  /* Hairline, below the grid: list gaps and insets. */
+  --s-hair: 2px;
+
+  /* ---- Component padding ----
+     Padding INSIDE a control sets that control's size, so it is a per-kind
+     token rather than a spacing step: every push button, row and badge is the
+     same size wherever it appears. Spacing BETWEEN elements uses --s-*. */
+  --pad-control: 6px 14px;                /* push buttons */
+  --pad-field:   var(--s-2) var(--s-3);   /* text fields */
+  --pad-row:     6px 10px;                /* list and settings rows */
+  --pad-badge:   1px 6px;                 /* keycaps, counts */
+  --pad-pill:    2px 10px;                /* status pills */
 
   /* ---- Material ---- */
   --ui-blur: 42px;            /* Aurora */

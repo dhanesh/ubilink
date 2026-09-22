@@ -653,6 +653,44 @@ mod tests {
     }
 
     #[test]
+    fn panel_css_spacing_comes_only_from_tokens() {
+        // Every margin, padding and gap is built from tokens.css — the 4-pt
+        // spacing scale (whose 8/20 steps match macOS's standard control and
+        // window-edge spacing) or a named component padding — never a one-off
+        // pixel value. One-off values are how the capture view, onboarding and
+        // Settings each ended up spaced differently.
+        let css = read_dist("panel.css");
+        let mut code = String::new();
+        let mut rest = css.as_str();
+        while let Some(open) = rest.find("/*") {
+            code.push_str(&rest[..open]);
+            rest = &rest[open + rest[open..].find("*/").expect("comment closes") + 2..];
+        }
+        code.push_str(rest);
+
+        let mut offenders = Vec::new();
+        for decl in code.split([';', '{', '}']) {
+            let Some((prop, value)) = decl.split_once(':') else {
+                continue;
+            };
+            let prop = prop.trim();
+            let spacing = ["margin", "padding", "gap", "row-gap", "column-gap"]
+                .iter()
+                .any(|p| prop == *p || prop.starts_with(&format!("{p}-")));
+            if !spacing {
+                continue;
+            }
+            let ok = value
+                .split_whitespace()
+                .all(|part| part == "0" || part == "auto" || part.starts_with("var(--"));
+            if !ok {
+                offenders.push(format!("{prop}: {}", value.trim()));
+            }
+        }
+        assert!(offenders.is_empty(), "off-scale spacing: {offenders:#?}");
+    }
+
+    #[test]
     fn panel_css_provides_a_visible_focus_indicator() {
         // U4: keyboard users must see where focus is.
         let css = read_dist("panel.css");
