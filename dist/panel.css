@@ -46,6 +46,10 @@ a:focus-visible,
 }
 
 /* ── Capture view ── */
+/* #panel's gap spaces only its direct children, and everything below lives in
+   this one wrapper; without its own layout the Copy button sat flush against the
+   status text. Hidden children (display:none) take no space and add no gap. */
+#capture { display: flex; flex-direction: column; gap: var(--s-3); }
 #resource-name { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-semibold); color: var(--text-1); line-height: 1.25; }
 .uri { margin: 0; color: var(--text-3); font-size: var(--fs-meta); font-family: var(--font-mono); word-break: break-all; }
 #status-line { margin: 0; color: var(--text-2); font-size: var(--fs-body); }
