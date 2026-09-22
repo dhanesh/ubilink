@@ -34,7 +34,7 @@ make bundle     # -> desktop/target/bundle/Ubilink.app (stable self-signed ident
 open desktop/target/bundle/Ubilink.app
 ```
 
-Grant Accessibility + Automation to **Ubilink.app** once; re-running `make bundle`
+Grant Automation to **Ubilink.app** once; re-running `make bundle`
 rebuilds in place, so the grant sticks. (Optionally drag `Ubilink.app` to /Applications
 for an even more stable location.)
 
@@ -48,9 +48,9 @@ for an even more stable location.)
    Tauri-free (S2).
 
    On launch the panel shows a **permission onboarding screen** (S4): it checks
-   Accessibility (`AXIsProcessTrusted`) and Automation (System Events probe), shows
-   ✓/✗ per item, and offers "Open Settings" (jumps to the right privacy pane) +
-   "Re-check". Grant both, Re-check → the capture view appears.
+   Automation (System Events probe), shows ✓/✗, and offers "Open Settings" (jumps to
+   the right privacy pane) + "Re-check". Grant it, Re-check → the capture view appears.
+   Accessibility is not requested: no built-in adapter needs it.
 
    The capture flow is **hotkey-driven and inverted**: pressing Cmd+Shift+K captures
    whatever app was frontmost *before* the panel appears. The panel paints first,

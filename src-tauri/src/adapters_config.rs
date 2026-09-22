@@ -245,14 +245,18 @@ fn clean_script_error(raw: &str) -> String {
 
 /// The user-facing explanation for a failed capture script. One failure gets its
 /// own message because it has a known fix: an adapter that UI-scripts an app
-/// through System Events (Bear) needs Accessibility, and macOS reports its absence
-/// as "osascript is not allowed assistive access" — accurate, but it never names
-/// the permission. Everything else gets the cleaned script error.
+/// through System Events needs Accessibility, and macOS reports its absence as
+/// "osascript is not allowed assistive access" — accurate, but it never names the
+/// permission. No built-in adapter does this any more (Bear uses bearcli), so it
+/// matters for user-defined adapters, and the app has no Accessibility row to
+/// point at — the message names System Settings instead. Everything else gets
+/// the cleaned script error.
 fn explain_script_error(app: &str, raw: &str) -> String {
     if raw.contains("not allowed assistive access") {
         return format!(
             "Capturing from {app} needs Accessibility permission, because Ubilink reads \
-             {app}'s menus. Grant it under Permissions."
+             {app}'s menus. Grant it in System Settings → Privacy & Security → \
+             Accessibility, then quit and reopen Ubilink."
         );
     }
     format!(
@@ -874,8 +878,8 @@ mod tests {
         assert!(msg.contains("Bear"), "names the app: {msg}");
         assert!(msg.contains("Accessibility"), "names the permission: {msg}");
         assert!(
-            msg.contains("Permissions"),
-            "points at where to fix it: {msg}"
+            msg.contains("Privacy & Security"),
+            "points at where to fix it — the app itself no longer has an Accessibility row: {msg}"
         );
         assert!(
             !msg.contains("osascript"),

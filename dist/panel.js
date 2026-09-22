@@ -1,6 +1,6 @@
 // Satisfies: U1/U2/U3/U4/U5 + S4 onboarding — the thin view shell. All decision
 // logic is the headlessly-tested reduce()/canConfirm()/copyPayload()/
-// permissionsComplete() from panel-state.mjs. This file is the ENV-blocked layer
+// canUseCapture() from panel-state.mjs. This file is the ENV-blocked layer
 // (needs a real Tauri webview + the Rust command/event layer); verified via
 // docs/RUNBOOK-gui-panel.md. Capture is driven by 'capture-ok'/'capture-err' events
 // the Rust hotkey handler emits — so it links the app you were IN, every time.
@@ -9,9 +9,7 @@ import {
   canConfirm,
   copyPayload,
   explanation,
-  permissionsComplete,
   hotkeyWarning,
-  accessibilityGuidance,
   canUseCapture,
   shouldDismissOnBlur,
 } from './panel-state.mjs';
@@ -256,7 +254,7 @@ async function openSettings(stats) {
   // permission pills
   const report = await checkPermissions();
   const setPill = (id, ok) => { const p = $(id); p.dataset.state = ok ? 'ok' : 'missing'; p.textContent = ok ? 'Granted' : 'Not granted'; };
-  if (report) { setPill('set-acc', report.accessibility === true); setPill('set-auto', report.automation === 'granted'); }
+  if (report) setPill('set-auto', report.automation === 'granted');
   // plugin toggles (Settings › Plugins)
   await renderPlugins();
   // stats (use the pushed payload, else fetch)
@@ -443,65 +441,32 @@ function hotkeysRegistered(hotkeys) {
   return !hotkeys || (hotkeys.toggle && hotkeys.browse && hotkeys.settings);
 }
 
-// Defect 3: has the user been through the Accessibility grant flow this
-// session (clicked "Grant Access…" or "Re-check" at least once)? Feeds the
-// pure accessibilityGuidance() so a still-false reading right after boot (the
-// normal starting state) doesn't get the launch/relaunch speech prematurely.
-let accessibilityGrantAttempted = false;
-
 /** Defect 2: plain-language result of a Re-check, distinct from the standing
  * onboarding-hint copy — the click must visibly DO something even when
  * nothing on screen changes otherwise. */
 function recheckResultMessage(report, hotkeys) {
   if (!report) return "Couldn't check permissions — is ubilink running?";
-  if (permissionsComplete(report) && hotkeysRegistered(hotkeys)) return 'All set — press ⌘⇧K from any supported app.';
-  if (canUseCapture(report) && hotkeysRegistered(hotkeys)) {
-    return 'Automation is granted — you can capture now. Accessibility above is optional (only needed for menu-scripted apps like Bear).';
-  }
-  const missing = [];
-  if (report.accessibility !== true) missing.push('Accessibility');
-  if (report.automation !== 'granted') missing.push('Automation');
-  if (missing.length > 0) return `Still waiting on ${missing.join(' and ')}.`;
+  if (!canUseCapture(report)) return 'Still waiting on Automation.';
+  if (hotkeysRegistered(hotkeys)) return 'All set — press ⌘⇧K from any supported app.';
   return 'Still waiting — check the items above.';
 }
 
-/** Paint the per-permission ✓/✗ rows + the hint, the hotkey warning (Defect 1/2,
- * hotkeyWarning()) and the Accessibility-specific guidance (Defect 3,
- * accessibilityGuidance()). Pure DOM — all decisions come from panel-state.mjs. */
+/** Paint the Automation ✓/✗ row, the hint, and the hotkey warning (Defect 1/2,
+ * hotkeyWarning()). Pure DOM — all decisions come from panel-state.mjs. */
 function renderPermStatuses(report, hotkeys) {
-  setPerm('accessibility', report.accessibility === true, report.accessibility ? 'granted' : 'not granted');
   const autoOk = report.automation === 'granted';
   setPerm('automation', autoOk, report.automation.replace('_', ' '));
-  const complete = permissionsComplete(report);
-  const ready = canUseCapture(report);
-  // Round 2: this used to say "All set" whenever permissions alone were
-  // complete, even while a hotkey was still dead (e.g. browse/settings failed
-  // to register) — the same "stuck with no explanation" bug the warning above
-  // exists to fix, just in the hint text instead of an empty warning.
-  // Defect 5: Automation alone is enough to use ubilink — Accessibility is
-  // only for AX-based menu-scripting adapters (e.g. Bear), so say that
-  // instead of implying the app is still unusable.
-  $('onboarding-hint').textContent = complete && hotkeysRegistered(hotkeys)
+  // Round 2: never "All set" while a hotkey is still dead (e.g. browse/settings
+  // failed to register) — the hotkey warning below says which and why.
+  $('onboarding-hint').textContent = canUseCapture(report) && hotkeysRegistered(hotkeys)
     ? 'All set — press ⌘⇧K from any supported app.'
-    : ready && hotkeysRegistered(hotkeys)
-      ? 'Automation is granted — press ⌘⇧K to capture. Accessibility above is optional, for menu-scripted apps like Bear.'
-      : 'Grant the items above, then press Re-check.';
+    : 'Grant the item above, then press Re-check.';
   const warning = hotkeyWarning(hotkeys);
   const warningEl = $('hotkey-warning');
   if (warningEl) {
     warningEl.textContent = warning;
     warningEl.hidden = !warning;
   }
-  // Defect 3: the launch-time-trust dead end. Only speaks up once the user has
-  // actually been through the grant flow this session.
-  const guidance = accessibilityGuidance(report, accessibilityGrantAttempted);
-  const guidanceEl = $('accessibility-hint');
-  if (guidanceEl) {
-    guidanceEl.textContent = guidance;
-    guidanceEl.hidden = !guidance;
-  }
-  const relaunchBtn = $('relaunch-app');
-  if (relaunchBtn) relaunchBtn.hidden = !(accessibilityGrantAttempted && report.accessibility !== true);
 }
 
 /** Check + switch view. `resetIdle` shows the idle prompt when complete. */
@@ -509,9 +474,7 @@ async function refreshPermissions({ resetIdle = false } = {}) {
   const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
   if (!report) { showCaptureView(); render(); return false; } // browser preview
   renderPermStatuses(report, hotkeys);
-  // Defect 5: capture (osascript, browsers/Finder) needs only Automation.
-  // Accessibility is solely for AX-based adapters (Bear) — its absence must
-  // not trap a user who granted Automation on the setup screen forever.
+  // Defect 5: capture needs only Automation, so that alone leaves setup.
   const done = canUseCapture(report) && hotkeysRegistered(hotkeys);
   if (done) {
     showCaptureView();
@@ -544,28 +507,9 @@ for (const b of document.querySelectorAll('.open-settings')) {
     }
   });
 }
-$('grant-accessibility').addEventListener('click', async () => {
-  const btn = $('grant-accessibility');
-  btn.disabled = true;
-  accessibilityGrantAttempted = true;
-  // Defect 2: acknowledge the click immediately — macOS only shows its prompt
-  // the FIRST time (once a TCC record exists, nothing visibly happens), so a
-  // silent no-op here reads as a dead button.
-  $('onboarding-hint').textContent = 'Requesting Accessibility… (macOS only prompts the first time — if nothing appears, checking below.)';
-  try {
-    await invoke('request_accessibility'); // shows the macOS dialog, if it hasn't already decided
-    // Registration otherwise only ever runs once at startup, so granting the
-    // permission an AX-based adapter needs wouldn't revive anything without a
-    // relaunch. Retry BEFORE re-reading status so the UI reflects it at once.
-    await invoke('retry_hotkeys').catch(() => {});
-  } catch { /* browser preview / command unavailable */ }
-  await refreshPermissions(); // reflect the new state (and Defect 3's guidance, if still false)
-  btn.disabled = false;
-});
 $('recheck').addEventListener('click', async () => {
   const btn = $('recheck');
   btn.disabled = true;
-  accessibilityGrantAttempted = true; // a re-check counts as "been through the flow" (Defect 3)
   $('onboarding-hint').textContent = 'Checking…'; // Defect 2: visible even when the outcome doesn't change anything else
   await invoke('retry_hotkeys').catch(() => {});
   const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
@@ -583,11 +527,6 @@ $('setup-done').addEventListener('click', () => {
   // all. The tray icon ("Show ubilink") and the hotkey both remain the way
   // back in, so an incomplete setup is no reason to trap anyone here.
   invoke('dismiss_panel').catch(() => {});
-});
-$('relaunch-app')?.addEventListener('click', () => {
-  // Defect 3: Accessibility trust is evaluated at process launch — offer the
-  // way out directly instead of telling the user to quit and reopen by hand.
-  invoke('restart_app').catch(() => {});
 });
 $('open-setup').addEventListener('click', openSetup);
 $('copy').addEventListener('click', confirmCopy);
@@ -682,9 +621,8 @@ onEvent('capture-err', async (e) => {
   // If the failure is because a permission is missing, route to setup so the user
   // knows what to fix (rather than just seeing an opaque error).
   const [report, hotkeys] = await Promise.all([checkPermissions(), checkHotkeys()]);
-  // canUseCapture (Automation), NOT permissionsComplete: a capture error is not a
-  // reason to re-trap an Automation-only user in onboarding — that is the exact
-  // dead end this branch removes, and a transient failure would re-arm it.
+  // Only a missing Automation grant routes to setup: a transient capture error
+  // must not re-trap a user who has everything capture needs.
   if (report && !canUseCapture(report)) {
     renderPermStatuses(report, hotkeys);
     showOnboarding();

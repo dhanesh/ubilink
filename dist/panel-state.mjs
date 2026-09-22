@@ -66,21 +66,6 @@ export function explanation(state) {
   return state.phase === 'error' ? state.message : null;
 }
 
-/**
- * Are BOTH macOS permissions in place? Automation is needed to read the active
- * app; Accessibility is needed only to script another app's MENUS (apps like Bear
- * with no API). Accessibility is NOT required for the global hotkey — macOS
- * registers those through Carbon, which needs no TCC grant, and a user proved it
- * by pressing ⌘⇧K with Accessibility off.
- *
- * This is therefore "everything granted", NOT the gate for using the app: see
- * canUseCapture(), which keys on Automation alone. Gating the app on this is what
- * locked out a user who had Automation granted. Pure, so it's testable.
- */
-export function permissionsComplete(report) {
-  return !!report && report.accessibility === true && report.automation === 'granted';
-}
-
 /** Every shortcut ubilink registers, in the order the user should hear about
  * failures. Keys match the Rust `HotkeyReport` fields. */
 const HOTKEY_LABELS = [
@@ -125,43 +110,15 @@ export function hotkeyWarning(hotkeys) {
 }
 
 /**
- * Defect 5 (wrong permission gate): capture from browsers/Finder goes through
- * osascript — Automation only. Accessibility is solely for AX-based
- * menu-scripting adapters (e.g. Bear's "Copy Link"). Gating the whole app
- * behind BOTH permissions trapped a user with Automation granted and
- * Accessibility not on the setup screen, unable to use ubilink at all.
- * `permissionsComplete()` (both) still decides whether EVERYTHING, AX-based
- * adapters included, is finished — this decides only whether the capture view
- * is reachable at all.
+ * Can the user capture? Every built-in adapter goes through osascript, which
+ * needs Automation and nothing else. Accessibility is not required: the global
+ * hotkey registers via Carbon (no TCC grant), and Bear — the one adapter that
+ * used to script menus — now captures through bearcli. Gating the app on
+ * Accessibility as well once trapped a user with Automation granted on the
+ * setup screen, unable to use Ubilink at all.
  */
 export function canUseCapture(report) {
   return !!report && report.automation === 'granted';
-}
-
-/**
- * Defect 3 (S4 dead end): macOS evaluates Accessibility trust at PROCESS
- * LAUNCH. A process already running when the user grants it in System
- * Settings keeps seeing `AXIsProcessTrusted() === false` until it is quit and
- * reopened — the other cause of the identical symptom is that the entry
- * enabled in Settings belongs to a DIFFERENT Ubilink build/signing identity.
- * Pure decision of which message (if any) to show about Accessibility
- * specifically, on top of the plain ✓/✗ row — tested without a real grant +
- * relaunch cycle.
- *
- * `attemptedGrant`: has the user been through the grant flow this session
- * (clicked "Grant Access…" or "Re-check" at least once)? Before that, a false
- * reading is just the normal starting state — no relaunch talk yet.
- */
-export function accessibilityGuidance(report, attemptedGrant) {
-  if (!report) return '';
-  if (report.accessibility !== true) {
-    if (!attemptedGrant) return '';
-    return "Still showing as not granted? macOS only checks Accessibility when Ubilink launches, so if you just enabled it in System Settings, quit and reopen Ubilink for it to take effect. (If you enabled a different Ubilink build, this one needs its own entry.) Use Relaunch below.";
-  }
-  if (report.automation !== 'granted') {
-    return 'Accessibility is granted. Automation still needs approval — click Open Settings above, allow Ubilink, then press Re-check.';
-  }
-  return '';
 }
 
 /** Views where losing focus means the user has moved on, so the panel gets out of

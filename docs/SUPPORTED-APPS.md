@@ -12,7 +12,7 @@ file (see below).
 | Safari | AppleScript (current tab) | the page URL |
 | Google Chrome, Arc, Brave Browser, Microsoft Edge, Vivaldi, Opera | AppleScript (active tab) | the page URL |
 | Finder | AppleScript (POSIX path) | `file://…` |
-| Bear | its **Note › Copy Link** menu item via System Events (needs Accessibility); the title is read from Bear's local database | Bear's own id-based link, `bear://x-callback-url/open-note?id=…` |
+| Bear | the open note's id and title from Bear's own CLI, `bearcli app get-selection` (no Accessibility; the clipboard is untouched) | Bear's own id-based link, `bear://x-callback-url/open-note?id=…` |
 | Things3 | AppleScript (selected to-do) | `things:///show?id=…` |
 
 These follow patterns ubilink can verify; the broader

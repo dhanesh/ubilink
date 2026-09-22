@@ -32,7 +32,7 @@ Automation grant. This runbook confirms that seam.
 
 1. **Launch the app and grant access.** Use the bundled app so grants persist
    (`make bundle`, see [`RUNBOOK-gui-panel.md`](RUNBOOK-gui-panel.md)). The onboarding
-   screen checks Accessibility and Automation. The **first** capture from each app
+   screen checks Automation. The **first** capture from each app
    also raises a macOS Automation prompt for that app. `osascript` waits for your
    answer, but only for 15 s. If the timeout expires first, the panel says
    *"…the app didn't respond within 15 seconds. If macOS is showing a permission
@@ -40,8 +40,8 @@ Automation grant. This runbook confirms that seam.
 2. **Safari:** open any page (e.g. `https://example.com`), press **Cmd+Shift+K**.
    Expect the panel to show the page title and URL; Enter copies the link.
 3. **Other built-ins:** repeat with a Chrome (or Arc/Brave/Edge/Vivaldi/Opera) tab,
-   a Finder window, a Bear note (needs Accessibility: the adapter clicks
-   *Note › Copy Link*) and a selected Things3 to-do.
+   a Finder window, a Bear note (read through Bear's own `bearcli`; no
+   Accessibility, and your clipboard is left alone) and a selected Things3 to-do.
 4. **Seam check without the panel (optional):** run an adapter's script directly.
    The grant belongs to your terminal here, not to `Ubilink.app`:
    ```sh

@@ -20,24 +20,11 @@
            user always knows exactly what's left to do. -->
       <section id="onboarding" hidden aria-labelledby="onboarding-heading">
         <h1 id="onboarding-heading">Set up Ubilink</h1>
-        <p class="sub">Ubilink needs Automation to capture links from browsers, Finder, and more. Accessibility is optional, only for apps that need their menus scripted (like Bear).</p>
+        <!-- Automation is the only permission capture needs. Accessibility used to
+             have a row here for Bear's menu scripting; Bear now captures through
+             bearcli, and no built-in adapter needs Accessibility. -->
+        <p class="sub">Ubilink needs Automation to capture links from browsers, Finder, Bear, and more.</p>
         <ul id="perm-list">
-          <li class="perm" data-perm="accessibility">
-            <span class="perm-status" role="img" aria-label="checking">…</span>
-            <div class="perm-body">
-              <strong>Accessibility (optional)</strong>
-              <p>Lets Ubilink script an app's menus — needed only for apps like Bear that have no API. The hotkey and browser/Finder capture work without it.</p>
-              <button type="button" id="grant-accessibility">Grant Access…</button>
-              <button type="button" class="open-settings" data-pane="accessibility">Open Settings</button>
-              <!-- Defect 3: macOS evaluates Accessibility trust at process launch, so a
-                   process already running when the user grants it in System Settings
-                   keeps reading itself as untrusted until it's quit and reopened. Hidden
-                   until the user has actually been through the grant flow; see
-                   accessibilityGuidance() in panel-state.mjs. -->
-              <p id="accessibility-hint" class="hint" hidden aria-live="polite"></p>
-              <button type="button" id="relaunch-app" hidden>Relaunch Ubilink</button>
-            </div>
-          </li>
           <li class="perm" data-perm="automation">
             <span class="perm-status" role="img" aria-label="checking">…</span>
             <div class="perm-body">
@@ -98,10 +85,6 @@
 
         <div class="set-group">
           <h2 class="set-label">Permissions</h2>
-          <div class="set-row">
-            <div class="set-text"><strong>Accessibility</strong><span class="set-sub">Script app menus (e.g. Bear).</span></div>
-            <span class="set-pill" id="set-acc" data-state="unknown">…</span>
-          </div>
           <div class="set-row">
             <div class="set-text"><strong>Automation</strong><span class="set-sub">Read the active app's link.</span></div>
             <span class="set-pill" id="set-auto" data-state="unknown">…</span>

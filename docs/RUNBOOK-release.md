@@ -65,8 +65,8 @@ On a clean **Apple silicon** Mac and a clean **Intel** Mac:
 - [ ] Opening the DMG and launching Ubilink from Applications shows **no** Gatekeeper
       warning (notarized builds only; an UNNOTARIZED dry run is expected to warn).
 - [ ] `spctl -a -t exec -vv /Applications/Ubilink.app` → `accepted`, `source=Notarized Developer ID`.
-- [ ] The Automation and Accessibility prompts appear, with the Apple Events reason text.
-- [ ] Cmd+Shift+K in Safari captures the page; in Finder captures the selected file.
+- [ ] The Automation prompt appears, with the Apple Events reason text. No Accessibility prompt appears.
+- [ ] Cmd+Shift+K in Safari captures the page; in Finder captures the open folder.
 - [ ] Cmd+Shift+L lists links; opening one works; export then import round-trips.
 - [ ] Settings shows `Ubilink X.Y.Z`.
 
