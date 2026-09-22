@@ -243,6 +243,24 @@ fn clean_script_error(raw: &str) -> String {
     message.trim().to_string()
 }
 
+/// The user-facing explanation for a failed capture script. One failure gets its
+/// own message because it has a known fix: an adapter that UI-scripts an app
+/// through System Events (Bear) needs Accessibility, and macOS reports its absence
+/// as "osascript is not allowed assistive access" — accurate, but it never names
+/// the permission. Everything else gets the cleaned script error.
+fn explain_script_error(app: &str, raw: &str) -> String {
+    if raw.contains("not allowed assistive access") {
+        return format!(
+            "Capturing from {app} needs Accessibility permission, because Ubilink reads \
+             {app}'s menus. Grant it under Permissions."
+        );
+    }
+    format!(
+        "Couldn't read the active resource from {app}: {}",
+        clean_script_error(raw)
+    )
+}
+
 impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
     fn id(&self) -> &str {
         &self.spec.app
@@ -254,11 +272,7 @@ impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
         match self.runner.run("osascript", &["-e", &self.spec.script]) {
             Ok(out) => self.parse(&out),
             Err(e) => Err(CaptureFailure::AdapterError {
-                explanation: format!(
-                    "Couldn't read the active resource from {}: {}",
-                    self.spec.app,
-                    clean_script_error(&e)
-                ),
+                explanation: explain_script_error(&self.spec.app, &e),
             }),
         }
     }
@@ -807,6 +821,40 @@ mod tests {
         for plain in ["osascript timed out", "No such file (os error 2)", ""] {
             assert_eq!(clean_script_error(plain), plain);
         }
+    }
+
+    #[test]
+    fn missing_accessibility_is_explained_as_a_permission_not_an_error() {
+        // What a user saw capturing from Bear with Accessibility off: accurate,
+        // but it never says the fix is the Accessibility permission — which the
+        // setup screen already describes as needed "only for apps like Bear".
+        let raw = "118:189: execution error: System Events got an error: osascript is not allowed assistive access. (-1719)";
+        let msg = explain_script_error("Bear", raw);
+        assert!(msg.contains("Bear"), "names the app: {msg}");
+        assert!(msg.contains("Accessibility"), "names the permission: {msg}");
+        assert!(
+            msg.contains("Permissions"),
+            "points at where to fix it: {msg}"
+        );
+        assert!(
+            !msg.contains("osascript"),
+            "no AppleScript internals: {msg}"
+        );
+        assert!(
+            !msg.contains("System Events"),
+            "no AppleScript internals: {msg}"
+        );
+    }
+
+    #[test]
+    fn other_script_errors_keep_the_cleaned_explanation() {
+        assert_eq!(
+            explain_script_error(
+                "Finder",
+                "0:9: execution error: “Recents” isn’t a folder on disk. (-2700)"
+            ),
+            "Couldn't read the active resource from Finder: “Recents” isn’t a folder on disk."
+        );
     }
 
     #[test]
