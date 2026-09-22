@@ -163,3 +163,19 @@ export function accessibilityGuidance(report, attemptedGrant) {
   }
   return '';
 }
+
+/** Views where losing focus means the user has moved on, so the panel gets out of
+ * the way (like Spotlight). Onboarding and settings are deliberately absent:
+ * leaving the panel IS the task there (granting a permission in System Settings,
+ * picking a file to import), so dismissing would pull the rug out mid-step. */
+const DISMISS_ON_BLUR_VIEWS = new Set(['capture', 'browser']);
+
+/**
+ * Should the panel hide when it loses focus? Pure, so it's testable.
+ * Never mid-capture: the first capture from an app can raise a macOS Automation
+ * prompt that takes focus, and hiding then would drop the result on the floor.
+ * An unknown view keeps the panel open — failing safe beats vanishing.
+ */
+export function shouldDismissOnBlur(view, phase) {
+  return DISMISS_ON_BLUR_VIEWS.has(view) && phase !== 'capturing';
+}
