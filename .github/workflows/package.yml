@@ -8,6 +8,10 @@ on:
     paths:
       - "scripts/**"
       - "desktop/**"
+      # The app compiles in ubilink-core and embeds the frontend, so changes there
+      # can break the universal release build just as surely as desktop/ changes.
+      - "src-tauri/**"
+      - "dist/**"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/**"
