@@ -213,6 +213,36 @@ impl<R: CommandRunner> ConfiguredAdapter<R> {
     }
 }
 
+/// Strip osascript's framing from a script error so the user reads a sentence,
+/// not AppleScript internals: `77:82: execution error: <message> (-1700)` becomes
+/// `<message>`. Anything not in exactly that shape is returned untouched, so a
+/// plain runner error (a timeout, a missing binary) is never mangled.
+fn clean_script_error(raw: &str) -> String {
+    let all_digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let Some((offsets, rest)) = raw.trim().split_once(": execution error: ") else {
+        return raw.to_string();
+    };
+    let framed = offsets
+        .split_once(':')
+        .is_some_and(|(from, to)| all_digits(from) && all_digits(to));
+    if !framed {
+        return raw.to_string();
+    }
+    // Drop a trailing Apple event code like " (-1700)", and only that.
+    let message = match rest.rsplit_once(" (") {
+        Some((msg, code))
+            if code
+                .strip_suffix(')')
+                .and_then(|c| c.strip_prefix('-'))
+                .is_some_and(all_digits) =>
+        {
+            msg
+        }
+        _ => rest,
+    };
+    message.trim().to_string()
+}
+
 impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
     fn id(&self) -> &str {
         &self.spec.app
@@ -225,8 +255,9 @@ impl<R: CommandRunner> ResourceAdapter for ConfiguredAdapter<R> {
             Ok(out) => self.parse(&out),
             Err(e) => Err(CaptureFailure::AdapterError {
                 explanation: format!(
-                    "Couldn't read the active resource from {}: {e}",
-                    self.spec.app
+                    "Couldn't read the active resource from {}: {}",
+                    self.spec.app,
+                    clean_script_error(&e)
                 ),
             }),
         }
@@ -749,6 +780,70 @@ mod tests {
         assert!(
             !reg.for_app("Finder").unwrap().user_defined,
             "untouched default"
+        );
+    }
+
+    #[test]
+    fn script_errors_lose_osascript_noise_but_keep_the_message() {
+        // Verbatim what a user saw capturing from Finder's Recents view: the
+        // offsets, the "execution error:" preamble and the Apple event code are
+        // AppleScript internals, not an explanation.
+        let raw = "77:82: execution error: Can’t make «class fvtg» of window 1 of application \"Finder\" into type alias. (-1700)";
+        assert_eq!(
+            clean_script_error(raw),
+            "Can’t make «class fvtg» of window 1 of application \"Finder\" into type alias."
+        );
+        // A script's own `error "…"` arrives wrapped the same way (code -2700).
+        assert_eq!(
+            clean_script_error("0:180: execution error: “Recents” isn’t a folder on disk. (-2700)"),
+            "“Recents” isn’t a folder on disk."
+        );
+    }
+
+    #[test]
+    fn script_errors_without_osascript_framing_are_left_alone() {
+        // Only osascript's exact framing is stripped: a parenthesised non-code
+        // like "(os error 2)" must survive, as must plain and empty messages.
+        for plain in ["osascript timed out", "No such file (os error 2)", ""] {
+            assert_eq!(clean_script_error(plain), plain);
+        }
+    }
+
+    #[test]
+    fn capture_failure_explanation_is_cleaned() {
+        let spec = AdapterRegistry::defaults()
+            .for_app("Finder")
+            .expect("Finder ships")
+            .clone();
+        let raw = "0:120: execution error: “Recents” isn’t a folder on disk. Select a file in it, or open a real folder. (-2700)";
+        let err = ConfiguredAdapter::new(spec, FakeRunner(Err(raw.into())))
+            .capture()
+            .unwrap_err();
+        match err {
+            CaptureFailure::AdapterError { explanation } => assert_eq!(
+                explanation,
+                "Couldn't read the active resource from Finder: “Recents” isn’t a folder on disk. Select a file in it, or open a real folder."
+            ),
+            _ => panic!("expected AdapterError"),
+        }
+    }
+
+    #[test]
+    fn builtin_finder_script_handles_views_that_are_not_folders() {
+        // Regression guard: Recents, AirDrop, Network and search results have no
+        // folder on disk, so `target of front window as alias` fails in them. The
+        // shipped script must guard that lookup, fall back to the selection, and
+        // not assume a Finder window is open at all.
+        let reg = AdapterRegistry::defaults();
+        let script = &reg.for_app("Finder").expect("Finder ships").script;
+        assert!(script.contains("try"), "target lookup must be guarded");
+        assert!(
+            script.contains("selection"),
+            "must fall back to the selection"
+        );
+        assert!(
+            script.contains("count of Finder windows"),
+            "must handle no open window"
         );
     }
 }

@@ -85,7 +85,7 @@
   },
   {
     "app": "Finder",
-    "script": "tell application \"Finder\" to return POSIX path of (target of front window as alias)",
+    "script": "tell application \"Finder\"\n\tif (count of Finder windows) is 0 then error \"No Finder window is open. Open a folder, then press ⌘⇧K.\"\n\ttry\n\t\treturn POSIX path of (target of front Finder window as alias)\n\ton error\n\t\tset sel to selection\n\t\tif (count of sel) > 0 then return POSIX path of (item 1 of sel as alias)\n\t\terror \"“\" & (name of front Finder window) & \"” isn’t a folder on disk. Select a file in it, or open a real folder.\"\n\tend try\nend tell",
     "fields": [
       "path"
     ],
