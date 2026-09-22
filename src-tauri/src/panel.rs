@@ -573,6 +573,33 @@ mod tests {
     }
 
     #[test]
+    fn panel_css_spaces_the_capture_view_on_the_token_scale() {
+        // #panel's gap only spaces its direct children, and the capture view's
+        // status line, Copy button and hint all sit inside ONE child, #capture.
+        // Without its own layout they stacked flush, the button touching the
+        // text above it. The gap must come from the spacing scale in tokens.css
+        // (a 4-pt grid whose 8/20 match macOS's standard control and edge
+        // spacing), not a one-off pixel value.
+        let css = read_dist("panel.css");
+        let start = css
+            .find("\n#capture {")
+            .expect("#capture needs its own layout rule");
+        let rule = &css[start..start + css[start..].find('}').expect("rule closes")];
+        assert!(
+            rule.contains("display: flex"),
+            "lays out its children: {rule}"
+        );
+        assert!(
+            rule.contains("flex-direction: column"),
+            "stacks them: {rule}"
+        );
+        assert!(
+            rule.contains("gap: var(--s-"),
+            "gap from the token scale: {rule}"
+        );
+    }
+
+    #[test]
     fn panel_css_provides_a_visible_focus_indicator() {
         // U4: keyboard users must see where focus is.
         let css = read_dist("panel.css");
