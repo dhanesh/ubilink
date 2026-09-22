@@ -15,11 +15,11 @@
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
-    <main id="panel" role="dialog" aria-modal="true" aria-label="Ubilink panel">
+    <main id="panel" data-tauri-drag-region role="dialog" aria-modal="true" aria-label="Ubilink panel">
       <!-- Onboarding (S4): shown until both macOS permissions are granted, so the
            user always knows exactly what's left to do. -->
       <section id="onboarding" hidden aria-labelledby="onboarding-heading">
-        <h1 id="onboarding-heading">Set up Ubilink</h1>
+        <h1 id="onboarding-heading" data-tauri-drag-region>Set up Ubilink</h1>
         <!-- Automation is the only permission capture needs. Accessibility used to
              have a row here for Bear's menu scripting; Bear now captures through
              bearcli, and no built-in adapter needs Accessibility. -->
@@ -48,7 +48,7 @@
 
       <!-- Capture view: shown once permissions are in place. -->
       <section id="capture" hidden>
-        <section id="status" aria-live="polite">
+        <section id="status" data-tauri-drag-region="deep" aria-live="polite">
           <p id="status-line" data-phase="idle"></p>
           <h1 id="resource-name" hidden></h1>
           <p id="resource-uri" class="uri" hidden></p>
@@ -69,7 +69,7 @@
       <!-- Link-browser (Cmd+Shift+L): all captured links by title; → drills into
            what a link is connected to, Enter opens it. Keyboard-first (U4). -->
       <section id="browser" hidden aria-labelledby="browser-heading">
-        <h1 id="browser-heading">Your links</h1>
+        <h1 id="browser-heading" data-tauri-drag-region>Your links</h1>
         <input id="browser-search" type="text" placeholder="Filter links…"
                autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter links" />
         <p id="browser-trail" class="trail" aria-live="polite" hidden></p>
@@ -81,7 +81,7 @@
 
       <!-- Settings (Cmd+Shift+,): permissions, data export, and reset. -->
       <section id="settings" hidden aria-labelledby="settings-heading">
-        <h1 id="settings-heading">Settings</h1>
+        <h1 id="settings-heading" data-tauri-drag-region>Settings</h1>
 
         <div class="set-group">
           <h2 class="set-label">Permissions</h2>

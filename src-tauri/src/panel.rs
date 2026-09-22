@@ -612,6 +612,47 @@ mod tests {
     }
 
     #[test]
+    fn panel_scrolls_when_its_content_is_taller_than_the_display() {
+        // The window is capped to the display's usable height (resize_panel), so
+        // taller content — Settings with its adapter list — must scroll inside
+        // the panel instead of being clipped off-screen and unreachable.
+        let css = read_dist("panel.css");
+        let start = css.find("\n#panel {").expect("#panel rule");
+        let rule = &css[start..start + css[start..].find('}').expect("rule closes")];
+        assert!(
+            rule.contains("overflow-y: auto"),
+            "#panel must scroll: {rule}"
+        );
+    }
+
+    #[test]
+    fn panel_can_be_dragged_by_its_background_and_titles() {
+        // Without a title bar the panel could not be moved at all. Drag handles:
+        // the panel's own background, the capture view's text-only status block,
+        // and each view's title. Never a subtree containing controls, where a
+        // drag starting on mouse-down would swallow clicks.
+        let html = read_dist("index.html");
+        for handle in [
+            "id=\"panel\"",
+            "id=\"status\"",
+            "id=\"onboarding-heading\"",
+            "id=\"settings-heading\"",
+            "id=\"browser-heading\"",
+        ] {
+            let at = html
+                .find(handle)
+                .unwrap_or_else(|| panic!("{handle} exists"));
+            let tag_end = at + html[at..].find('>').expect("tag closes");
+            let tag_start = html[..at].rfind('<').expect("tag opens");
+            assert!(
+                html[tag_start..tag_end].contains("data-tauri-drag-region"),
+                "{handle} must be a drag handle: {}",
+                &html[tag_start..=tag_end]
+            );
+        }
+    }
+
+    #[test]
     fn panel_css_provides_a_visible_focus_indicator() {
         // U4: keyboard users must see where focus is.
         let css = read_dist("panel.css");

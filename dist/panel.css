@@ -35,7 +35,11 @@ html, body {
   backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
   border: 1px solid var(--ui-border);
   border-radius: var(--r-panel);
-  overflow: hidden;
+  /* The window is capped to the display's usable height (resize_panel), so
+     taller content — Settings' adapter list — scrolls here instead of being
+     clipped off-screen. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 button:focus-visible,

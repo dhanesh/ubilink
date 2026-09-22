@@ -10,6 +10,8 @@
 // running needs a desktop session.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod placement;
+
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -358,10 +360,71 @@ fn open_link(state: State<'_, AppState>, uri: String) -> Result<(), String> {
 #[tauri::command]
 fn resize_panel(app: AppHandle, height: f64) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
-        let h = height.clamp(96.0, 900.0);
+        let mut h = height.clamp(96.0, 900.0);
+        // Keep the panel on its display as the content grows: cap the height to
+        // the usable area (the panel scrolls inside) and move it up if it would
+        // run past the bottom. Settings used to extend off-screen, unreachable.
+        let fitted = (|| {
+            let scale = w.scale_factor().ok()?;
+            let pos = w.outer_position().ok()?.to_logical::<f64>(scale);
+            let work = display_of(&w.current_monitor().ok()??).work;
+            Some((pos.x, placement::fit_vertically(work, pos.y, h)))
+        })();
+        if let Some((x, (top, fitted_h))) = fitted {
+            h = fitted_h;
+            let _ = w.set_position(tauri::LogicalPosition::new(x, top));
+        }
         let _ = w.set_size(tauri::LogicalSize::new(640.0_f64, h));
     }
     Ok(())
+}
+
+/// Move the panel onto the display under the mouse cursor, so it opens where the
+/// user is looking rather than on whichever display it was created on. The maths
+/// (and the macOS coordinate-space conversions it depends on) live in
+/// `placement`, where they're unit-tested. Best effort: if any query fails the
+/// window stays where it was, which is the old behaviour.
+fn place_panel(app: &AppHandle, w: &tauri::WebviewWindow) {
+    let (Ok(cursor), Ok(monitors)) = (app.cursor_position(), app.available_monitors()) else {
+        return;
+    };
+    let primary = app.primary_monitor().ok().flatten();
+    // Primary first: it's where the panel goes if the cursor is on no display.
+    let mut displays: Vec<placement::Display> = primary.iter().map(display_of).collect();
+    for m in &monitors {
+        let d = display_of(m);
+        if !displays.contains(&d) {
+            displays.push(d);
+        }
+    }
+    let (Ok(size), Ok(scale)) = (w.outer_size(), w.scale_factor()) else {
+        return;
+    };
+    let size = size.to_logical::<f64>(scale);
+    // tao reports the cursor scaled by the PRIMARY display's factor.
+    let primary_scale = primary.as_ref().map_or(1.0, |m| m.scale_factor());
+    let cursor = placement::cursor_points(cursor.x, cursor.y, primary_scale);
+    if let Some((x, y)) = placement::panel_origin(&displays, cursor, (size.width, size.height)) {
+        let _ = w.set_position(tauri::LogicalPosition::new(x, y));
+    }
+}
+
+/// A monitor's frame and usable area in global points. On macOS both are reported
+/// as points x that monitor's own scale factor, so both convert the same way.
+fn display_of(m: &tauri::Monitor) -> placement::Display {
+    let scale = m.scale_factor();
+    let (p, s) = (m.position(), m.size());
+    let work = m.work_area();
+    placement::Display {
+        frame: placement::Screen::from_physical(p.x, p.y, s.width, s.height, scale),
+        work: placement::Screen::from_physical(
+            work.position.x,
+            work.position.y,
+            work.size.width,
+            work.size.height,
+            scale,
+        ),
+    }
 }
 
 /// Hide the panel — the flow is done (U2: 2 actions, then get out of the way).
@@ -705,12 +768,14 @@ fn main() {
                             // The same event the ⌘⇧, shortcut sends. With no stats in
                             // the payload, the webview fetches them itself.
                             let _ = w.emit("settings", ());
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
                     }
                     "show" => {
                         if let Some(w) = app.get_webview_window("panel") {
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -733,6 +798,7 @@ fn main() {
             // Show the panel on launch so there is ALWAYS visible UI. On load the
             // webview checks permissions and shows onboarding if anything's missing.
             if let Some(w) = app.get_webview_window("panel") {
+                place_panel(app.handle(), &w);
                 let _ = w.show();
                 let _ = w.set_focus();
             }
@@ -767,6 +833,7 @@ fn main() {
                                 None
                             };
                             let _ = w.emit("capturing", t0);
+                            place_panel(app, &w);
                             let _ = w.show();
 
                             // Run the capture OFF the UI path so it never blocks first paint.
@@ -831,6 +898,7 @@ fn main() {
                                     let _ = w.emit("browse-err", msg);
                                 }
                             }
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -848,6 +916,7 @@ fn main() {
                                 }
                             };
                             let _ = w.emit("settings", stats);
+                            place_panel(app, &w);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -905,6 +974,17 @@ fn main() {
 mod tests {
     use super::{build_hotkey_report, load_disabled, save_disabled};
     use std::collections::HashSet;
+
+    #[test]
+    fn the_panel_is_allowed_to_start_a_window_drag() {
+        // data-tauri-drag-region silently does nothing unless the window's
+        // capability grants start-dragging, and core:default does not include it.
+        let caps = include_str!("../capabilities/default.json");
+        assert!(
+            caps.contains("\"core:window:allow-start-dragging\""),
+            "capabilities/default.json must allow start-dragging"
+        );
+    }
 
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
         // Unique per test (name + pid) so parallel test threads don't clobber each other.
