@@ -13,6 +13,7 @@ import {
   hotkeyWarning,
   accessibilityGuidance,
   canUseCapture,
+  shouldDismissOnBlur,
 } from './panel-state.mjs';
 import { initialBrowse, reduce as browseReduce, selectedItem, breadcrumb, atRoot, markedUri, visibleItems } from './browse-state.mjs';
 
@@ -602,6 +603,13 @@ $('set-import-file').addEventListener('change', (e) => { settingsImportFile(e.ta
 $('set-reset').addEventListener('click', () => { $('set-reset-confirm').hidden = false; $('set-feedback').hidden = true; fitWindow(); });
 $('set-reset-no').addEventListener('click', () => { $('set-reset-confirm').hidden = true; fitWindow(); });
 $('set-reset-yes').addEventListener('click', settingsReset);
+// Click-away dismiss, Spotlight-style: when the panel loses focus the user has
+// moved on, so get out of the way. shouldDismissOnBlur() keeps it open during
+// onboarding/settings (where leaving the panel IS the task) and mid-capture
+// (a macOS Automation prompt may have taken focus).
+window.addEventListener('blur', () => {
+  if (shouldDismissOnBlur(view, state.phase)) invoke('dismiss_panel').catch(() => {});
+});
 document.addEventListener('keydown', (e) => {
   // Settings: Esc closes (back to capture).
   if (view === 'settings') {

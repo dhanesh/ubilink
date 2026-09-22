@@ -194,3 +194,33 @@ test('S6: capture is NOT reachable without Automation, regardless of Accessibili
   assert.equal(canUseCapture({ accessibility: true, automation: 'not_determined' }), false);
   assert.equal(canUseCapture(null), false);
 });
+
+// Dismiss on click-away. Only where leaving the panel means the user is done with
+// it; never where leaving IS the task (granting a permission in System Settings,
+// picking an import file), and never while a capture is in flight, because the
+// first capture from an app can raise a macOS Automation prompt that takes focus.
+import { shouldDismissOnBlur } from './panel-state.mjs';
+
+test('D1: clicking away dismisses the capture view once a capture has settled', () => {
+  for (const phase of ['idle', 'ready', 'error']) {
+    assert.equal(shouldDismissOnBlur('capture', phase), true, phase);
+  }
+});
+
+test('D2: clicking away dismisses the link browser', () => {
+  assert.equal(shouldDismissOnBlur('browser', 'idle'), true);
+});
+
+test('D3: never dismisses mid-capture (an Automation prompt may have taken focus)', () => {
+  assert.equal(shouldDismissOnBlur('capture', 'capturing'), false);
+});
+
+test('D4: never dismisses onboarding or settings, where leaving the panel is the task', () => {
+  assert.equal(shouldDismissOnBlur('onboarding', 'idle'), false);
+  assert.equal(shouldDismissOnBlur('settings', 'idle'), false);
+});
+
+test('D5: an unknown view keeps the panel open (fail safe)', () => {
+  assert.equal(shouldDismissOnBlur(undefined, 'idle'), false);
+  assert.equal(shouldDismissOnBlur('something-new', 'ready'), false);
+});
