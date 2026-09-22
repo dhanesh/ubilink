@@ -45,19 +45,33 @@ pub fn cursor_points(x: f64, y: f64, primary_scale: f64) -> (f64, f64) {
     (x / primary_scale, y / primary_scale)
 }
 
+/// Gap kept between the panel and the edges of a display's usable area when the
+/// panel has to be moved or capped to fit.
+pub const EDGE: f64 = 8.0;
+
+/// A display: its whole frame, and the part of it windows may use (the frame
+/// minus the menu bar and Dock). Both in global points, top-left origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Display {
+    pub frame: Screen,
+    pub work: Screen,
+}
+
 /// Top-left corner, in points, for a panel of `panel` (width, height) points.
-/// Uses the display under `cursor`; if the cursor is on none of them, the first
-/// (the caller lists the primary display first). `None` when there are no
-/// displays, meaning: leave the window where it is.
+/// The display is chosen by its FRAME, so a cursor up in the menu bar still
+/// counts as on that display; the panel is placed within its usable area. If the
+/// cursor is on no display, the first is used (the caller lists the primary
+/// display first). `None` when there are no displays: leave the window alone.
 pub fn panel_origin(
-    screens: &[Screen],
+    displays: &[Display],
     cursor: (f64, f64),
     (width, height): (f64, f64),
 ) -> Option<(f64, f64)> {
-    let s = screens
+    let s = displays
         .iter()
-        .find(|s| s.contains(cursor))
-        .or_else(|| screens.first())?;
+        .find(|d| d.frame.contains(cursor))
+        .or_else(|| displays.first())?
+        .work;
     let x = s.x + ((s.width - width) / 2.0).max(0.0);
     // Near the top, but moved up rather than hanging off the bottom edge, and
     // never above the top edge.
@@ -65,6 +79,18 @@ pub fn panel_origin(
         .min(s.y + s.height - height)
         .max(s.y);
     Some((x, y))
+}
+
+/// Keep a panel whose content wants `wanted` points of height on-screen, given
+/// its current `top` and the usable area `work` of the display it is on. Returns
+/// the (top, height) to apply: the height capped to what fits (the panel scrolls
+/// inside), and the top moved up if the panel would run past the bottom, or down
+/// if it sits above the usable area. A panel that already fits is left alone.
+pub fn fit_vertically(work: Screen, top: f64, wanted: f64) -> (f64, f64) {
+    let height = wanted.min((work.height - 2.0 * EDGE).max(0.0));
+    let lowest_top = work.y + work.height - EDGE - height;
+    let top = top.min(lowest_top).max(work.y + EDGE);
+    (top, height)
 }
 
 #[cfg(test)]
@@ -81,10 +107,15 @@ mod tests {
             height,
         }
     }
+    /// A display whose usable area is its whole frame (no menu bar or Dock).
+    fn display(x: f64, y: f64, width: f64, height: f64) -> Display {
+        let s = screen(x, y, width, height);
+        Display { frame: s, work: s }
+    }
 
     #[test]
     fn single_screen_centres_horizontally_near_the_top() {
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
         let (x, y) = panel_origin(&[main], (100.0, 100.0), PANEL).unwrap();
         assert_eq!(x, (1440.0 - 640.0) / 2.0);
         assert_eq!(y, 900.0 * TOP_FRACTION);
@@ -92,8 +123,8 @@ mod tests {
 
     #[test]
     fn opens_on_the_screen_under_the_cursor() {
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
-        let right = screen(1440.0, 0.0, 1920.0, 1080.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
+        let right = display(1440.0, 0.0, 1920.0, 1080.0);
         let (x, y) = panel_origin(&[main, right], (2000.0, 500.0), PANEL).unwrap();
         assert_eq!(x, 1440.0 + (1920.0 - 640.0) / 2.0);
         assert_eq!(y, 1080.0 * TOP_FRACTION);
@@ -103,8 +134,8 @@ mod tests {
     fn handles_screens_left_of_and_above_the_primary() {
         // Negative global coordinates are normal on macOS for screens arranged
         // left of or above the primary display.
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
-        let left = screen(-1920.0, -180.0, 1920.0, 1080.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
+        let left = display(-1920.0, -180.0, 1920.0, 1080.0);
         let (x, y) = panel_origin(&[main, left], (-500.0, 0.0), PANEL).unwrap();
         assert_eq!(x, -1920.0 + (1920.0 - 640.0) / 2.0);
         assert_eq!(y, -180.0 + 1080.0 * TOP_FRACTION);
@@ -113,8 +144,8 @@ mod tests {
     #[test]
     fn cursor_off_every_screen_falls_back_to_the_first() {
         // The caller lists the primary display first.
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
-        let right = screen(1440.0, 200.0, 1920.0, 1080.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
+        let right = display(1440.0, 200.0, 1920.0, 1080.0);
         // In the gap above the right-hand screen, which starts lower.
         let (x, _) = panel_origin(&[main, right], (2000.0, 50.0), PANEL).unwrap();
         assert_eq!(x, (1440.0 - 640.0) / 2.0);
@@ -123,8 +154,8 @@ mod tests {
     #[test]
     fn a_screen_edge_belongs_to_one_screen_only() {
         // x == 1440 is the right screen's first column, not the main screen's.
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
-        let right = screen(1440.0, 0.0, 1920.0, 1080.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
+        let right = display(1440.0, 0.0, 1920.0, 1080.0);
         let (x, _) = panel_origin(&[main, right], (1440.0, 10.0), PANEL).unwrap();
         assert_eq!(x, 1440.0 + (1920.0 - 640.0) / 2.0);
     }
@@ -136,7 +167,7 @@ mod tests {
 
     #[test]
     fn never_spills_off_a_screen_smaller_than_the_panel() {
-        let tiny = screen(100.0, 50.0, 500.0, 300.0);
+        let tiny = display(100.0, 50.0, 500.0, 300.0);
         let (x, y) = panel_origin(&[tiny], (200.0, 100.0), (640.0, 900.0)).unwrap();
         assert_eq!(x, 100.0, "too wide: pin to the left edge");
         assert_eq!(y, 50.0, "too tall: pin to the top edge");
@@ -144,9 +175,30 @@ mod tests {
 
     #[test]
     fn a_tall_panel_moves_up_rather_than_off_the_bottom() {
-        let main = screen(0.0, 0.0, 1440.0, 900.0);
+        let main = display(0.0, 0.0, 1440.0, 900.0);
         let (_, y) = panel_origin(&[main], (10.0, 10.0), (640.0, 800.0)).unwrap();
         assert_eq!(y, 100.0, "bottom edge sits on the screen's bottom edge");
+    }
+
+    #[test]
+    fn places_within_the_usable_area_but_picks_the_display_by_its_frame() {
+        // The menu bar (top 25 pt) and the Dock (bottom 70 pt) are part of the
+        // display's frame but not its usable area. A cursor up in the menu bar
+        // is still on this display; the panel is centred in, and kept inside,
+        // the usable area.
+        let d = Display {
+            frame: screen(0.0, 0.0, 1440.0, 900.0),
+            work: screen(0.0, 25.0, 1440.0, 805.0),
+        };
+        let (x, y) = panel_origin(&[d], (700.0, 5.0), PANEL).unwrap();
+        assert_eq!(x, (1440.0 - 640.0) / 2.0);
+        assert_eq!(y, 25.0 + 805.0 * TOP_FRACTION);
+        let (_, y) = panel_origin(&[d], (700.0, 5.0), (640.0, 800.0)).unwrap();
+        assert_eq!(
+            y,
+            25.0 + 805.0 - 800.0,
+            "clear of the Dock, not the frame bottom"
+        );
     }
 
     #[test]
@@ -166,11 +218,56 @@ mod tests {
         // Cursor 260 pt into the external: reported as (1700, 200) pt x 2.
         let cursor = cursor_points(3400.0, 400.0, 2.0);
         assert_eq!(cursor, (1700.0, 200.0));
-        let (x, _) = panel_origin(&[built_in, external], cursor, PANEL).unwrap();
+        let displays = [
+            Display {
+                frame: built_in,
+                work: built_in,
+            },
+            Display {
+                frame: external,
+                work: external,
+            },
+        ];
+        let (x, _) = panel_origin(&displays, cursor, PANEL).unwrap();
         assert_eq!(
             x,
             1440.0 + (1920.0 - 640.0) / 2.0,
             "panel lands on the external"
         );
+    }
+
+    // ── fit_vertically: keeping the panel on-screen as its content grows ──
+
+    const WORK: Screen = Screen {
+        x: 0.0,
+        y: 25.0,
+        width: 1440.0,
+        height: 805.0,
+    };
+
+    #[test]
+    fn a_panel_that_fits_keeps_its_place_and_height() {
+        assert_eq!(fit_vertically(WORK, 200.0, 300.0), (200.0, 300.0));
+    }
+
+    #[test]
+    fn growing_past_the_bottom_moves_the_panel_up() {
+        // Settings grew to 700 pt with its top at 213: it would end at 913, below
+        // the usable bottom (830). It moves up so its bottom sits EDGE above it.
+        let (top, height) = fit_vertically(WORK, 213.0, 700.0);
+        assert_eq!(height, 700.0);
+        assert_eq!(top, 25.0 + 805.0 - EDGE - 700.0);
+    }
+
+    #[test]
+    fn content_taller_than_the_display_is_capped_and_scrolls() {
+        let (top, height) = fit_vertically(WORK, 213.0, 2000.0);
+        assert_eq!(height, 805.0 - 2.0 * EDGE, "capped to the usable height");
+        assert_eq!(top, 25.0 + EDGE, "pinned just below the menu bar");
+    }
+
+    #[test]
+    fn a_panel_dragged_above_the_usable_area_comes_back_down() {
+        assert_eq!(fit_vertically(WORK, -50.0, 300.0), (25.0 + EDGE, 300.0));
     }
 }
