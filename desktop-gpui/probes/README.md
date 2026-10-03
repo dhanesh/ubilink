@@ -11,6 +11,7 @@ python3 scripts/probe.py run shell                  # one instance
 python3 scripts/probe.py run shell --instances 2    # two at once, plus isolation checks
 python3 scripts/probe.py run shell panel-hotkey     # several scenarios in one run
 python3 scripts/probe.py list --expect 15           # the Phase 1 scenarios, each run, with results
+python3 scripts/probe.py budget --write docs/PERFORMANCE.md  # measure R15's numbers into the doc
 python3 -m unittest scripts/test_probe.py           # the engine's self-tests (no app)
 ```
 
@@ -117,7 +118,7 @@ which is shown in the report, and a `block` id: consecutive steps with the same
 | `call` | verb name | `args`, `expect`, `expect_error`, `retry_ms`, `save` | Sends `{"verb", "args"}` and requires `ok`, then every `expect` entry against `result`. `expect_error` (substring, or `true`) requires `ok: false` instead. `retry_ms` re-sends until the step passes or the time runs out. It is allowed only for read-only verbs: `state`, `metrics`, `window_id`, `a11y`, `opened`. `save: {name: "dot.path"}` records values from the result (a missing path fails the step) for a later `{"saved": name}` matcher or `perf_doc compare`. |
 | `see` | a query, or a non-empty list of them (see [`see` queries](#see-queries)) | `absent`, `exact`, `count`, `min_count`, `max_count`, `route`, `timeout_ms` (default 3000) | Polls `a11y` (GPUI's AccessKit tree, read in-process with no TCC grant, spec TN5) until every query holds. `route` first requires `state.route` to equal it. `absent` also requires the tree to have at least one node other than the Window, so an empty tree can't pass it. Roles compare case-insensitively, ignoring punctuation. Text matching is described below. |
 | `ocr` | text or list | `absent`, `exact` | Runs `screencapture -l<window_id>` on the panel, then Vision OCR (`scripts/ocr.swift`), and requires each text in some line (or in all lines joined). Needs Screen Recording. |
-| `pixel` | `{x, y, w?, h?}` in window points from the top-left, or a dot path into `state` where the view reports such a region | `color` (`#rrggbb`, required), `delta_e` (default 3.0), `match` (`mean`, default, or `best`) | The region's mean sRGB colour (`best`: its closest single pixel, for a text run whose antialiased edges are not the text colour) must be within CIE76 ΔE of `color`. A state path that holds no region is a FAIL (the view did not report it). Uses the same capture as `ocr`, so it also needs Screen Recording. |
+| `pixel` | `{x, y, w?, h?}` in window points from the top-left, or a dot path into `state` where the view reports a region `{x, y, w, h}` of at least 24 × 24 pt (smaller is a FAIL: a real surface, not a swatch) | `color` (`#rrggbb`, required), `delta_e` (default 3.0), `match` (`mean`, default, or `best`) | The region's mean sRGB colour (`best`: its closest single pixel, for a text run whose antialiased edges are not the text colour) must be within CIE76 ΔE of `color`. A state path that holds no region is a FAIL (the view did not report it). Uses the same capture as `ocr`, so it also needs Screen Recording. |
 | `pasteboard` | `"set_nonce"` or `"read"` | `expect`, `changed` | `set_nonce` puts a unique string on the pasteboard and records the change count. `read` compares `pbpaste` against `expect` (a literal, which may be `"{nonce}"`, or a matcher). `changed: true/false` requires the change count to have risen (or not) since the last pasteboard step. |
 | `graph` | `true` | `db`, `export`, `links`, `no_links`, `link_count`, `resource_count`, `timeout_ms` | Reads the instance's graph read-only. The default is `{data_dir}/ubilink-graph.sqlite` (ubilink-core's file). `db` names another file, and `export` reads a Settings > Export JSON instead. `links`/`no_links` are `[[uriA, uriB], ...]` unordered pairs. |
 | `file` | path | `exists` (default true), `expect`, `timeout_ms` | The file exists (or not). With `expect`, it parses as JSON and meets the path expectations. |
@@ -131,7 +132,7 @@ which is shown in the report, and a `block` id: consecutive steps with the same
 | `process` | `"unchanged"` | | The instance is still the process this scenario launched (or last restarted), and alive: "the same pid" (Phase 1 R14). |
 | `screenshot` | a file-name-safe label | | Captures the panel like `ocr` and keeps the PNG at `~/Library/Caches/ubilink-probe/shots/<run>/<scenario>-<label>.png` (instance temp roots are deleted; the run prints the directory). Needs Screen Recording. |
 | `release_budget` | `true` | `cpu_pct_lt`, `footprint_mb_lt`, `binary_mb_lt` (all required), `idle_s` (default 60), `settle_s` (default 5) | Builds the stripped release build (no automation channel) and launches it as a second isolated instance (see [Release-build instances](#release-build-instances)), waits `settle_s`, then measures idle CPU as the `ps -o time=` CPU-time delta over `idle_s` seconds of wall time, physical footprint with `vmmap --summary`'s `Physical footprint:` line (Activity Monitor's Memory number) at the end, and the binary's size after `strip` (a copy). Each must be under its budget. Saves `idle_cpu_percent`, `physical_footprint_mb`, `stripped_binary_mb`. A `vmmap` refusal is ENV-BLOCKED. |
-| `perf_doc` | path of `docs/PERFORMANCE.md` (use `{repo}`) | `compare` (default false), `make_target` | Parses the doc's budget table ([PERFORMANCE.md format](#performancemd-format)): every row present once, each budget cell exactly as specified, each measured value under its budget. `compare` also requires each value to agree with this run's saved measurement within the row's tolerance. `make_target` requires `make -n <target>` to exit 0 at the repo root (a dry run: make prints the recipe but runs only `$(shell ...)` and `+` lines). |
+| `perf_doc` | path of `docs/PERFORMANCE.md` (use `{repo}`) | `compare` (default false), `make_target` | Parses the doc's budget table ([PERFORMANCE.md format](#performancemd-format)): every row present once, each budget cell exactly as specified, each measured value under its budget. `compare` also requires each value to agree with this run's saved measurement within the row's tolerance. `make_target` requires `make -n <target>` to exit 0 at the repo root and print a recipe line running `scripts/probe.py budget` (a dry run: make prints the recipe but runs only `$(shell ...)` and `+` lines). |
 
 ### `see` queries
 
@@ -217,8 +218,11 @@ Both sides are NFKC-normalised (this turns `…` into `...`), casefolded and
 whitespace-collapsed. The expected text must then be a substring of the node's text,
 or equal to it with `exact`. A narrow panel truncates by design, so a node ending in
 an ellipsis also matches when the visible text before the ellipsis ends with at
-least 6 characters (or all) of the start of the expected text. For example,
-`"Capture: https://exa…"` matches `https://example.com/page`. A leading ellipsis
+least max(12, half the expected text's length) characters (or all) of the start of
+the expected text. For example, `"Capture: https://example.c…"` matches
+`https://example.com/page` (needs 12), while `"https://…"` matches no URI: an
+over-truncated row is no evidence for a sequence, and cannot hide a decoy from an
+`absent` check either. A leading ellipsis
 works the same way from the other end. A node's text is every string in its `aria`
 object except the role (value, label, placeholder, description).
 
@@ -250,8 +254,8 @@ instance's steps. ENV-BLOCKED steps are skipped and the run continues.
 | Exit | Meaning |
 |---|---|
 | 0 | every step passed |
-| 1 | a product FAIL, or the harness could not build or launch |
-| 2 | a scenario error (bad file, unknown step or option) |
+| 1 | a product FAIL |
+| 2 | a scenario error (bad file, unknown step or option) or a harness error (build failure, an instance that does not start, a socket timeout or close, a helper failing): never counted as the product failing |
 | 3 | nothing failed, but some step was ENV-BLOCKED (missing Screen Recording, too few displays, display asleep, focus taken twice, no swiftc) |
 
 With `--instances N` (N ≥ 2), every instance runs all the steps. While all of them
@@ -334,7 +338,7 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
 | browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
-| every view | `theme_samples` | object | `{surface, text, accent}`, each `{x, y, w, h}` in window points from the panel's top-left: a region of an opaque surface the view paints with `color.uiBg`'s RGB at full opacity, a region around a run of primary text (`color.text1`) drawn on that surface, and a region inside a control filled with `color.accent` | theming |
+| every view | `theme_samples` | object | `{surface, text, accent}`, each `{x, y, w, h}` in window points from the panel's top-left: a region of an opaque surface the view paints with `color.uiBg`'s RGB at full opacity, a region around a run of primary text (`color.text1`) drawn on that surface, and a region inside a control filled with `color.accent`; each at least 24 × 24 pt (the probe fails a smaller one) | theming |
 
 The browser's first-frame time is not a view-state field: the browser records a
 `view_first_frame` sample (route `"browser"`, timed at present) in the metrics ring
@@ -356,7 +360,7 @@ a `text!` element (role `Label`).
   `selected` and `size_of_set`), each row's subtree holding the name and the URI as
   Labels; no other `ListItem`s in the view. Top-level order is ubilink-app's
   `list_links` (`updated_at` DESC, then rowid DESC), the Tauri browser's. Selection
-  starts on row 1. A `TextInput` filter is focused when the browser opens; printable
+  starts on row 1. A `TextInput` filter is focused when the browser opens and stays focused; printable
   keys type into it, Backspace deletes, the filter ranks by `probe.py rank()`
   (fixtures/README.md) and drops non-matches. Down/Up move the selection, Enter opens
   the selected URI through the core opener, End shows the last row. Right drills into
@@ -365,6 +369,13 @@ a `text!` element (role `Label`).
   `Linked to <names joined by " › ">` when drilled. ⌘L (key `cmd-l`; spec R8, ruling
   R-n) marks the selected link and, on a second link, links the two (plain L types
   into the filter, as in Tauri); a Label then reads `Linked “<A name>” ↔ “<B name>”`.
+  Because the filter keeps focus, the focused Input swallows Up/Down/Home/End (and
+  sees Enter/Escape/Right/Left first): the browser intercepts them on a parent with
+  `capture_action::<MoveUp/MoveDown/MoveHome/MoveEnd/Enter/Escape>` plus
+  `cx.stop_propagation()`, handles Right/Left with bubble-phase
+  `on_action::<MoveRight/MoveLeft>` (they reach it at the filter's text edges), and
+  ⌘L with a parent `on_key_down`. The per-key table and the proven reference are in
+  A11Y-NOTES.md ("Navigating a list while an Input keeps focus", a11y-spike.json).
 - **Onboarding (R9).** One `ListItem` per missing permission (`Accessibility`,
   `Automation`), each subtree naming the permission and a status Label `Not granted`
   or exactly `Granted`; rows stay listed when granted. Each row has a Button whose
@@ -412,6 +423,15 @@ answers.
 
 ## PERFORMANCE.md format
 
+`python3 scripts/probe.py budget [--write docs/PERFORMANCE.md]` is the measurement:
+the release app exactly as `performance.json`'s `release_budget` step measures it,
+then panel-hotkey's 50 triggers on a fresh automation instance. It prints the table
+below and, with `--write`, puts it in the file between `<!-- probe.py budget: begin -->`
+and `<!-- probe.py budget: end -->` (replacing an earlier block, keeping everything
+else). It writes nothing unless every number was measured and within budget. Phase
+1's `make budget` must run it: `performance.json` requires `make -n budget` to print
+a line containing `scripts/probe.py budget`, so a no-op target fails.
+
 `docs/PERFORMANCE.md` (Phase 1 R15, written by `make budget`'s run) must contain one
 Markdown table row per key below, in any order, anywhere in the file; other lines and
 rows are ignored. Cells: the key, the budget exactly as shown, and the measured value
@@ -436,5 +456,5 @@ as a plain number in the key's unit (no unit text).
 | `hotkey_p99_ms` | same, `.p99` | ± max(40 ms, 50 %) |
 
 Every measured value in the doc must itself be under its budget, and `make -n budget`
-must succeed. The tolerances are wide for latency on purpose: the doc records a
+must succeed and show a recipe line running `scripts/probe.py budget`. The tolerances are wide for latency on purpose: the doc records a
 typical run, the probe re-measures on whatever machine runs it.
