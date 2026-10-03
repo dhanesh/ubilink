@@ -19,6 +19,9 @@ Usage (JSON on stdout; build and lock chatter on stderr):
     ubilink_instance.py doctor --instance I [--as-args]  # read-only checks  exit 0|1|2
     ubilink_instance.py call   --instance I --verifier V [--out DIR] STEP [STEP ...]
                                                           #                  exit 0|1|2|3
+    ubilink_instance.py restart --instance I --verifier V
+                          # RESTARTED: {...}: quit + relaunch, data dir and fixtures kept
+                          #                                          exit 0|1|2|3
     ubilink_instance.py stop   --instance I --verifier V # STOPPED: {...}    exit 0|2|3
     ubilink_instance.py list                             # every instance under the run dir
 
@@ -490,6 +493,10 @@ class Remote:
             raise probe.ProbeError("instance %s closed the socket on %s" % (self.label, verb))
         resp = json.loads(reply)
         self.log.append({"verb": verb, "args": args or {}, "response": resp})
+        if verb == "load_fixture" and resp.get("ok"):
+            # Fixtures live in the app's memory; `restart` replays them, as probe.py's
+            # Instance.restart does, so the claim remembers each one (kind -> path).
+            record_fixture(self.doc, (args or {}).get("kind"), (args or {}).get("path"))
         return resp
 
     def call(self, verb, **args):
@@ -873,13 +880,105 @@ def _call_locked(a, doc, steps, awake):
     return {"ok": 0, "fail": 1, "blocked": 3}[outcome]
 
 
+# ── restart ──────────────────────────────────────────────────────────────────
+def write_claim(doc):
+    path = inst_dir(doc["instance"]) / "instance.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, path)
+
+
+def record_fixture(doc, kind, path):
+    """Remember a loaded fixture in the claim (kind -> path; a later load of the same
+    kind replaces it, like the app's own fixture store and probe.py's _fixtures)."""
+    if not kind:
+        return
+    claim = read_json(inst_dir(doc["instance"]) / "instance.json") or doc
+    loaded = dict(claim.get("fixtures_loaded") or {})
+    loaded[kind] = path
+    claim["fixtures_loaded"] = loaded
+    doc["fixtures_loaded"] = loaded
+    write_claim(claim)
+
+
+def restart_problem(doc, binary_sha):
+    """Why this claim cannot be restarted (exit 2), or None. Pure, unit-tested."""
+    root = doc.get("root") or ""
+    if not os.path.basename(root).startswith("ubprobe-"):
+        return "instance %r has no probe temp root to keep (%r)" % (doc.get("instance"), root)
+    if not os.path.isdir(doc.get("data_dir") or ""):
+        return "instance %r: its data dir %s is gone, nothing would survive the restart" % (
+            doc.get("instance"), doc.get("data_dir"))
+    if binary_sha != doc.get("binary_sha256"):
+        return ("instance %r: binary %s changed since launch (sha256 %s, launched %s): a "
+                "restart must run the same build" % (doc.get("instance"), doc.get("binary"),
+                                                     binary_sha, doc.get("binary_sha256")))
+    return None
+
+
+def cmd_restart(a):
+    """Quit and relaunch the app with the same temp root, env and binary, as probe.py's
+    Instance.restart: the data dir survives, every fixture loaded so far is replayed."""
+    check_verifier(a.verifier)
+    doc = load_state(a.instance, a.verifier)
+    lease_touch(doc, active=True)  # heartbeat; exit 3 if the lease is not ours
+    awake = probe.keep_awake()
+    try:
+        try:
+            sha = probe._sha256_file(Path(doc["binary"]))
+        except OSError:
+            sha = None
+        why = restart_problem(doc, sha)
+        if why:
+            raise HarnessError(why)
+        with probe.desktop_lock(out=err):  # a quit and a first frame are GUI work
+            old_pid, was_running = doc["pid"], is_ours(doc)
+            sig = terminate_process(doc)
+            if is_ours(doc):
+                raise HarnessError("instance %r: pid %s survived SIGKILL" % (a.instance, old_pid))
+            inst = probe.Instance(doc["instance"], doc["binary"])
+            inst.name = doc["app_instance"]  # same UBILINK_INSTANCE: same socket path
+            inst.root = Path(doc["root"])    # same data dir, fixture copy, si socket, log
+            inst._fixtures = dict(doc.get("fixtures_loaded") or {})
+            try:
+                inst._launch(a.timeout)  # waits for the socket, replays the fixtures
+            except probe.CallError as e:
+                emit({"RESTARTED": {"instance": a.instance, "ok": False, "old_pid": old_pid,
+                                    "new_pid": inst.proc and inst.proc.pid,
+                                    "error": "the app refused a fixture replay: %s" % e}})
+                doc["pid"] = inst.proc.pid if inst.proc else None
+                write_claim(doc)
+                return 1
+            try:
+                st = inst.call("state")
+            finally:
+                doc.update(pid=inst.proc.pid, started_at=recorder._now(),
+                           restarts=int(doc.get("restarts") or 0) + 1)
+                write_claim(doc)
+                inst._reader.close()
+                inst._sock.close()
+        ok = st.get("data_dir") == doc["data_dir"]
+        emit({"RESTARTED": {"instance": a.instance, "ok": ok, "old_pid": old_pid,
+                            "was_running": was_running, "signal": sig,
+                            "new_pid": doc["pid"], "restarts": doc["restarts"],
+                            "data_dir": st.get("data_dir"), "data_dir_kept": ok,
+                            "fixtures_replayed": inst._fixtures}})
+        # The app resolving another data dir after a restart is the product's doing.
+        return 0 if ok else 1
+    finally:
+        if awake is not None:
+            awake.terminate()
+        lease_touch(doc, active=False)
+
+
 # ── stop / list ──────────────────────────────────────────────────────────────
-def stop_instance(doc):
-    """Instance.stop semantics for a claim: SIGTERM by the recorded pid, only after
-    checking that pid still runs this instance's binary (never a reused pid, never by
-    name), SIGKILL after 5 s, then remove the socket, its 0700 dir and the temp root
-    (data copy, fixtures, app log). None of it is evidence. Returns the signal used,
-    or None when the process was already gone."""
+def terminate_process(doc):
+    """Instance._terminate semantics for a claim: SIGTERM by the recorded pid, only
+    after checking that pid still runs this instance's binary (never a reused pid,
+    never by name), SIGKILL after 5 s, then unlink the automation and single-instance
+    socket files (the app does not unlink them; a relaunch must never mistake a stale
+    file for the new process). Keeps the temp root: data dir, fixture copy, app log.
+    Returns the signal used, or None when the process was already gone."""
     killed = None
     pid = doc.get("pid")
     if pid and is_ours(doc):
@@ -896,6 +995,14 @@ def stop_instance(doc):
         if p:
             with contextlib.suppress(OSError):
                 os.unlink(p)
+    return killed
+
+
+def stop_instance(doc):
+    """Instance.stop semantics for a claim: terminate_process, then remove the
+    socket's 0700 dir and the temp root (data copy, fixtures, app log). None of it is
+    evidence. Returns the signal used, or None when the process was already gone."""
+    killed = terminate_process(doc)
     if doc.get("socket"):
         with contextlib.suppress(OSError):
             os.rmdir(os.path.dirname(doc["socket"]))
@@ -970,13 +1077,18 @@ def main(argv=None):
     s.add_argument("--timeout-ms", type=int, default=DEFAULT_TIMEOUT_MS,
                    help="how long wait_state/see/absent poll (default 5000)")
     s.add_argument("steps", nargs="+")
+    s = sub.add_parser("restart")
+    s.add_argument("--instance", required=True)
+    s.add_argument("--verifier", required=True)
+    s.add_argument("--timeout", type=float, default=probe._LAUNCH_TIMEOUT_S,
+                   help="seconds to wait for the relaunched socket (default 60)")
     s = sub.add_parser("stop")
     s.add_argument("--instance", required=True)
     s.add_argument("--verifier", required=True)
     sub.add_parser("list")
     a = p.parse_args(argv)
     fn = {"name": cmd_name, "launch": cmd_launch, "doctor": cmd_doctor, "call": cmd_call,
-          "stop": cmd_stop, "list": cmd_list}[a.cmd]
+          "restart": cmd_restart, "stop": cmd_stop, "list": cmd_list}[a.cmd]
     try:
         return fn(a)
     except HarnessError as e:
