@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -524,6 +525,52 @@ class Subsequence(unittest.TestCase):
         self.assertFalse(probe.is_subsequence("", ""))
 
 
+class MinWindowSpanAndRank(unittest.TestCase):
+    """`min_window_span`/`rank` (Task 10 fix round 1): the reference ranking rule
+    fixtures/README.md documents as normative. `min_window_span` must find the
+    true MINIMUM window, not the greedy-leftmost one `is_subsequence`'s own scan
+    would stop at — the whole reason `rank` cannot be built on `is_subsequence`
+    alone."""
+
+    def test_greedy_leftmost_and_minimum_window_differ(self):
+        # The greedy left-to-right scan matches 'a' at index 0, then 'b' at index
+        # 2 -- a 3-character span ("aab"). The true minimum window is "ab" at
+        # indices 1-2 (span 2): a tighter embedding using the SECOND 'a'.
+        self.assertEqual(probe.min_window_span("ab", "aabb"), (2, 1))
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(probe.min_window_span("ba", "ab"), "wrong order")
+        self.assertIsNone(probe.min_window_span("abz", "ab"), "a letter missing entirely")
+
+    def test_exact_match_spans_the_whole_text(self):
+        self.assertEqual(probe.min_window_span("abc", "abc"), (3, 0))
+
+    def test_ties_prefer_the_earliest_start(self):
+        # "ab" embeds at (0,1) and (3,4), both span 2; the earliest start wins.
+        self.assertEqual(probe.min_window_span("ab", "ab_ab"), (2, 0))
+
+    def test_rank_orders_by_span_then_start_then_uri(self):
+        # "xy" is tight (span 2) in the first uri, loose (span 4) in the second:
+        # span is the primary key, so the tight one ranks first regardless of
+        # uri ordering.
+        uris = ["https://b.example/w-x-y-z", "https://a.example/xy"]
+        self.assertEqual(probe.rank("xy", uris), ["https://a.example/xy", "https://b.example/w-x-y-z"])
+
+    def test_rank_tie_breaks_on_uri_ascending_when_span_and_start_tie(self):
+        uris = ["https://zzz.example/ab", "https://aaa.example/ab"]
+        self.assertEqual(
+            probe.rank("ab", uris), ["https://aaa.example/ab", "https://zzz.example/ab"]
+        )
+
+    def test_rank_drops_non_matches_and_is_case_insensitive(self):
+        uris = ["https://GitHub.com/x", "https://nomatch.example/zzz"]
+        self.assertEqual(probe.rank("gthb", uris), ["https://GitHub.com/x"])
+
+    def test_rank_does_not_depend_on_corpus_order(self):
+        uris = ["https://a.example/gthb", "https://b.example/githubbbb"]
+        self.assertEqual(probe.rank("gthb", uris), probe.rank("gthb", list(reversed(uris))))
+
+
 class FixturesGenerator(unittest.TestCase):
     """`generate_graph_5000` (Task 10, R4/R5): must be exactly reproducible from its
     seed, since `--check` compares the committed file against a fresh run."""
@@ -646,7 +693,7 @@ class FixturesValidators(unittest.TestCase):
         issues = probe._validate_backlinks_doc(doc(decoy_linked=True), probe._BACKLINKS_ORDER_NEWEST_FIRST)
         self.assertTrue(any("decoy" in i for i in issues))
 
-    def test_ranking_golden_catches_a_non_matching_expectation_and_a_matching_decoy(self):
+    def test_ranking_golden_catches_a_scorer_disagreement_and_a_matching_decoy(self):
         # A forward-ordered "uri" (every increasing-length prefix is trivially an
         # in-order subsequence of it) paired with its exact reverse (no forward pair
         # of two-or-more letters can be an in-order subsequence of it), so 20
@@ -654,20 +701,26 @@ class FixturesValidators(unittest.TestCase):
         # one loop instead of 20 hand-picked ones.
         forward = "abcdefghijklmnopqrstuvwxyz"
         backward = forward[::-1]
-        corpus = {forward, backward}
+        corpus = [forward, backward]
         good = [
             {"query": forward[:n], "expect_top3": [forward], "decoys": [backward]}
             for n in range(2, 22)  # 20 distinct, increasing-length queries
         ]
+        self.assertEqual(probe.rank(forward[:2], corpus), [forward], "sanity: only `forward` ever matches")
         self.assertEqual(probe._validate_ranking_golden(good, corpus), [])
 
+        # expect_top3 names a uri that IS in the corpus but disagrees with what
+        # `rank()` actually computes for that query (`backward` never matches at
+        # all here, so this also doubles as a "wrong answer" rather than a
+        # "missing from corpus" case).
         bad_expect = [dict(good[0], expect_top3=[backward])] + good[1:]
         issues = probe._validate_ranking_golden(bad_expect, corpus)
-        self.assertTrue(any("not an in-order subsequence match" in i for i in issues))
+        self.assertTrue(any("disagrees with the reference scorer" in i for i in issues))
 
+        # A decoy that the reference scorer actually ranks is not a valid decoy.
         bad_decoy = [dict(good[0], decoys=[forward])] + good[1:]
         issues = probe._validate_ranking_golden(bad_decoy, corpus)
-        self.assertTrue(any("IS a subsequence match" in i for i in issues))
+        self.assertTrue(any("IS ranked" in i for i in issues))
 
     def test_adapters_catches_an_unsorted_or_mismatched_list(self):
         rows = json.loads(probe._ADAPTER_DEFAULTS_JSON.read_text(encoding="utf-8"))
@@ -709,6 +762,32 @@ class FixturesCommand(unittest.TestCase):
     def test_generate_reproduces_the_committed_graph_5000(self):
         committed = json.loads((probe.FIXTURES_DIR / "graph-5000.json").read_text(encoding="utf-8"))
         self.assertEqual(committed, probe.generate_graph_5000())
+
+    def test_check_fails_when_the_golden_table_disagrees_with_the_scorer(self):
+        # A full copy of the real fixtures dir, with ranking-golden.json's first
+        # entry's expect_top3 reversed (still every uri from the corpus, so this
+        # exercises the "wrong order" path, not "missing from corpus") — proves
+        # `--check` actually recomputes the ranking rather than trusting the file.
+        with tempfile.TemporaryDirectory() as d:
+            tmp_fixtures = Path(d) / "fixtures"
+            shutil.copytree(probe.FIXTURES_DIR, tmp_fixtures)
+            golden_path = tmp_fixtures / "ranking-golden.json"
+            golden = json.loads(golden_path.read_text(encoding="utf-8"))
+            entry = next(e for e in golden if len(e["expect_top3"]) > 1)
+            entry["expect_top3"] = list(reversed(entry["expect_top3"]))
+            golden_path.write_text(json.dumps(golden), encoding="utf-8")
+
+            saved = probe.FIXTURES_DIR
+            probe.FIXTURES_DIR = tmp_fixtures
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    code = probe._fixtures_check()
+            finally:
+                probe.FIXTURES_DIR = saved
+        self.assertEqual(code, 1)
+        self.assertIn("disagrees with the reference scorer", buf.getvalue())
+        self.assertIn("FAIL: fixtures — ranking-golden.json", buf.getvalue())
 
 
 class EnvBlockedIsNotAFail(unittest.TestCase):
