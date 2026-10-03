@@ -2,7 +2,7 @@
 
 - id: backlinks
 - proven: no
-- anchors: src/views/capture.rs:CaptureView, probes/backlinks.json, probes/fixtures/capture-subject.json, probes/fixtures/graph-backlinks.json, probes/fixtures/graph-backlinks-newer.json
+- anchors: probes/backlinks.json, probes/fixtures/capture-subject.json, probes/fixtures/graph-backlinks.json, probes/fixtures/graph-backlinks-newer.json
 - constraints: linking-manifesto-app:B1, linking-manifesto-app:U5
 
 ## What it is

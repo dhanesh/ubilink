@@ -2,7 +2,7 @@
 
 - id: resource-budget
 - proven: no
-- anchors: probes/performance.json, src/automation/store.rs:MetricKind, src/automation/store.rs:record_metric, src/views/capture.rs, src/views/browser.rs, src/views/onboarding.rs, src/views/settings.rs
+- anchors: probes/performance.json, src/automation/store.rs:MetricKind, src/automation/store.rs:record_metric
 
 ## What it is
 
@@ -80,9 +80,12 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
   `make budget` running `scripts/probe.py budget`), so it cannot be an anchor here
   (the forge lint requires every anchor to resolve against a file that exists now)
   — the anchors above instead name the measurement's source
-  (`probes/performance.json`), the metrics ring it reads
-  (`src/automation/store.rs`), and the four views whose rendering cost the idle
-  CPU/footprint numbers actually measure once Phase 1 lands.
+  (`probes/performance.json`) and the metrics ring it reads
+  (`src/automation/store.rs`). The four view files are deliberately NOT anchors
+  (final review C1): the conductor matches anchors at file level, so anchoring them
+  here would make every Phase 1 view task prove this feature, which needs R15's
+  PERFORMANCE.md and cannot pass before R15. Phase 1 R15 names this feature in its
+  `[feature:]` tag instead, which is what puts it on the evidence gate.
 - `performance.json` also contains the identical 50-trigger hotkey-latency loop and
   dismiss-regression steps that `panel-hotkey.md` and `panel-dismiss.md` each run on
   their own (`probes/panel-hotkey.json`, `probes/panel-dismiss.json`), copied here at
