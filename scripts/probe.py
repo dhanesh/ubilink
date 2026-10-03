@@ -376,6 +376,90 @@ def is_subsequence(query: str, text: str) -> bool:
     return False
 
 
+def min_window_span(query: str, text: str):
+    """(length, start) of the SHORTEST contiguous window of `text` that embeds
+    `query` as an in-order subsequence, preferring the earliest `start` among
+    windows tied at that minimum length; `None` if `query` is not a subsequence
+    of `text` at all. Case-sensitive and otherwise pure — `rank` below does the
+    case-folding, so this is independently testable against exact strings.
+
+    This is the "minimum window subsequence" problem (LeetCode 727), not the
+    greedy-leftmost embedding: `is_subsequence`'s own left-to-right scan finds
+    *a* match but not necessarily the tightest one, which matters once two
+    corpus entries both match and the fixtures/README.md ranking rule orders
+    them by how tight the match is. Classic two-pass fix: scan `text` forward,
+    greedily completing one embedding of `query`; every time an embedding
+    completes at some end index, walk backward from that end to find the
+    LATEST possible start for a window ending there (equivalently, the
+    shortest window ending at that position); record it, then resume the
+    forward scan from just after that start — never from the original end —
+    so a still-shorter window starting later is never missed. Because the
+    scan only moves forward, each window found this way starts strictly after
+    the previous one, so the first minimum-length window found is, by
+    construction, also the one with the earliest start among every window
+    tied at that length (ties are handled anyway, defensively).
+    """
+    n, m = len(text), len(query)
+    if m == 0:
+        return None
+    best_len = None
+    best_start = None
+    i = 0
+    while i < n:
+        j, k = 0, i
+        while k < n:
+            if text[k] == query[j]:
+                j += 1
+                if j == m:
+                    break
+            k += 1
+        if j != m:
+            break  # no more complete embeddings starting at or after i
+        end = k
+        j2, start = m - 1, end
+        while j2 >= 0:
+            if text[start] == query[j2]:
+                j2 -= 1
+            start -= 1
+        start += 1
+        length = end - start + 1
+        if best_len is None or length < best_len or (length == best_len and start < best_start):
+            best_len, best_start = length, start
+        i = start + 1
+    return (best_len, best_start) if best_len is not None else None
+
+
+def rank(query: str, uris) -> list:
+    """The reference ranking rule R5's filter must reproduce (normative spec in
+    fixtures/README.md, with pseudocode and worked examples). Matches against
+    each uri in `uris` (case-folded; names are not matched — see the README for
+    why), ordered by:
+
+      1. the shortest minimum-window span containing the match (`min_window_span`,
+         NOT the greedy-leftmost embedding `is_subsequence` would find)
+      2. that window's start index (earliest first)
+      3. no word-boundary/prefix bonus — deliberately: this is a single,
+         unambiguous number with no second scoring pass bolted on
+      4. the uri itself, case-folded, ascending — a total, stable tie-break
+         that does not depend on `uris`' own order (so a corpus handed in any
+         order produces the same ranking)
+
+    Non-matches are dropped entirely (never ranked, however "close"). Returns
+    the matching uris in ranked order (every match, not just a top-N slice —
+    callers take `[:3]` for a "top 3").
+    """
+    q = query.lower()
+    hits = []
+    for uri in uris:
+        span = min_window_span(q, uri.lower())
+        if span is None:
+            continue
+        length, start = span
+        hits.append((length, start, uri.lower(), uri))
+    hits.sort(key=lambda h: (h[0], h[1], h[2]))
+    return [h[3] for h in hits]
+
+
 def _load_fixture_json(path: Path):
     if not path.is_file():
         raise ValueError(f"missing file: {path}")
@@ -625,7 +709,15 @@ def _validate_adapters(doc) -> list:
     return issues
 
 
-def _validate_ranking_golden(doc, corpus_uris: set) -> list:
+def _validate_ranking_golden(doc, corpus_uris: list) -> list:
+    """Validate ranking-golden.json against `rank()`, the normative scorer
+    (fixtures/README.md): every `expect_top3` must equal `rank(query, corpus)`'s
+    own top 3 EXACTLY (not just "each is some kind of match" — order included),
+    so the table can never silently drift from the one rule it claims to follow.
+    `decoys` are checked separately: each must be in the corpus and must not
+    appear in `rank()`'s result at all (not a match by any margin).
+    """
+    corpus_set = set(corpus_uris)
     issues = []
     if len(doc) != 20:
         issues.append(f"must have exactly 20 queries (the golden table), got {len(doc)}")
@@ -645,21 +737,26 @@ def _validate_ranking_golden(doc, corpus_uris: set) -> list:
         top3 = entry["expect_top3"] if isinstance(entry.get("expect_top3"), list) else None
         if not top3 or not (1 <= len(top3) <= 3):
             issues.append(f"{where} ({q!r}): expect_top3 must be a list of 1-3 uris")
-            top3 = []
+            top3 = None
         decoys = entry["decoys"] if isinstance(entry.get("decoys"), list) else None
         if not decoys:
             issues.append(f"{where} ({q!r}): decoys must be a non-empty list")
             decoys = []
-        for uri in top3:
-            if uri not in corpus_uris:
-                issues.append(f"{where} ({q!r}): expected uri {uri!r} is not in graph-ranking.json")
-            elif not is_subsequence(q, uri):
-                issues.append(f"{where} ({q!r}): expected uri {uri!r} is not an in-order subsequence match")
+        if top3 is not None:
+            for uri in top3:
+                if uri not in corpus_set:
+                    issues.append(f"{where} ({q!r}): expected uri {uri!r} is not in graph-ranking.json")
+            computed = rank(q, corpus_uris)[:3]
+            if top3 != computed:
+                issues.append(
+                    f"{where} ({q!r}): expect_top3 {top3} disagrees with the reference "
+                    f"scorer `rank(query, corpus)`, which ranks {computed} first"
+                )
         for uri in decoys:
-            if uri not in corpus_uris:
+            if uri not in corpus_set:
                 issues.append(f"{where} ({q!r}): decoy {uri!r} is not in graph-ranking.json")
-            elif is_subsequence(q, uri):
-                issues.append(f"{where} ({q!r}): decoy {uri!r} IS a subsequence match, not a valid decoy")
+            elif uri in rank(q, corpus_uris):
+                issues.append(f"{where} ({q!r}): decoy {uri!r} IS ranked (matches), not a valid decoy")
     return issues
 
 
@@ -710,9 +807,9 @@ def _validate_fixture_file(name: str, path: Path) -> list:
         except ValueError as e:
             return [f"could not read graph-ranking.json to cross-check: {e}"]
         corpus_issues = _validate_graph_shape(corpus)
-        corpus_uris = {
+        corpus_uris = [
             r["uri"] for r in corpus.get("resources", []) if isinstance(r, dict) and isinstance(r.get("uri"), str)
-        }
+        ]
         return _validate_ranking_golden(doc, corpus_uris) + [f"graph-ranking.json: {i}" for i in corpus_issues]
     validator = _FIXTURE_VALIDATORS.get(name)
     if validator is None:

@@ -102,20 +102,86 @@ A JSON **list** of exactly 20 entries:
 - `query`: what the user types into the link-browser filter.
 - `expect_top3`: 1–3 URIs from `graph-ranking.json`, **in the order the filter must
   rank them** — the a11y rows' top matches (in document order) must equal this list
-  exactly (a `sequence` query with `mode: "prefix"` in a scenario). Every entry here
-  is verified to be an in-order, case-insensitive subsequence match of `query`
-  against the URI (`gthb` → `g`,`t`,`h`,`b` appear in that order inside `github`,
-  skipping `i`/`u`), matching R5's "rank in-order subsequence matches above other
-  matches". Ranking tie-break used to build this table: shorter matched span first,
-  then earliest match start, then the corpus's own order — Phase 1's filter does
-  not have to use this exact scoring function internally, but its *output order*
-  for these 20 queries must agree with it.
+  exactly (a `sequence` query with `mode: "prefix"` in a scenario).
 - `decoys`: at least one URI from `graph-ranking.json` that looks superficially
-  related but is **not** an in-order subsequence match of `query` (verified the same
-  way) — it must never appear in the filtered rows at all, let alone in the top 3.
+  related but **never matches at all** (not "ranks low" — absent from the filtered
+  rows entirely, let alone the top 3).
 
-`is_subsequence(query, text)` in `scripts/probe.py` is the exact predicate
-`--check` uses for both checks; `scripts/test_probe.py` unit-tests it directly.
+#### The reference ranking rule (normative)
+
+R5 says the filter must "rank in-order subsequence matches above other matches".
+That alone under-specifies the order *among* several subsequence matches — which
+is exactly what this table pins down. `rank(query, uris)` in `scripts/probe.py` is
+the rule, byte for byte; `--check` recomputes every golden query's ranking with it
+and fails if `expect_top3` disagrees, so this table can never drift from the rule
+it claims to follow. **A Phase 1 Rust implementation of the filter must reproduce
+this rule's output for every query in this table** (it need not use the same
+internal algorithm — a different data structure that provably yields the same
+order is fine).
+
+Rule, in order of precedence:
+
+1. **Match text**: the resource's `uri`, case-folded (NFKC is not applied — these
+   are URIs, not display text). `name` is **not** matched by this rule. (Phase 1
+   may additionally filter on `name`; this table only pins the `uri`-matching
+   behaviour, since that is what every query here was built against.)
+2. A hit requires `query` to be an in-order (not necessarily contiguous)
+   subsequence of that `uri`. Non-matches are dropped — never ranked, however
+   "close" they look.
+3. **Primary key — minimum window span**: the length of the SHORTEST contiguous
+   substring of the `uri` that still contains `query` as a subsequence, taken
+   over every possible embedding (not just the first/greedy-leftmost one — see
+   the worked example below, where they differ). Shorter span ranks first.
+4. **Tie-break 1 — earliest start**: among spans of equal minimum length, the
+   one starting earlier in the `uri` ranks first.
+5. **Tie-break 2 — none**: deliberately no word-boundary or prefix bonus. This
+   corpus does not need one, and leaving it out keeps the rule a single,
+   unambiguous number instead of a second scoring pass bolted on.
+6. **Final tie-break — uri ascending**: the `uri` itself, case-folded,
+   lexicographic. Not "corpus file order" — `graph-ranking.json`'s array order is
+   not part of the contract, and a real implementation's own corpus order has no
+   reason to match this fixture file's, so the rule must not depend on it.
+
+Pseudocode (what `min_window_span` + `rank` in `scripts/probe.py` implement):
+
+```
+function min_window_span(query, text):
+    # shortest [start, end) of text containing query as a subsequence,
+    # earliest start among ties; None if query is not a subsequence of text.
+    best = None
+    for each position i in text where a leftmost subsequence match of query
+            starting the search at i completes at some end index e:
+        walk backward from e to find the LATEST start s such that
+            text[s..e] still contains query as a subsequence
+        candidate = (length = e - s + 1, start = s)
+        best = candidate if best is None or candidate is shorter
+                              (or equal length with an earlier start)
+        resume the forward search at s + 1   # not at e — this is what makes
+                                              # it the minimum window, not the
+                                              # greedy-leftmost one
+    return best
+
+function rank(query, uris):
+    hits = [(min_window_span(lower(query), lower(uri)), lower(uri), uri)
+            for uri in uris if min_window_span(lower(query), lower(uri)) is not None]
+    sort hits by (span.length, span.start, lower(uri))
+    return [uri for _, _, uri in hits]
+```
+
+Worked examples:
+
+| query | uri | minimum window | why |
+|---|---|---|---|
+| `gthb` | `https://github.com/ubilink/ubilink` | `"github"` (span 6, start 8) | `g`,`t`,`h`,`b` is a subsequence of `github` (skipping `i`,`u`); no shorter substring of the whole uri contains it. |
+| `ab` | `aabb` | span **2**, start 1 (`"ab"` at index 1–2) | The GREEDY-leftmost embedding (`a` at 0, `b` at 2) spans 3 characters (`"aab"`) — but a tighter embedding exists (`a` at 1, `b` at 2, span 2). `min_window_span` finds the true minimum (2), not the greedy one (3); this is exactly why `rank` cannot be built on `is_subsequence` alone. |
+| `lnr` | `https://linear.app/ubilink/issue/ub-42` vs. `https://gitlab.com/ubilink/ubilink-mirror` | `linear.app`'s window has span 6, start 8 (the literal substring `"linear"`) vs. `gitlab...`'s best embedding of `l`,`n`,`r` at span 8, start 30 | Both are genuine subsequence matches (`ranking-golden.json`'s `lnr` entry lists both in its top 3), but the tighter one (span 6 < 8) ranks first by rule 3. |
+
+`is_subsequence(query, text)` (a plain boolean, no span) is what `decoys` are
+checked against conceptually, but `--check` actually calls `rank` and confirms
+the decoy is simply absent from its result — the same thing, expressed as "not
+ranked" rather than "not a match". `scripts/test_probe.py` unit-tests
+`min_window_span` (including the greedy-vs-minimum case above), `rank`'s
+tie-breaks, and that `--check` fails when the table disagrees with the scorer.
 
 ## Capture fixtures (R1, R2)
 
