@@ -544,6 +544,140 @@ class EnvBlockedIsNotAFail(unittest.TestCase):
         self.assertEqual((tally.blocked, tally.passed, tally.failed), (1, 1, 0))
 
 
+class UnattendedGuards(unittest.TestCase):
+    """Phase 1 R15 runs probes with nobody watching: environment trouble (display
+    asleep, another app taking focus) must come out ENV-BLOCKED, not FAIL."""
+
+    def test_display_asleep_is_env_blocked(self):
+        with self.assertRaisesRegex(probe.EnvBlocked, "display asleep"):
+            probe.displays_or_blocked([])
+        one = [{"id": 1, "main": True, "bounds": {"x": 0, "y": 0, "w": 10, "h": 10}}]
+        self.assertEqual(probe.displays_or_blocked(one), one)
+
+    def test_nil_window_list_is_env_blocked_not_empty(self):
+        saved = probe.quartz
+
+        def nil(*a):
+            raise probe.ProbeError("quartz windows 1: CGWindowListCopyWindowInfo returned nil")
+
+        probe.quartz = nil
+        try:
+            with self.assertRaises(probe.EnvBlocked):
+                probe.screen_windows(1)
+        finally:
+            probe.quartz = saved
+
+    def test_focus_thief(self):
+        term = {"pid": 10, "name": "iTerm2"}
+        thief = {"pid": 30, "name": "Mail"}
+        own = {1, 2}
+        self.assertEqual(probe.focus_thief(term, thief, own), "Mail")
+        self.assertIsNone(probe.focus_thief(term, term, own), "nothing changed")
+        self.assertIsNone(probe.focus_thief(term, {"pid": 2, "name": "act"}, own), "own process")
+        self.assertIsNone(probe.focus_thief(term, None, own), "unknown is not theft")
+        self.assertEqual(probe.focus_thief(None, {"pid": 30}, own), "pid 30")
+
+    def test_visibility_steps(self):
+        vis = probe.is_visibility_step
+        self.assertTrue(vis("winframe", {"winframe": "gone"}))
+        self.assertTrue(vis("call", {"call": "state", "expect": {"shell.visible": False}}))
+        self.assertTrue(vis("call", {"call": "state", "expect": {"route": None}}))
+        self.assertTrue(vis("call", {"call": "resign_key"}))
+        self.assertFalse(vis("call", {"call": "metrics", "expect": {"summary.x.count": 1}}))
+        self.assertFalse(vis("call", {"call": "state", "expect": {"data_dir": "/x"}}))
+        self.assertFalse(vis("see", {"see": {"text": "x"}}))
+
+    def test_step_units_group_blocks(self):
+        steps = [{"a": 1}, {"b": 1, "block": "x"}, {"c": 1, "block": "x"},
+                 {"d": 1, "block": "y"}, {"e": 1}]
+        units = [[i for i, _ in u] for u in probe.step_units(steps)]
+        self.assertEqual(units, [[1], [2, 3], [4], [5]])
+
+    def _run(self, fronts, results):
+        """run_steps over one block with a fake instance and frontmost sequence."""
+        calls = []
+
+        class FakeInst:
+            proc = None
+
+            def request(self, verb, args):
+                calls.append(verb)
+                return {"ok": True, "result": results.pop(0) if verb == "state" and results else {}}
+
+            def call(self, verb, **args):
+                calls.append(f"reset:{verb}")
+                return {"shell": {"visible": False}}
+
+        sc = {"steps": [{"call": "state", "block": "b", "expect": {"shell.visible": True}}]}
+        saved = probe.quartz
+        probe.quartz = lambda *a: fronts.pop(0) if a[0] == "frontmost" else []
+        try:
+            ctx = probe.RunContext(FakeInst(), sc)
+            ctx.tokens = lambda: {}
+            tally = probe.Tally()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                probe.run_steps(ctx, tally, "t")
+        finally:
+            probe.quartz = saved
+        return tally, out.getvalue(), calls
+
+    def test_focus_theft_retries_once_then_passes(self):
+        term, mail = {"pid": 10, "name": "iTerm2"}, {"pid": 30, "name": "Mail"}
+        hidden, shown = {"shell": {"visible": False}}, {"shell": {"visible": True}}
+        tally, out, calls = self._run([term, mail, term], [hidden, shown])
+        self.assertIn("RETRY", out)
+        self.assertIn("focus taken by Mail", out)
+        self.assertIn("reset:state", calls, "the panel is reset before the re-run")
+        self.assertEqual((tally.passed, tally.failed, tally.blocked), (1, 0, 0))
+
+    def test_focus_theft_twice_is_env_blocked(self):
+        term, mail = {"pid": 10, "name": "iTerm2"}, {"pid": 30, "name": "Mail"}
+        hidden = {"shell": {"visible": False}}
+        tally, out, _ = self._run([term, mail, term, mail], [hidden, hidden])
+        self.assertIn("ENV-BLOCKED", out)
+        self.assertIn("focus taken by Mail (twice)", out)
+        self.assertEqual((tally.passed, tally.failed, tally.blocked), (0, 0, 1))
+
+    def test_failure_without_theft_is_a_fail(self):
+        term = {"pid": 10, "name": "iTerm2"}
+        tally, out, _ = self._run([term, term], [{"shell": {"visible": False}}])
+        self.assertNotIn("RETRY", out)
+        self.assertEqual((tally.passed, tally.failed, tally.blocked), (0, 1, 0))
+
+    def test_activate_other_only_launches_the_probe_activator(self):
+        sv = ScenarioValidation()
+        sv.load({"steps": [{"activate_other": True}]})
+        for bad in ("Finder", "Calculator", False):
+            with self.subTest(bad=bad), self.assertRaises(probe.ScenarioError):
+                sv.load({"steps": [{"activate_other": bad}]})
+        self.assertTrue(probe._ACTIVATOR_SWIFT.is_file())
+
+
+class GoneTracksTheCurrentPanel(unittest.TestCase):
+    def test_visible_in_reads_both_result_shapes(self):
+        self.assertTrue(probe.visible_in({"shell": {"visible": True}}))
+        self.assertFalse(probe.visible_in({"state": {"shell": {"visible": False}}}))
+        self.assertIsNone(probe.visible_in({"capacity": 3}))
+        self.assertIsNone(probe.visible_in([]))
+
+    def test_a_reopen_drops_the_old_window(self):
+        class Inst:
+            proc = None
+
+        ctx = probe.RunContext(Inst(), {"steps": []})
+        ctx.observe("window_id", {"window_id": 7})
+        self.assertEqual(ctx.last_panel_wid, 7)
+        ctx.observe("resign_key", {"state": {"shell": {"visible": False}}})
+        self.assertEqual(ctx.last_panel_wid, 7, "a hide keeps it: `gone` checks this one")
+        ctx.observe("trigger_hotkey", {"shell": {"visible": True}})
+        self.assertIsNone(ctx.last_panel_wid, "a new panel: the old number must not be checked")
+        ctx.observe("window_id", {"window_id": 9})
+        ctx.observe("state", {"shell": {"visible": True}})
+        self.assertEqual(ctx.last_panel_wid, 9, "still the same panel")
+        with self.assertRaises(probe.StepFailed):
+            probe.window_gone(None, [])
+
+
 class DesktopLock(unittest.TestCase):
     def test_second_holder_waits(self):
         with tempfile.TemporaryDirectory() as d:

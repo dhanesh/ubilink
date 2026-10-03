@@ -102,7 +102,9 @@ value) and, after a `pasteboard: set_nonce`, `{nonce}`.
 ### Steps
 
 Each step is an object with exactly one step key. Any step may also have a `name`,
-which is shown in the report.
+which is shown in the report, and a `block` id: consecutive steps with the same
+`block` are one iteration, the unit a focus-theft retry re-runs (see
+[Unattended guards](#unattended-guards)).
 
 | Step | Value | Options | Checks |
 |---|---|---|---|
@@ -113,9 +115,9 @@ which is shown in the report.
 | `pasteboard` | `"set_nonce"` or `"read"` | `expect`, `changed` | `set_nonce` puts a unique string on the pasteboard and records the change count. `read` compares `pbpaste` against `expect` (a literal, which may be `"{nonce}"`, or a matcher). `changed: true/false` requires the change count to have risen (or not) since the last pasteboard step. |
 | `graph` | `true` | `db`, `export`, `links`, `no_links`, `link_count`, `resource_count`, `timeout_ms` | Reads the instance's graph read-only. The default is `{data_dir}/ubilink-graph.sqlite` (ubilink-core's file). `db` names another file, and `export` reads a Settings > Export JSON instead. `links`/`no_links` are `[[uriA, uriB], ...]` unordered pairs. |
 | `file` | path | `exists` (default true), `expect`, `timeout_ms` | The file exists (or not). With `expect`, it parses as JSON and meets the path expectations. |
-| `winframe` | `"any"`, `"cursor"`, `"state"`, `"gone"` or a display index | `timeout_ms` (default 2000) | Finds the panel's frame through Quartz `CGWindowListCopyWindowInfo`, matched by `window_id`. It must lie within any display, the display under the cursor, the display `state.shell.display_id` names, or display *n*. `"gone"` instead requires the window an earlier `winframe` found to be absent from Quartz's on-screen list (a hide checked at the window server, not just in `state`); with no earlier window it fails. |
+| `winframe` | `"any"`, `"cursor"`, `"state"`, `"gone"` or a display index | `timeout_ms` (default 2000) | Finds the panel's frame through Quartz `CGWindowListCopyWindowInfo`, matched by `window_id`. It must lie within any display, the display under the cursor, the display `state.shell.display_id` names, or display *n*. `"gone"` instead requires the window found by the most recent `winframe` (or `window_id` call) for the current panel to be absent from Quartz's on-screen list (a hide checked at the window server, not just in `state`). A call showing a new panel (hidden → visible) forgets the old number, and a passing `gone` uses it up, so with no such window it fails. |
 | `warp_cursor` | display index, or `{display, x, y}` (fractions, default 0.5) | | Moves the cursor with `CGWarpMouseCursorPosition`. No event is posted and no Accessibility grant is needed. |
-| `activate_other` | app name, or `true` for Finder | `settle_ms` (default 300) | Runs `open -a <app>`, a real loss of key status for the panel. |
+| `activate_other` | `true` | `settle_ms` (default 300) | A real loss of key status for the panel: launches the probe's own activator (`scripts/probe-helpers/activator.swift`, compiled like the other helpers), a minimal app that makes itself active with a 1-point key window, waits for it to report `active`, holds for `settle_ms`, then quits it. No user app is ever launched (O4), and none is left running. A real deactivation test necessarily takes focus from your app for that moment. If the activator cannot become active in 8 s the step is ENV-BLOCKED. |
 | `restart` | `true` | | Stops the instance and relaunches it with the same temp root (data survives), then replays every fixture loaded so far, since fixtures live in app memory. |
 | `sleep_ms` | milliseconds | | Waits. Prefer `retry_ms` or `timeout_ms`. |
 
@@ -195,6 +197,25 @@ least 6 characters (or all) of the start of the expected text. For example,
 works the same way from the other end. A node's text is every string in its `aria`
 object except the role (value, label, placeholder, description).
 
+## Unattended guards
+
+Phase 1 runs probes with nobody watching (R15), so the runner keeps environment
+trouble from passing for a product failure:
+
+- **Display awake.** `run` holds `caffeinate -d -i -u` for the whole run (tied to the
+  probe's pid, terminated in teardown), which also wakes a display that was asleep.
+  If the display still reports no active display, any step that needs one is
+  ENV-BLOCKED with "display asleep", and a nil window list from the window server is
+  ENV-BLOCKED too, never an empty list.
+- **Focus theft.** A capture or browser panel hides on any loss of key status, by
+  design, so another app activating mid-step can hide it. When a step that asserts
+  visibility fails (`winframe`, `window_id`, `resign_key`, or a `call` whose `expect`
+  names `visible`, `route` or `closed`) and the frontmost app changed during the step
+  to one that is not the probe, its instance or its activator, the iteration (its
+  `block`, or the step alone) is re-run once from a closed panel (`RETRY` in the
+  report). A second theft makes it ENV-BLOCKED ("focus taken by <app>"). A failure
+  with no theft is a FAIL as usual.
+
 ## Report and exit codes
 
 The report has one line per step: `PASS`, `FAIL`, `ENV-BLOCKED` or `ERROR`. A
@@ -206,7 +227,7 @@ instance's steps. ENV-BLOCKED steps are skipped and the run continues.
 | 0 | every step passed |
 | 1 | a product FAIL, or the harness could not build or launch |
 | 2 | a scenario error (bad file, unknown step or option) |
-| 3 | nothing failed, but some step was ENV-BLOCKED (missing Screen Recording, too few displays, no swiftc) |
+| 3 | nothing failed, but some step was ENV-BLOCKED (missing Screen Recording, too few displays, display asleep, focus taken twice, no swiftc) |
 
 With `--instances N` (N ≥ 2), every instance runs all the steps. While all of them
 are still running, the probe then checks that each one answers `state` with its own
@@ -229,4 +250,5 @@ single-instance socket exists, and `call()` refuses. No scenario step uses it ye
 - `ocr` and `pixel` need Screen Recording for the process running `probe.py`.
   Without it they are ENV-BLOCKED. Text proofs should use `see`.
 - `warp_cursor` and `activate_other` act on the real desktop. That is why every run
-  holds the desktop lock.
+  holds the desktop lock. `activate_other` briefly takes focus from whatever you are
+  using.

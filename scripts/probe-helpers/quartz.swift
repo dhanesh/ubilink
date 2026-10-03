@@ -10,6 +10,7 @@
 // prompt would stall an unattended verifier).
 //
 //   windows <pid>        on-screen windows owned by <pid>: number, layer, bounds
+//   frontmost            the active app: {"pid", "name"}
 //   displays             active displays: id, main, bounds (global points, top-left)
 //   cursor               cursor location in the same global space
 //   warp <x> <y>         move the cursor to a global point
@@ -45,12 +46,16 @@ func num(_ s: String) -> Double {
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let cmd = args.first else { fail("usage: quartz <windows|displays|cursor|warp|pbcount|screen-access|pixel> ...") }
+guard let cmd = args.first else { fail("usage: quartz <windows|frontmost|displays|cursor|warp|pbcount|screen-access|pixel> ...") }
 
 switch cmd {
 case "windows":
     guard args.count == 2, let pid = Int(args[1]) else { fail("usage: quartz windows <pid>") }
-    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    // nil means the window server gave no answer (no session, display asleep): fail,
+    // never report it as "no windows", or `winframe gone` would pass on nothing.
+    guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+        fail("CGWindowListCopyWindowInfo returned nil")
+    }
     var out: [[String: Any]] = []
     for w in info {
         guard (w[kCGWindowOwnerPID as String] as? Int) == pid else { continue }
@@ -67,6 +72,12 @@ case "windows":
         ])
     }
     emit(out)
+
+case "frontmost":
+    // The active app, for the probe's focus-theft check: pid and name only (from
+    // NSWorkspace, no TCC grant needed).
+    let a = NSWorkspace.shared.frontmostApplication
+    emit(["pid": Int(a?.processIdentifier ?? 0), "name": a?.localizedName ?? ""])
 
 case "displays":
     var count: UInt32 = 0
