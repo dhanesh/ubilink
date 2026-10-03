@@ -244,6 +244,9 @@ data = os.environ["UBILINK_DATA_DIR"]
 assert os.environ.get("UBILINK_SKIP_HOTKEYS") == "1"
 with open(os.path.join(data, "launches.log"), "a") as f:
     f.write("%d\n" % os.getpid())
+if os.path.exists(os.path.join(data, "hang")):  # a start that never serves its socket
+    import time
+    time.sleep(3600)
 if os.path.exists(path):
     os.unlink(path)
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -258,6 +261,8 @@ while True:
             with open(os.path.join(data, "fixtures.log"), "a") as f:
                 f.write(json.dumps(req["args"], sort_keys=True) + "\n")
             res = {"ok": True, "result": {req["args"]["kind"]: req["args"]["path"]}}
+        elif req["verb"] == "opened":
+            res = {"ok": True, "result": []}
         elif req["verb"] == "state":
             res = {"ok": True, "result": {"data_dir": data, "shell": {"hotkeys_skipped": True}}}
         else:
@@ -398,6 +403,165 @@ class RestartEndToEnd(unittest.TestCase):
         self.assertFalse(Path(self.doc["socket"]).exists())
         ui.stop_instance(self.doc)
         self.assertFalse(Path(self.doc["root"]).exists())
+
+
+    def test_failed_relaunch_is_killed_and_the_claim_says_so(self):
+        # Review I5: the relaunched process never serves its socket.
+        (self.inst.data_dir / "hang").write_text("")
+        code = ui.main(["restart", "--instance", "vr", "--verifier", "v1", "--timeout", "2"])
+        self.assertEqual(code, 2)
+        launches = (self.inst.data_dir / "launches.log").read_text().split()
+        self.assertEqual(len(launches), 2, "the relaunch did start a process")
+        self.assertFalse(alive_not_zombie({"pid": int(launches[-1])}),
+                         "the half-started process is killed, not orphaned")
+        claim = ui.read_json(self.run_root / "vr" / "instance.json")
+        self.assertEqual((claim["status"], claim["pid"]), ("failed-restart", None))
+        self.assertTrue(Path(claim["root"]).is_dir(), "the root stays for stop to clean")
+        with self.assertRaises(ui.HarnessError):
+            ui.load_state("vr", "v1")  # call/doctor refuse it; stop cleans up
+        stop = type("A", (), {"instance": "vr", "verifier": "v1"})()
+        self.assertEqual(ui.cmd_stop(stop), 0)
+        self.assertFalse(Path(claim["root"]).exists())
+
+
+SCENARIOS = {
+    "t-pass": {"description": "stand-in pass", "requirement": "T1",
+               "setup": {"fixtures": {"capture": "capture-ok.json"}},
+               "steps": [
+                   {"call": "state", "expect": {"data_dir": "{data_dir}"}},
+                   {"call": "opened", "expect": {"": {"eq": []}}},
+                   {"restart": True},
+                   {"process": "unchanged"},
+                   {"call": "state", "expect": {"data_dir": "{data_dir}"}}]},
+    "t-fail": {"description": "stand-in fail",
+               "steps": [{"call": "state"},
+                         {"call": "state", "expect": {"data_dir": "/not/this"}},
+                         {"call": "opened"}]},
+}
+
+
+class ScenarioCommand(RestartEndToEnd):
+    """`scenario` runs probe.py's own run_scenario against the verifier's instance."""
+
+    def setUp(self):
+        super().setUp()
+        self.probes = TMP / "probes"
+        self.probes.mkdir(exist_ok=True)
+        for name, sc in SCENARIOS.items():
+            (self.probes / ("%s.json" % name)).write_text(json.dumps(sc))
+        (self.probes / "t-bad.json").write_text(json.dumps({"steps": [{"nope": 1}]}))
+        self.patches = [(ui, "PROBES_DIR", self.probes),
+                        (ui, "screen_locked", lambda: False),
+                        (ui.probe, "active_displays", lambda: [{"id": 1}]),
+                        (ui.probe, "wait_for_display", lambda *a, **k: None),
+                        (ui.probe, "_helper", lambda *a, **k: None),
+                        (ui.probe, "keep_awake", lambda: None),
+                        (ui.probe, "source_revision", lambda repo=None: ("c0ffee", False))]
+        self.saved_attrs = [(m, n, getattr(m, n)) for m, n, _ in self.patches]
+        for m, n, v in self.patches:
+            setattr(m, n, v)
+        self.doc.update(commit="c0ffee", dirty=False)
+        ui.write_claim(self.doc)
+        self.out = TMP / "out"
+        shutil.rmtree(self.out, ignore_errors=True)
+
+        self.addCleanup(self.stop_claimed)  # whatever the scenario left running
+
+    def stop_claimed(self):
+        claim = ui.read_json(self.run_root / "vr" / "instance.json")
+        if claim:
+            ui.stop_instance(claim)
+
+    def tearDown(self):
+        for m, n, v in self.saved_attrs:
+            setattr(m, n, v)
+
+    def run_scenario(self, *names, verifier="v1", instances=1):
+        argv = ["scenario", "--instance", "vr", "--verifier", verifier, "--out", str(self.out),
+                "--instances", str(instances)]
+        for n in names:
+            argv += ["--name", n]
+        return ui.main(argv)
+
+    def test_pass_with_restart_records_claim_and_artifacts(self):
+        before = (self.probes / "t-pass.json").read_bytes()
+        self.assertEqual(self.run_scenario("t-pass"), 0)
+        self.assertEqual((self.probes / "t-pass.json").read_bytes(), before, "input untouched")
+        d = self.out / "t-pass"
+        res = json.loads((d / "result.json").read_text())
+        self.assertEqual((res["exit"], res["verdict"], res["scenario"]), (0, "PASS", "t-pass"))
+        self.assertEqual(res["sha"], "c0ffee")
+        self.assertEqual([s["verdict"] for s in res["steps"]], ["PASS"] * 5)
+        self.assertEqual([s["index"] for s in res["steps"]], [1, 2, 3, 4, 5])
+        self.assertTrue((d / "transcript.txt").read_text().count("PASS") >= 5)
+        for f in res["step_records"]:
+            self.assertTrue((d / f).is_file(), f)
+        rec = json.loads((d / res["step_records"][0]).read_text())
+        self.assertEqual(rec["exchanges"][0]["verb"], "state")
+        self.assertEqual(sorted(res["artifacts"]), sorted(p.name for p in d.iterdir()))
+        # The verifier's own instance: a fresh root, restarted in place, still running,
+        # and its claim names the live (post-restart) pid and the replayed fixture.
+        claim = ui.read_json(self.run_root / "vr" / "instance.json")
+        self.assertNotEqual(claim["root"], self.doc["root"])
+        self.assertFalse(Path(self.doc["root"]).exists(), "the pre-scenario root is gone")
+        self.assertTrue(alive_not_zombie(claim))
+        self.assertEqual(claim["pid"], res["primary_pid_after"])
+        launches = (Path(claim["data_dir"]) / "launches.log").read_text().split()
+        self.assertEqual(len(launches), 2, "launched fresh, then the restart step")
+        self.assertEqual(int(launches[-1]), claim["pid"])
+        fixtures = (Path(claim["data_dir"]) / "fixtures.log").read_text().splitlines()
+        self.assertEqual(len(fixtures), 2, "setup fixture loaded, then replayed on restart")
+        self.assertIn("capture", claim["fixtures_loaded"])
+
+    def test_product_fail_exits_1_and_marks_the_step(self):
+        self.assertEqual(self.run_scenario("t-fail"), 1)
+        res = json.loads((self.out / "t-fail" / "result.json").read_text())
+        self.assertEqual(res["verdict"], "FAIL")
+        self.assertEqual([s["verdict"] for s in res["steps"]], ["PASS", "FAIL"])
+        self.assertTrue(any("/not/this" in m for m in res["steps"][1]["more"]))
+
+    def test_bad_scenario_and_paths_exit_2_before_touching_the_instance(self):
+        self.assertEqual(self.run_scenario("t-bad"), 2)
+        self.assertEqual(self.run_scenario("../x"), 2)
+        self.assertEqual(self.run_scenario("nonexistent"), 2)
+        self.assertEqual(ui.read_json(self.run_root / "vr" / "instance.json")["pid"],
+                         self.doc["pid"])
+
+    def test_other_verifier_is_refused(self):
+        self.assertEqual(self.run_scenario("t-pass", verifier="v2"), 3)
+        self.assertEqual(ui.read_json(self.run_root / "vr" / "instance.json")["pid"],
+                         self.doc["pid"])
+
+    def test_stale_build_is_refused(self):
+        ui.probe.source_revision = lambda repo=None: ("deadbeef", False)
+        self.assertEqual(self.run_scenario("t-pass"), 2)
+
+    def test_two_instances_claims_extra_and_cleans_it(self):
+        self.assertEqual(self.run_scenario("t-fail", instances=2), 1)
+        res = json.loads((self.out / "t-fail" / "result.json").read_text())
+        self.assertEqual(res["extra_instances"], ["vr-2"])
+        self.assertFalse((self.run_root / "vr-2").exists(), "the extra claim is removed")
+        lease = json.loads(ui.LEASE.read_text())
+        self.assertEqual(lease["instances"], ["vr"], "the extra left the lease")
+        self.assertEqual({s["instance"] for s in res["steps"]}, {"t-fail#1", "t-fail#2", "t-fail"})
+
+    def test_transcript_parser(self):
+        steps = ui.parse_transcript(
+            "── x: d\n"
+            "PASS  x [1/3] call state — ok\n"
+            "RETRY x [2/3] winframe any\n"
+            "      focus taken by Mail\n"
+            "PASS  x [2/3] winframe any — inside\n"
+            "FAIL  x [3/3] see Label\n"
+            "      expected: a\n"
+            "PASS  x#1 [side-by-side] answers state while 2 run — pid 1\n"
+            "ERROR x: harness: boom\n"
+            "FAIL: run x (instances=1) — 2 passed\n")
+        self.assertEqual([(s["index"], s["verdict"], s["retried"]) for s in steps],
+                         [(1, "PASS", False), (2, "PASS", True), (3, "FAIL", False),
+                          ("side-by-side:answers state while 2 run", "PASS", False),
+                          ("scenario", "ERROR", False)])
+        self.assertEqual(steps[2]["more"], ["expected: a"])
 
 
 if __name__ == "__main__":

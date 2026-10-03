@@ -73,6 +73,7 @@ import contextlib
 import ctypes
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -916,6 +917,16 @@ def restart_problem(doc, binary_sha):
     return None
 
 
+def abandon_relaunch(inst, doc):
+    """Kill a relaunched process that did not finish starting (probe.py's
+    Instance._terminate: SIGTERM, SIGKILL after 5 s, unlink the socket files; the temp
+    root stays) and mark the claim so call/doctor refuse it and stop only cleans up."""
+    with contextlib.suppress(Exception):
+        inst._terminate()
+    doc.update(pid=None, status="failed-restart", failed_at=recorder._now())
+    write_claim(doc)
+
+
 def cmd_restart(a):
     """Quit and relaunch the app with the same temp root, env and binary, as probe.py's
     Instance.restart: the data dir survives, every fixture loaded so far is replayed."""
@@ -942,21 +953,27 @@ def cmd_restart(a):
             inst._fixtures = dict(doc.get("fixtures_loaded") or {})
             try:
                 inst._launch(a.timeout)  # waits for the socket, replays the fixtures
-            except probe.CallError as e:
-                emit({"RESTARTED": {"instance": a.instance, "ok": False, "old_pid": old_pid,
-                                    "new_pid": inst.proc and inst.proc.pid,
-                                    "error": "the app refused a fixture replay: %s" % e}})
-                doc["pid"] = inst.proc.pid if inst.proc else None
-                write_claim(doc)
-                return 1
-            try:
                 st = inst.call("state")
-            finally:
-                doc.update(pid=inst.proc.pid, started_at=recorder._now(),
-                           restarts=int(doc.get("restarts") or 0) + 1)
-                write_claim(doc)
-                inst._reader.close()
-                inst._sock.close()
+            except BaseException as e:
+                # Review I5: a relaunch that did not complete (no socket within the
+                # timeout, a refused fixture replay, a socket error on `state`, an
+                # interrupt) must not leave a GUI process the claim does not name:
+                # `stop` would then delete the temp root under a live, orphaned app.
+                # Kill it rather than record it, because an instance that never
+                # finished starting is not one a proof can use, and the verifier's
+                # next step is a fresh launch either way.
+                abandon_relaunch(inst, doc)
+                if isinstance(e, probe.CallError):
+                    emit({"RESTARTED": {"instance": a.instance, "ok": False,
+                                        "old_pid": old_pid, "new_pid": None,
+                                        "error": "the app refused a fixture replay: %s" % e}})
+                    return 1
+                raise
+            doc.update(pid=inst.proc.pid, started_at=recorder._now(),
+                       restarts=int(doc.get("restarts") or 0) + 1)
+            write_claim(doc)
+            inst._reader.close()
+            inst._sock.close()
         ok = st.get("data_dir") == doc["data_dir"]
         emit({"RESTARTED": {"instance": a.instance, "ok": ok, "old_pid": old_pid,
                             "was_running": was_running, "signal": sig,
@@ -969,6 +986,345 @@ def cmd_restart(a):
         if awake is not None:
             awake.terminate()
         lease_touch(doc, active=False)
+
+
+# ── scenario: the frozen acceptance scenarios as evidence (ruling R-z) ──────
+SCENARIO_LINE = re.compile(
+    r"^(PASS|FAIL|ENV-BLOCKED|RETRY|ERROR)\s+(\S+?)(?: \[(\d+)/(\d+)\]| \[side-by-side\])?"
+    r"[ :](.*)$")
+
+
+def _safe(text):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(text)).strip("-") or "x"
+
+
+def parse_transcript(text):
+    """probe.py's report lines -> per-step verdicts. The last line for a step wins
+    (a RETRY followed by PASS is a PASS, marked retried); continuation lines (the
+    indented expected/actual) are attached to the step above them."""
+    steps, order, last = {}, [], None
+    for line in text.splitlines():
+        m = SCENARIO_LINE.match(line)
+        if not m:
+            if last is not None and line.startswith("      "):
+                steps[last]["more"].append(line.strip())
+            continue
+        verdict, prefix, idx, total, rest = m.groups()
+        if idx is None and "[side-by-side]" in line:
+            key = (prefix, "side-by-side:" + rest.split(" — ")[0].strip())
+        elif idx is None:
+            key = (prefix, "scenario")
+        else:
+            key = (prefix, int(idx))
+        prev = steps.get(key)
+        entry = {"instance": prefix, "index": key[1], "total": int(total) if total else None,
+                 "verdict": verdict if verdict != "RETRY" else "RETRY",
+                 "text": rest.strip(), "more": [],
+                 "retried": bool(prev and prev["verdict"] == "RETRY") or verdict == "RETRY"}
+        if key not in steps:
+            order.append(key)
+        steps[key] = entry
+        last = key
+    return [steps[k] for k in order]
+
+
+def make_claimed_instance_class(doc, verifier, out_dir, extra_names):
+    """A probe.Instance subclass for run_scenario: the first instance it builds is the
+    verifier's own (same UBILINK_INSTANCE, binary and claim; a fresh temp root, because
+    every acceptance scenario starts from a fresh instance, as `probe.py run` gives it);
+    later ones are extra instances claimed by this verifier for the command's length.
+    Release-build instances (release_budget) stay plain probe.py instances, which that
+    step starts and stops itself. Every launch (first start and each `restart` step)
+    records the live pid in the claim, so `stop` always knows what runs."""
+    base = probe.Instance
+    made = []
+
+    class ClaimedInstance(base):
+        def __init__(self, label, binary, release=False):
+            super().__init__(label, binary, release)
+            self.log, self.ready, self.primary = [], False, False
+            if release:
+                self.claim = None
+                return
+            if not made:
+                self.primary = True
+                self.claim = dict(doc)
+                self.name = doc["app_instance"]
+            else:
+                name = "%s-%d" % (doc["instance"][:13], len(made) + 1)
+                check_name(name)
+                extra_names.append(name)
+                self.name = app_instance_name(name)
+                self.claim = {"status": "launching", "instance": name, "verifier": verifier,
+                              "app_instance": self.name, "binary": doc["binary"],
+                              "binary_sha256": doc["binary_sha256"], "commit": doc["commit"],
+                              "dirty": doc["dirty"], "checkout": str(REPO),
+                              "network_port": None, "owned_by_scenario_of": doc["instance"]}
+                inst_dir(name).mkdir(parents=True, exist_ok=True)
+                write_claim(self.claim)
+                lease_add(verifier, name)
+            made.append(self)
+
+        def _launch(self, timeout):
+            if self.claim is None:
+                return super()._launch(timeout)
+            if self.primary and not self.ready and not getattr(self, "_replaced", False):
+                # The verifier's running process and its old root give way to the fresh
+                # one (same socket name: the app refuses to bind a live socket).
+                old = dict(self.claim)
+                stop_instance(old)
+                self._replaced = True
+            try:
+                super()._launch(timeout)
+            finally:
+                if self.proc is not None:  # record whatever runs, even a failed start
+                    self.claim.update(
+                        status="running", pid=self.proc.pid, root=str(self.root),
+                        data_dir=str(self.data_dir), fixtures=str(self.fixtures_dir),
+                        socket=str(self.socket_path), si_socket=str(self.si_socket_path),
+                        log=str(self.log_path), started_at=recorder._now(),
+                        fixtures_loaded=dict(self._fixtures))
+                    write_claim(self.claim)
+            self.ready = True
+
+        def request(self, verb, args=None):
+            resp = super().request(verb, args)
+            self.log.append({"verb": verb, "args": args or {}, "response": resp})
+            if verb == "load_fixture" and resp.get("ok") and self.claim is not None:
+                self.claim["fixtures_loaded"] = dict(self._fixtures)
+                write_claim(self.claim)
+            return resp
+
+        def stop(self):
+            if self.primary and self.ready and self.proc is not None \
+                    and self.proc.poll() is None:
+                # The verifier's own instance outlives the scenario (its claim names the
+                # live process), for further observation; `stop` ends it.
+                for f in (self._reader, self._sock):
+                    with contextlib.suppress(OSError):
+                        f and f.close()
+                self._sock = self._reader = None
+                return
+            super().stop()
+            if self.claim is not None and not self.primary:
+                d = inst_dir(self.claim["instance"])
+                if d.parent == run_root():
+                    shutil.rmtree(d, ignore_errors=True)
+                lease_update(verifier, drop=self.claim["instance"])
+            elif self.primary:
+                self.claim.update(pid=None, status="scenario-ended")
+                write_claim(self.claim)
+
+    return ClaimedInstance, made
+
+
+def lease_add(verifier, name):
+    with probe.file_lock(LEASE_LOCK, "verify lease lock", out=quiet):
+        lease = read_json(LEASE)
+        if not lease or lease.get("verifier") != verifier \
+                or lease.get("run_root") != str(run_root()):
+            raise Blocked("the session lease is not this verifier's: cannot add %r" % name)
+        lease["instances"] = sorted(set(lease.get("instances") or []) | {name})
+        lease["last_activity"] = _epoch()
+        _write_lease(lease, exclusive=False)
+
+
+def instrument_runners(doc, out_dir, records):
+    """Wrap probe.py's step runners (the engine still runs them, with its own retry and
+    tally) to save each step's socket exchanges and captured images under out_dir and
+    to refresh the lease heartbeat. Returns a restore function."""
+    original = dict(probe.STEP_RUNNERS)
+
+    def wrap(kind, fn):
+        def run(ctx, step):
+            lease_touch(doc, active=True)
+            inst = ctx.inst
+            idx = next((i for i, st in enumerate(ctx.scenario["steps"], 1) if st is step), 0)
+            prefix = _safe(getattr(inst, "label", "x").replace("#", "-"))
+            shots = Path(inst.root) / "shots" if getattr(inst, "root", None) else None
+            before = set(shots.glob("*.png")) if shots and shots.is_dir() else set()
+            if hasattr(inst, "log"):
+                inst.log.clear()
+            rec = {"instance": getattr(inst, "label", None), "index": idx, "kind": kind,
+                   "def": step, "started_at": recorder._now()}
+            try:
+                detail = fn(ctx, step)
+                rec.update(outcome="pass", detail=detail)
+                return detail
+            except BaseException as e:
+                rec.update(outcome=type(e).__name__, error=str(e))
+                for k in ("expected", "actual"):
+                    if hasattr(e, k):
+                        rec[k] = getattr(e, k)
+                raise
+            finally:
+                rec["exchanges"] = list(getattr(inst, "log", []))
+                rec["saved"] = dict(getattr(ctx, "saved", {}) or {})
+                n = sum(1 for r in records if (r["instance"], r["index"]) ==
+                        (rec["instance"], idx))
+                base = "%s-%02d-%s%s" % (prefix, idx, kind, "-retry%d" % n if n else "")
+                if kind == "screenshot" and isinstance(rec.get("detail"), str):
+                    src = Path(rec["detail"].replace("recorded ", "", 1))
+                    if src.is_file():
+                        dest = Path(out_dir) / ("%s-%s.png" % (base, _safe(step["screenshot"])))
+                        shutil.move(str(src), dest)
+                        rec["image"] = dest.name
+                if shots and shots.is_dir():
+                    for k, png in enumerate(sorted(set(shots.glob("*.png")) - before), 1):
+                        dest = Path(out_dir) / ("%s-capture%d.png" % (base, k))
+                        shutil.copy2(png, dest)
+                        rec.setdefault("captures", []).append(dest.name)
+                rec["file"] = base + ".json"
+                (Path(out_dir) / rec["file"]).write_text(
+                    json.dumps(rec, indent=2, sort_keys=True, default=str) + "\n")
+                records.append(rec)
+        return run
+
+    for kind, fn in original.items():
+        probe.STEP_RUNNERS[kind] = wrap(kind, fn)
+
+    def restore():
+        probe.STEP_RUNNERS.clear()
+        probe.STEP_RUNNERS.update(original)
+    return restore
+
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for st in self.streams:
+            st.write(text)
+        return len(text)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
+PROBES_DIR = probe.PROBES_DIR  # the frozen scenarios; tests point this elsewhere
+
+
+def run_one_scenario(a, doc, sc, out_root):
+    name = sc["_name"]
+    out_dir = Path(out_root) / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.iterdir():  # one result per scenario per run; evidence is in .verify
+        if old.is_file():
+            old.unlink()
+    records, extra = [], []
+    cls, made = make_claimed_instance_class(doc, a.verifier, out_dir, extra)
+    restore = instrument_runners(doc, out_dir, records)
+    real_instance, real_shots = probe.Instance, probe._SHOTS_DIR
+    probe.Instance, probe._SHOTS_DIR = cls, out_dir
+    tally = probe.Tally()
+    buf = io.StringIO()
+    head, dirty = probe.source_revision(REPO)
+    try:
+        with contextlib.redirect_stdout(Tee(buf, sys.stderr)):
+            probe.run_scenario(sc, Path(doc["binary"]), a.instances, tally)
+    finally:
+        probe.Instance, probe._SHOTS_DIR = real_instance, real_shots
+        restore()
+    code = tally.exit_code()
+    transcript = buf.getvalue()
+    (out_dir / "transcript.txt").write_text(transcript)
+    primary = made[0].claim if made else doc
+    if made:
+        doc.update(made[0].claim)  # the verifier's instance now names the fresh process
+    result = {
+        "schema": "verify-ubilink-scenario/v1", "scenario": name,
+        "scenario_file": str(sc["_path"]), "requirement": sc.get("requirement"),
+        "description": sc.get("description"), "sha": head, "dirty": dirty,
+        "binary": doc["binary"], "binary_sha256": doc["binary_sha256"],
+        "instance": doc["instance"], "verifier": a.verifier, "instances": a.instances,
+        "extra_instances": extra, "exit": code,
+        "verdict": {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code],
+        "counts": {"passed": tally.passed, "failed": tally.failed,
+                   "env_blocked": tally.blocked, "errors": tally.errors},
+        "steps": parse_transcript(transcript),
+        "step_records": [r["file"] for r in records],
+        "saved": [dict(getattr(c, "saved", {}) or {}) for c in sc.get("_contexts", [])],
+        "primary_pid_after": primary.get("pid"), "finished_at": recorder._now(),
+    }
+    result["artifacts"] = sorted(p.name for p in out_dir.iterdir() if p.is_file()) + \
+        ["result.json"]
+    (out_dir / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True,
+                                                    default=str) + "\n")
+    emit({"SCENARIO": {"name": name, "exit": code, "verdict": result["verdict"],
+                       "counts": result["counts"], "result": str(out_dir / "result.json"),
+                       "artifacts": len(result["artifacts"])}})
+    return code
+
+
+def cmd_scenario(a):
+    check_verifier(a.verifier)
+    if a.instances < 1:
+        raise HarnessError("--instances must be >= 1")
+    for n in a.name:
+        if "/" in n or n.endswith(".json"):
+            raise HarnessError("--name takes a scenario name from desktop-gpui/probes "
+                               "(the frozen acceptance scenarios), not a path: %r" % n)
+    try:
+        scenarios = [probe.load_scenario(n, PROBES_DIR) for n in a.name]  # read-only
+    except probe.ScenarioError as e:
+        raise HarnessError(str(e))
+    doc = load_state(a.instance, a.verifier)
+    lease_touch(doc, active=True)
+    head, dirty = probe.source_revision(REPO)
+    try:
+        sha = probe._sha256_file(Path(doc["binary"]))
+    except OSError:
+        sha = None
+    if sha != doc["binary_sha256"] or doc["commit"] != head or doc["dirty"] or dirty:
+        lease_touch(doc, active=False)
+        raise HarnessError("instance %r runs a build that is not this checkout's clean HEAD "
+                           "(built %s%s, HEAD %s%s, binary sha256 %s): commit, stop and "
+                           "launch again" % (a.instance, doc["commit"],
+                                             "+dirty" if doc["dirty"] else "", head,
+                                             "+dirty" if dirty else "", sha))
+    out_root = Path(a.out) if a.out else inst_dir(a.instance) / "scenarios"
+    run_dir = inst_dir(a.instance) / "scenario-run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    old_term = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    awake = probe.keep_awake()
+    real_run_dir = probe._RUN_DIR
+    probe._RUN_DIR = run_dir  # release_budget builds its release copy here
+    codes = []
+    try:
+        # As probe.py's run_loaded: helpers and builds before the desktop lock.
+        probe._helper(probe._QUARTZ_SWIFT)
+        kinds = {probe.step_type(st, "") for sc in scenarios for st in sc["steps"]}
+        if "ocr" in kinds:
+            probe._helper(probe._OCR_SWIFT)
+        if "release_budget" in kinds:
+            probe.build_binary(run_dir, release=True, out=err)
+        if "activate_other" in kinds:
+            probe._helper(probe._ACTIVATOR_SWIFT)
+        probe.wait_for_display()
+        with probe.desktop_lock(out=err):
+            lease_check(doc)
+            probe.displays_or_blocked(probe.active_displays())
+            if screen_locked():
+                raise probe.EnvBlocked("the screen is locked: no panel can become active, "
+                                       "so nothing can be proven until it is unlocked")
+            for sc in scenarios:
+                codes.append(run_one_scenario(a, doc, sc, out_root))
+    finally:
+        probe.stop_activators()
+        probe.restore_pasteboard()
+        probe._RUN_DIR = real_run_dir
+        shutil.rmtree(run_dir, ignore_errors=True)
+        if awake is not None:
+            awake.terminate()
+        signal.signal(signal.SIGTERM, old_term)
+        lease_touch(doc, active=False)
+    # probe.py's Tally order across scenarios: an error beats a failure beats a block.
+    for code in (2, 1, 3):
+        if code in codes:
+            return code
+    return 0
 
 
 # ── stop / list ──────────────────────────────────────────────────────────────
@@ -1077,6 +1433,16 @@ def main(argv=None):
     s.add_argument("--timeout-ms", type=int, default=DEFAULT_TIMEOUT_MS,
                    help="how long wait_state/see/absent poll (default 5000)")
     s.add_argument("steps", nargs="+")
+    s = sub.add_parser("scenario")
+    s.add_argument("--instance", required=True)
+    s.add_argument("--verifier", required=True)
+    s.add_argument("--name", action="append", required=True,
+                   help="a desktop-gpui/probes scenario name; repeat for several")
+    s.add_argument("--instances", type=int, default=1,
+                   help="run each scenario on N instances (yours + N-1 claimed for the "
+                        "command) and add probe.py's side-by-side checks")
+    s.add_argument("--out", help="artifacts go to OUT/<name>/ (default "
+                                 ".verify-run/<instance>/scenarios/<name>/)")
     s = sub.add_parser("restart")
     s.add_argument("--instance", required=True)
     s.add_argument("--verifier", required=True)
@@ -1088,7 +1454,7 @@ def main(argv=None):
     sub.add_parser("list")
     a = p.parse_args(argv)
     fn = {"name": cmd_name, "launch": cmd_launch, "doctor": cmd_doctor, "call": cmd_call,
-          "restart": cmd_restart, "stop": cmd_stop, "list": cmd_list}[a.cmd]
+          "scenario": cmd_scenario, "restart": cmd_restart, "stop": cmd_stop, "list": cmd_list}[a.cmd]
     try:
         return fn(a)
     except HarnessError as e:
