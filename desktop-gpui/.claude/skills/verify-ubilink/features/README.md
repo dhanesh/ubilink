@@ -36,20 +36,27 @@ proves it:
 - `linking-manifesto-app:U4` → feature `browser-navigation`
 - `linking-manifesto-app:U5` → feature `backlinks`
 - `linking-manifesto-app:S4` → feature `onboarding` (resolved from "Undecided" below: the onboarding view's per-step rationale and pane links are exactly S4's "transparent rationale")
-- `linking-manifesto-app:T5` → feature `settings-adapters` (resolved from "Undecided" below: each adapter's `scheme` field is its resource-addressing interface)
 
 None of these are `proven` yet — the features above all carry `proven: no` until
 Phase 1's views replace the stubs and a verifier drives the recipe live; `forge
 coverage` counts a constraint as covered once some feature names it in `- constraints:`,
 independent of whether that feature is itself proven.
 
-Still undecided (no Phase 1 feature maps cleanly to these; left uncovered):
+Still undecided (no Phase 1 feature's scenario genuinely proves these; left
+uncovered):
 
 - `linking-manifesto-app:S2` Local-only data, zero telemetry — needs a network
   observation this harness does not make (no proxy, no packet capture)
 - `linking-manifesto-app:T3` Best-effort link re-resolution via multiple identifiers —
   no Phase 1 requirement exercises cross-identifier re-resolution; this is a future
   feature, not one of the 14 ported here
+- `linking-manifesto-app:T5` Resource-addressing behind a platform/app adapter
+  interface — Task 15's fix round 1 (I6) re-checked this against
+  `probes/settings-adapters.json`'s actual steps and found it only toggles
+  adapters on/off and asserts `plugins-state.json`; it never exercises a
+  `scheme`-based resource-addressing decision (no step opens a link through a
+  specific adapter's scheme), so the earlier "resolved" mapping to
+  `settings-adapters` was not genuinely proven and is moved back here
 
 No face in this app's driven UI (packaging, plugins, signing, architecture); expected to
 stay uncovered here:
@@ -64,14 +71,13 @@ stay uncovered here:
 
 ## Coverage
 
-Re-run after Task 15 added the 14 Phase 1 entries (`forge coverage
-desktop-gpui/.claude/skills/verify-ubilink`), verbatim:
+Re-run after fix round 1 (`forge coverage desktop-gpui/.claude/skills/verify-ubilink`),
+verbatim:
 
 ```
 COVERED: linking-manifesto-app:B1 -> backlinks, capture-view
 COVERED: linking-manifesto-app:S4 -> onboarding
 COVERED: linking-manifesto-app:T2 -> graph-data, link-marking
-COVERED: linking-manifesto-app:T5 -> settings-adapters
 COVERED: linking-manifesto-app:U1 -> panel-hotkey
 COVERED: linking-manifesto-app:U2 -> copy-link
 COVERED: linking-manifesto-app:U3 -> capture-view
@@ -86,10 +92,14 @@ UNCOVERED: linking-manifesto-app:S3 "Integrations are signed/verified before ins
 UNCOVERED: linking-manifesto-app:T1 "Tauri architecture with capability-gated IPC"
 UNCOVERED: linking-manifesto-app:T3 "Best-effort link re-resolution via multiple identifiers"
 UNCOVERED: linking-manifesto-app:T4 "Integrations are versioned, health-checked, and updatable independent of core"
-COVERAGE: 9/18 anchored constraints have an observable proof
+UNCOVERED: linking-manifesto-app:T5 "Resource-addressing behind a platform/app adapter interface"
+COVERAGE: 8/18 anchored constraints have an observable proof
 ```
 
-Before Task 15 this read `COVERAGE: 0/18` (Task 14's backlog note above). The 9
-covered are exactly the 7 "has a runtime face" constraints plus S4 and T5, resolved
-out of "Undecided" below; the 9 still uncovered are the unchanged "no face" bucket
-plus S2 and T3, which stay undecided.
+History: Task 14 left `COVERAGE: 0/18`. Task 15 moved 9 constraints (the 7 "has a
+runtime face" ones plus S4 and T5) and reached `9/18`. Fix round 1 (I6) re-checked
+every `- constraints:` claim against what its scenario actually asserts and found
+`T5` was not genuinely proven by `settings-adapters.json` (it never exercises
+scheme-based resource addressing); `T5` moved back to "Undecided" above, landing
+at `8/18`. The remaining 8 covered constraints were each re-confirmed against their
+scenario's actual steps during the same pass.

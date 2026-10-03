@@ -20,65 +20,66 @@ changes — no new window, no restart. Phase 1 R14.
 
 ## Drive it
 
+The acceptance proof is the frozen scenario `probes/theming.json`, run through the
+harness's `scenario` command. It drives all 4 views × 2 appearances × 3 samples (24
+pixel checks) and records 8 screenshots in one run — not one view sampled as a
+stand-in for the rest.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/theming"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'load_fixture:{"kind":"capture","path":"{fixtures}/capture-ok.json"}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'step:{"call":"window_id","save":{"wid":"window_id"}}' \
-  'set_appearance:{"mode":"light"}' \
-  'step:{"process":"unchanged"}' \
-  'step:{"call":"window_id","expect":{"window_id":{"saved":"wid"}}}' \
-  'step:{"pixel":"view.theme_samples.surface","color":"#fafafc","delta_e":3}' \
-  'step:{"pixel":"view.theme_samples.text","color":"#1e1e1e","delta_e":3,"match":"best"}' \
-  'step:{"pixel":"view.theme_samples.accent","color":"#007aff","delta_e":3}' \
-  screenshot:capture-light \
-  'set_appearance:{"mode":"dark"}' \
-  'step:{"process":"unchanged"}' \
-  'step:{"call":"window_id","expect":{"window_id":{"saved":"wid"}}}' \
-  'step:{"pixel":"view.theme_samples.surface","color":"#1c1c1e","delta_e":3}' \
-  'step:{"pixel":"view.theme_samples.text","color":"#f6f6f6","delta_e":3,"match":"best"}' \
-  'step:{"pixel":"view.theme_samples.accent","color":"#0a84ff","delta_e":3}' \
-  screenshot:capture-dark \
-  'set_appearance:{"mode":"system"}'
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name theming
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0; two PNGs land in `$OUT`. Repeat
-the same shape for `browser`, `onboarding` and `settings` (opened with
-`open_view`/`trigger_hotkey` as each route requires) for the full proof; the Phase 1
-scenario (`probes/theming.json`) drives all 4 views × 2 appearances × 3 samples, 24
-pixel checks and 8 screenshots in one run, restoring the system appearance at the
-end.
+Expected: exit 0. `$OUT/theming/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows, for each of `capture`, `browser`, `onboarding`, `settings` ×
+`light`, `dark`, PASS lines for "...: same process", "...: opaque surface", "...:
+primary text run", "...: accent control" and "...: screenshot recorded" — 8
+screenshot PNGs land under `$OUT/theming/`.
 
 ## Proof
 
-- **Same window, same process.** `set_appearance` changes colours without a new
-  window id or a different process.
-- **Within tolerance of the token colours.** Each of the three samples —
-  an opaque surface, a run of primary text (best-matching pixel, since antialiased
-  edges are not the text colour), and the accent control — is within ΔE 3 of the
-  light/dark values this map states explicitly (not read from `design/` at proof
-  time, so the proof cannot drift silently with the tokens).
+- **Same window, same process, for every view.** Each view/appearance pair's
+  "...: same process" and "...: same window, still on ..." steps require
+  `set_appearance` to change colours without a new window id or a different
+  process, for all 4 views.
+- **Within tolerance of the token colours, all 24 samples.** Each view/appearance
+  pair's three pixel steps (surface, text, accent) are each within ΔE 3 of the
+  scenario's own stated colours — light surface `#fafafc`, text `#1e1e1e`, accent
+  `#007aff`; dark surface `#1c1c1e`, text `#f6f6f6`, accent `#0a84ff` — read from
+  `view.theme_samples`, not from `design/` at proof time, so the proof cannot drift
+  silently with the tokens.
 - **Real regions, not swatches.** Each view reports its own sample regions in
   `view.theme_samples.{surface,text,accent}`; a region under 24×24 pt fails
   (`STATE_REGION_MIN_PT`), so a view cannot point the probe at a token-coloured
   rectangle painted only for this check.
-- **Screenshots recorded** for both appearances of every view, as artifacts for the
-  evidence record.
+- **All 8 screenshots recorded**, as artifacts in the evidence record.
+
+Record it (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/theming"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature theming \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario theming (desktop-gpui/probes/theming.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "same pid/window id across every appearance switch, for all 4 views; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
 - Pixel and screenshot steps need Screen Recording for the process running the
-  harness; without the grant they are ENV-BLOCKED (exit 3), never a FAIL — drop
-  those steps and say so in `--observed` if the grant is missing on this host.
-- `uiBg` and `text1` are translucent and the panel itself is blurred, so the expected
-  colours above are the tokens' RGB painted at full opacity (surface) and
+  harness; without the grant they are ENV-BLOCKED (exit 3), never a FAIL — the
+  scenario's own report distinguishes this from a product FAIL, and `--observed`
+  should say so if the grant is missing on this host.
+- `uiBg` and `text1` are translucent and the panel itself is blurred, so the
+  expected colours above are the tokens' RGB painted at full opacity (surface) and
   alpha-composited over that surface (text), not the raw token values — see
   `probes/theming.json`'s notes for the exact composite math.
-- Restore the system appearance (`set_appearance: {"mode": "system"}`) at the end of
-  the call, as shown above, so the host is not left pinned to one appearance.
-- Today's stub paints only its title in the theme's foreground colour and reports no
-  `view.theme_samples` region at all, so the `pixel` steps fail (a state path with no
-  region is a FAIL) until Phase 1 lands.
+- The scenario restores the system appearance (`set_appearance: {"mode": "system"}`)
+  at the end of its own run.
+- Today's stub paints only its title in the theme's foreground colour and reports
+  no `view.theme_samples` region at all, so `scenario --name theming` exits 1 at its
+  first `pixel` step (a state path with no region is a FAIL) until Phase 1 lands.

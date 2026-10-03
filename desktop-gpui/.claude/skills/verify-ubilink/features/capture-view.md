@@ -2,7 +2,7 @@
 
 - id: capture-view
 - proven: no
-- anchors: src/views/capture.rs:CaptureView, src/views/capture.rs:State, src/views/mod.rs:ViewState, src/fixtures.rs:Capture, probes/capture-view.json, probes/fixtures/capture-delayed.json, probes/fixtures/capture-failed.json
+- anchors: src/views/capture.rs:CaptureView, src/views/capture.rs:State, src/views/mod.rs:ViewState, src/fixtures.rs, probes/capture-view.json, probes/fixtures/capture-delayed.json, probes/fixtures/capture-failed.json
 - constraints: linking-manifesto-app:B1, linking-manifesto-app:U3
 
 ## What it is
@@ -25,69 +25,70 @@ pending (spec TN1).
 
 ## Drive it
 
-On a launched instance, after a passing doctor, in `$WT` with the session variables
-set (SKILL.md). Two calls: one for the delayed-success path (the render-first and
-filled-in proofs), one for the failure path.
+The acceptance proof is the frozen scenario `probes/capture-view.json`, run through
+the harness's `scenario` command (SKILL.md's Drive section), not a hand-written
+`call`. It checks every obligation R1 states — the render-first phase, the filled-in
+name and URI, the error sentence, the `opened` sink — not a sample of them.
 
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/capture-view"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'load_fixture:{"kind":"capture","path":"{fixtures}/capture-delayed.json"}' \
-  'wait_state:{"route":null}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture","view.phase":"capturing"}' \
-  'see:{"role":"Label","text":"Capturing"}' \
-  'see:{"role":"Label","text":"Delayed Capture Target"}' \
-  'wait_state:{"view.phase":"captured"}' \
-  'absent:{"text":"Capturing"}' \
-  'load_fixture:{"kind":"capture","path":"{fixtures}/capture-failed.json"}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":false,"route":null}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'see:{"role":"Label","text":"Safari returned no active resource — open something there and try again.","exact":true}' \
-  'absent:{"text":"Delayed Capture Target"}' \
-  'wait_state:{"view.phase":"failed"}' \
-  opened
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name capture-view
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0. The `Capturing` label appears
-within the harness's default step timeout while the 1-second-delayed fixture is still
-pending (`probes/fixtures/capture-delayed.json`'s `delay_ms`); the `captured` phase
-and the name label appear once it resolves (the Phase 1 scenario,
-`probes/capture-view.json`, additionally asserts the fixture's URI label the same
-way — omitted from this literal command only to avoid baking a fixture URL into this
-map). The error path shows the failed fixture's exact sentence
-(`probes/fixtures/capture-failed.json`'s `error`), and the final `opened` line
-reports `"result": []`.
+Expected: exit 0. `$OUT/capture-view/result.json`'s `verdict` is `"PASS"` and
+`counts.failed` is 0; `transcript.txt` shows one PASS line per step, including "a11y
+Capturing node while the capture is pending", "captured: name and URI in the a11y
+tree", "a11y error node states the failure and the next step (verbatim fixture
+text)" and "nothing launched". The per-step JSON files under `$OUT/capture-view/`
+hold each step's request/response, so a verifier can read the exact `view.phase`
+value and a11y dump at each point without re-driving it.
 
 ## Proof
 
-- **Render-first.** `view.phase` is `"capturing"` in the same reply that opens the
-  panel (before the fixture's delay elapses), and an a11y `Label` "Capturing" is on
-  screen while the capture is still pending — the only way to observe this is to read
-  both before the delay runs out (TN1).
-- **Captured.** Once resolved, `view.phase` is `"captured"`, the "Capturing" label is
-  gone, and the a11y tree holds `Label`s for the fixture's name and URI (the capture
-  truncates long URIs with an ellipsis; the harness's text matcher still matches the
-  fixture's text against a truncated label — probes/README.md's text-matching rule).
-- **Failure (U3).** On a failing fixture, an a11y `Label` states the fixture's
-  sentence verbatim — what failed and what to do — with no stale capture data left
-  showing, and `view.phase` is `"failed"`.
-- **Side effect.** The `opened` sink stays `[]`: nothing is launched by a capture,
-  success or failure.
+- **Render-first.** The scenario's "hotkey opens the view already in capturing"
+  step requires `view.phase: "capturing"` in the same reply that opens the panel
+  (before `capture-delayed.json`'s 1-second delay elapses), and the following
+  "a11y Capturing node while the capture is pending" step (`timeout_ms: 800`, inside
+  that 1-second window) requires an a11y `Label` "Capturing" to already be on
+  screen — the pairing is what proves the pending state is actually rendered, not
+  skipped.
+- **Captured.** "captured: name and URI in the a11y tree" requires `Label`s for
+  both the fixture's name ("Delayed Capture Target") and its URI; "capturing
+  indicator gone once captured" requires "Capturing" to be absent; the `state` call
+  right after requires `view.phase: "captured"`.
+- **Failure (U3).** After `load_fixture capture-failed.json` and a fresh
+  `trigger_hotkey`, "a11y error node states the failure and the next step (verbatim
+  fixture text)" requires the a11y `Label`'s text to equal
+  `capture-failed.json`'s `error` sentence exactly (`exact: true`); "no stale
+  capture shown with the error" requires the prior fixture's name to be absent;
+  `view.phase` reads `"failed"`.
+- **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+
+Record it (SKILL.md, Evidence) by pinning `result.json` and every file in
+`$OUT/capture-view/`:
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/capture-view"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature capture-view \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario capture-view (desktop-gpui/probes/capture-view.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "opened sink stayed [] across both the success and the failure path; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
+
+Use `--result fail` with the transcript's failing step when `exit` is not 0.
 
 ## Gotchas
 
-- The "Capturing" label must be read before the fixture's delay elapses, so this
-  call's step timeout for that `see` must stay under the fixture's `delay_ms` (the
-  Phase 1 scenario uses an 800 ms window inside the fixture's 1000 ms delay,
-  probes/capture-view.json) — too generous a timeout can pass even if the view skips
-  straight to `captured` and never renders the pending state at all.
-- A narrow panel truncates long URIs with an ellipsis; assert on enough of the text
-  for probes/README.md's truncation rule to still match (at least 12 characters, or
-  half the string), not the bare domain.
-- This feature is Phase 1 work: today's stub always reports `phase: "stub"` and never
-  shows a Capturing/captured/failed sequence, so this call fails at the first
-  `wait_state` until Phase 1 lands. `proven: no` stays until then.
+- `scenario` replaces the instance's process and temp root with a fresh one before
+  it runs (SKILL.md's Drive section), so run it before any other proof that depends
+  on this instance's prior state, or relaunch after.
+- A narrow panel truncates long URIs with an ellipsis; the scenario's text matcher
+  (probes/README.md) tolerates this on the URI assertion the full scenario makes.
+- This feature is Phase 1 work: today's stub always reports `phase: "stub"` and
+  never shows a Capturing/captured/failed sequence, so `scenario --name
+  capture-view` exits 1 at its first `view.phase` check until Phase 1 lands.
+  `proven: no` stays until then.

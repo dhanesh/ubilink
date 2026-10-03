@@ -16,55 +16,68 @@ and real controls that could, in principle, change what deactivation does.
 
 ## How to reach it
 
-- **`resign_key`** (`step:{"call": "resign_key", "expect": {...}}`), the click-away
-  observer's own code path.
-- **A real loss of key status** (`step:{"activate_other": true}`), the probe's own
-  activator app taking focus and quitting, so the deactivation is real AppKit
-  behaviour, not simulated.
-- Onboarding has no hotkey; reach it with `open_view {"route": "onboarding"}`.
+- **`resign_key`**, the click-away observer's own code path.
+- **A real loss of key status** (`activate_other`), the probe's own activator app
+  taking focus and quitting, so the deactivation is real AppKit behaviour, not
+  simulated.
+- Onboarding has no hotkey; the scenario reaches it with `open_view
+  {"route": "onboarding"}`.
 
 ## Drive it
 
+The acceptance proof is the frozen scenario `probes/panel-dismiss.json`, run
+through the harness's `scenario` command. It drives all four routes
+(capture, browser, settings, onboarding) × both dismiss paths (`resign_key`, a real
+`activate_other`), not a subset.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/panel-dismiss"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'step:{"winframe":"any"}' \
-  'step:{"call":"resign_key","expect":{"route":"capture","closed":true,"state.shell.visible":false}}' \
-  'step:{"winframe":"gone"}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'step:{"activate_other":true}' \
-  'wait_state:{"shell.visible":false}' \
-  'step:{"winframe":"gone"}' \
-  'open_view:{"route":"settings"}' \
-  'wait_state:{"shell.visible":true,"route":"settings"}' \
-  'step:{"call":"resign_key","expect":{"route":"settings","closed":false,"state.shell.visible":true}}' \
-  'step:{"activate_other":true,"settle_ms":800}' \
-  'step:{"call":"state","expect":{"shell.visible":true,"route":"settings"}}'
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name panel-dismiss
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0. The full Phase 1 regression
-(`probes/panel-dismiss.json`) repeats this for `browser` the same way as `capture`,
-and for `onboarding` the same way as `settings`, each case its own focus-theft-
-retryable block.
+Expected: exit 0. `$OUT/panel-dismiss/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows, for each of `capture` and `browser`, PASS for "...: resign_key
+hides", "...: shell has no panel", "...: window left the screen (resign_key)",
+"...: real loss of key status", "...: hidden by the real deactivation" and "...:
+window left the screen (activate_other)"; for each of `settings` and `onboarding`,
+PASS for "...: resign_key keeps it", "...: still on screen (resign_key)", "...:
+real loss of key status", "...: still shown after the real deactivation" and
+"...: still on screen (activate_other)".
 
 ## Proof
 
 - **Capture and browser hide.** Both `resign_key` (the click-away observer's code)
   and a real `activate_other` deactivation close the panel: `state.shell.visible`
-  false and the window gone from Quartz's on-screen list.
+  false and the window gone from Quartz's on-screen list, for both routes.
 - **Settings and onboarding stay open.** Neither `resign_key` nor a real
   deactivation hides them: `state.shell.visible` stays true on the same route, and
-  the window is still on screen.
+  the window is still on screen, for both routes.
+- **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+
+Record it (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/panel-dismiss"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature panel-dismiss \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario panel-dismiss (desktop-gpui/probes/panel-dismiss.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "opened sink stayed []; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
 - `probes/panel-dismiss.json` is a protected Phase 0 baseline file (spec T4): Phase
   1 may not edit it, and neither may this skill's harness — only this feature file
-  changes for Task 15.
+  changes for this fix round.
+- `probes/performance.json` embeds an identical copy of these same
+  resign_key/activate_other cases per route (its own notes: copied here at Phase 0
+  because Phase 1 may change neither file), as part of the `resource-budget.md`
+  scenario's own run; this feature's own `panel-dismiss` scenario is the narrower
+  regression check whose own evidence record this file pins.
 - A focus theft during a visibility check re-runs that case's block once from a
   closed panel; a second theft is ENV-BLOCKED, never a product FAIL.
 - `activate_other` briefly takes real key status from whatever is in front on this

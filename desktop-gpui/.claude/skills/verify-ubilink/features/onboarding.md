@@ -18,64 +18,69 @@ asked for and *where* to grant it, rather than failing silently).
 
 - **The tray's Open on `onboarding`** (`open_view {"route": "onboarding"}`) — there
   is no hotkey for this route (`shell/mod.rs`'s `Route` doc comment).
-- **Tab to a step's button, then Enter** (`step:{"key_until": {...}, "key": "tab"}`,
-  then `key {"keys": "enter"}`) to open its pane.
+- **Tab to a step's button, then Enter** (the scenario's `key_until` step, then
+  `key {"keys": "enter"}`) to open its pane.
 - **`R`** (`key {"keys": "r"}`) to re-check permission state.
 
 ## Drive it
 
+The acceptance proof is the frozen scenario `probes/onboarding.json`, run through
+the harness's `scenario` command.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/onboarding"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'load_fixture:{"kind":"permission","path":"{fixtures}/permissions-two-missing.json"}' \
-  'open_view:{"route":"onboarding"}' \
-  'wait_state:{"shell.visible":true,"route":"onboarding"}' \
-  'step:{"call":"window_id","save":{"wid":"window_id"}}' \
-  'see:{"role":"ListItem","count":2}' \
-  'see:{"text":"Accessibility"}' \
-  'see:{"text":"Automation"}' \
-  'see:{"role":"ListItem","text":"Not granted","deep":true,"count":2}' \
-  opened \
-  'step:{"key_until":{"role":"Button","text":"Automation","state":{"focused":true}},"key":"tab"}' \
-  'key:{"keys":"enter"}' \
-  'step:{"call":"opened","retry_ms":3000,"expect":{"":{"min_len":1}}}' \
-  'load_fixture:{"kind":"permission","path":"{fixtures}/permissions-all-granted.json"}' \
-  'key:{"keys":"r"}' \
-  'see:{"role":"ListItem","text":"Granted","exact":true,"deep":true,"count":2}' \
-  'absent:{"text":"Not granted"}' \
-  'step:{"call":"window_id","expect":{"window_id":{"saved":"wid"}}}' \
-  'step:{"process":"unchanged"}'
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name onboarding
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0. Before any button is activated,
-`opened` reports `"result": []`; after activating Automation's button it grows by
-one entry whose target is `ubilink-app`'s `settings_pane_url("automation")` exactly
-(the Phase 1 scenario, `probes/onboarding.json`, asserts that URL verbatim).
+Expected: exit 0. `$OUT/onboarding/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "two steps", "one per missing permission", "both
+not granted", "the opened sink reports the Automation pane URL exactly", "Automation
+now shows granted", "both steps granted, none left 'Not granted'", "same window id"
+and "same process".
 
 ## Proof
 
-- **Two steps, named and unmet.** Exactly two `ListItem` rows exist, one per missing
-  permission, each naming it and reading `Not granted`.
-- **The button opens the right pane.** Activating the Automation step's button
-  (reached by `key_until`, so the proof never hard-codes a keyboard layout) makes the
-  `opened` sink's newest entry match that permission's exact System Settings pane
-  URL — through the opener, never a real `open`.
-- **Re-check, same window.** After the fixture flips to all-granted and `R` is
-  pressed, the row shows `Granted` (exact text) with no `Not granted` left anywhere,
-  and the window id and process are unchanged — proving Re-check updates state in
-  place rather than reopening.
-- **Side effect.** `opened` only ever grows from the button press, never from `R`.
+- **Two steps, named and unmet.** "two steps" and "both not granted" require
+  exactly two `ListItem` rows, each reading `Not granted`.
+- **The button opens the right pane.** "Tab to the Automation step's button"
+  (`key_until`, so the proof never hard-codes a keyboard layout) then "the opened
+  sink reports the Automation pane URL exactly" requires the sink's newest entry to
+  match `ubilink-app`'s `settings_pane_url("automation")` exactly — through the
+  opener, never a real `open`.
+- **Re-check, same window.** After `load_fixture permissions-all-granted.json` and
+  `key r`, "Automation now shows granted" and "both steps granted, none left 'Not
+  granted'" require the exact text `Granted`; "same window id" compares the saved
+  `window_id` from before any button was pressed against the one read after R; "same
+  process" requires the pid to be unchanged — together proving Re-check updates
+  state in place rather than reopening.
+- **Side effect.** "nothing opened yet" / "Re-check opened nothing more" bracket the
+  one expected growth of the `opened` sink (the button press), so `R` itself never
+  opens anything.
+
+Record it (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/onboarding"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature onboarding \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario onboarding (desktop-gpui/probes/onboarding.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "opened sink grows only from the button press, never from R; same window id and pid across Re-check; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
-- "Granted" is matched exactly (`exact: true` in the real Phase 1 scenario) so a
-  residual "Not granted" row cannot satisfy it by substring.
+- "Granted" is matched exactly (`exact: true`) so a residual "Not granted" row
+  cannot satisfy it by substring.
 - The pane URL comes from `ubilink-app`'s own `settings_pane_url`, not from the
   fixture — the fixture only says which permissions are missing, never which pane to
   open.
-- `key_until` proves the button is reachable from the keyboard without this map
-  committing to a specific keyboard focus sequence for the view — a later reordering
-  of the steps does not break this proof as long as the button is still reachable.
-- Today's stub shows only its static title with no permission rows at all, so this
-  call fails at the first `see` until Phase 1 lands.
+- `key_until` proves the button is reachable from the keyboard without the scenario
+  committing to a specific keyboard focus sequence for the view — a later
+  reordering of the view's layout does not break this proof as long as the button
+  is still reachable.
+- Today's stub shows only its static title with no permission rows at all, so
+  `scenario --name onboarding` exits 1 at the first `see` until Phase 1 lands.

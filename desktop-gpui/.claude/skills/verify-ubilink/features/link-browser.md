@@ -26,81 +26,81 @@ Phase 1 R5, re-filtering the full 5,000+ link corpus in p99 < 16 ms per keystrok
 
 ## Drive it
 
-```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/link-browser"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'seed_graph:{"fixture":"graph-5000.json"}' \
-  'step:{"graph":true,"resource_count":5000,"link_count":0}' \
-  'trigger_hotkey:{"action":"browser"}' \
-  'wait_state:{"shell.visible":true,"route":"browser"}' \
-  'step:{"call":"metrics","retry_ms":3000,"expect":{"summary.view_first_frame.count":{"ge":1},"summary.view_first_frame.max":{"lt":100}}}' \
-  'see:{"role":"ListItem","min_count":1,"max_count":60}' \
-  'see:{"role":"ListItem","nth":0,"state":{"size_of_set":5000}}' \
-  'key:{"keys":"end"}' \
-  'see:{"role":"ListItem","nth":0,"state":{"size_of_set":5000}}' \
-  opened
-echo "exit $?"
-```
+Two frozen scenarios are this feature's acceptance proof: `probes/link-browser.json`
+(R4, virtualisation and the first-frame budget) and
+`probes/link-browser-filter.json` (R5, all 20 golden filter queries plus the
+50-keystroke p99 timing). Both run through the harness's `scenario` command; neither
+is sampled — `link-browser-filter` checks every one of the 20 golden queries, not
+one representative query.
 
 ```sh
-OUT2="$WT/.verify-run/$INSTANCE/captures/link-browser-filter"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT2" \
-  'seed_graph:{"fixture":"graph-ranking.json"}' \
-  'step:{"graph":true,"resource_count":22,"link_count":0}' \
-  'trigger_hotkey:{"action":"browser"}' \
-  'see:{"role":"TextInput"}' \
-  'see:{"role":"ListItem","count":22}' \
-  'key:{"keys":"g t h b"}' \
-  'see:{"role":"ListItem","nth":0,"text":"GitHub - ubilink","deep":true}' \
-  'see:{"role":"ListItem","count":1}' \
-  'absent:{"role":"ListItem","text":"gitlab.com/ubilink/ubilink-mirror","deep":true}' \
-  'key:{"keys":"backspace backspace backspace backspace"}' \
-  'see:{"role":"ListItem","count":22}' \
-  opened
-echo "exit $?"
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name link-browser
+echo "link-browser exit $?"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name link-browser-filter
+echo "link-browser-filter exit $?"
 ```
 
-Expected: every step in both calls prints `"ok": true`, exit 0; `opened` reports
-`"result": []`. The ranking call's `gthb` round is golden query 1 of the 20 in
-`probes/fixtures/ranking-golden.json`; the Phase 1 scenario
-(`probes/link-browser-filter.json`) runs all 20, plus a 50-keystroke timing script
-against the 5,022-link corpus checking `view.filter_p99_ms < 16`.
+Expected: both exit 0. `$OUT/link-browser/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "virtualised: between 1 and 60 row nodes", "row
+5000 is in the tree" and "the first row is no longer built". `$OUT/link-browser-filter/result.json`'s
+`verdict` is `"PASS"`; `transcript.txt` shows a PASS triplet ("top rows = the
+table's", "lists only its N subsequence match(es)", "decoys absent") for each of the
+20 `golden-N` blocks, plus "filter p99 < 16 ms over the 50 keystrokes".
 
 ## Proof
 
-- **Virtualised.** At 5,000 links, between 1 and 60 `ListItem` nodes exist at once;
-  the first row's `size_of_set` reads 5000 (the whole list is known to the widget
-  even though most rows are never built), and `End` brings row 5000 into the tree
-  while the first row drops out — proving rows are built and recycled, not all kept.
-- **First frame.** `metrics.summary.view_first_frame.max` is read before any a11y
-  call (activating the tree would slow every later frame) and must be under 100 ms.
-- **Ranking.** For each golden query, the top matching rows equal
-  `ranking-golden.json`'s `expect_top3` for that query, in order, and all the fixture's
-  decoys for that query are completely absent — not merely ranked low. The full table
-  and the normative `rank()` rule it is generated from are in
-  `probes/fixtures/README.md`; a Phase 1 filter must reproduce that rule's output for
-  every one of the 20 queries, not just the one driven here.
-- **Filter latency.** `view.filter_samples` counts per-keystroke re-filters since the
-  browser was last opened (0 right after opening, proving it is per-open, not
-  cumulative); `view.filter_p99_ms` must read under 16 ms after the 50-keystroke
-  script.
-- **Side effect.** The `opened` sink stays `[]`.
+- **Virtualised.** `link-browser`'s "virtualised: between 1 and 60 row nodes" and
+  "the list holds all 5000 links" (`size_of_set: 5000`) together prove the widget
+  knows about every link while building only a fraction of the rows; "row 5000 is
+  in the tree" / "the first row is no longer built" after `End` prove rows are
+  recycled, not merely capped.
+- **First frame.** "first frame < 100 ms (timed at present, before any a11y call)"
+  reads `metrics.summary.view_first_frame.max < 100` before any `see`/`a11y` call on
+  that instance.
+- **Ranking, all 20 queries.** Each `golden-N` block's three steps assert the top
+  rows equal `ranking-golden.json`'s `expect_top3` for that query exactly (by both
+  URI and name), that only the matching count of rows exist, and that the query's
+  named decoy is completely absent — the full table and the normative `rank()` rule
+  it is generated from are in `probes/fixtures/README.md`.
+- **Filter latency.** "no keystroke timed yet in this view" (`view.filter_samples:
+  0`) proves the counter is per-open, not cumulative; "filter p99 < 16 ms over the
+  50 keystrokes" then requires `view.filter_samples >= 50` and
+  `view.filter_p99_ms < 16` against the 5,022-link corpus.
+- **Side effect.** Both scenarios' "nothing launched" step requires the `opened`
+  sink to equal `[]`.
+
+Record each scenario separately (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+for name in link-browser link-browser-filter; do
+  R="$OUT/$name"
+  python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature link-browser \
+    --verifier "$VERIFIER" --result pass \
+    --action "scenario $name (desktop-gpui/probes/$name.json) on instance $INSTANCE" \
+    --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+    --side-effect "opened sink stayed []; see result.json" \
+    $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+done
+```
 
 ## Gotchas
 
-- Read `metrics` for the first-frame timing **before** any `see`/`a11y` call on that
-  instance — activating the AccessKit tree makes GPUI build it on every frame for the
-  window's life, which would slow the very frame being timed.
+- `scenario` replaces the instance's process and temp root before each run, so run
+  `link-browser` and `link-browser-filter` as two separate `scenario` invocations
+  (above), not interleaved steps of one hand-written `call`.
+- Read `metrics` for the first-frame timing before any `see`/`a11y` call on that
+  instance — activating the AccessKit tree makes GPUI build it on every frame for
+  the window's life, which would slow the very frame being timed. The scenario
+  itself is already ordered this way; do not add an ad-hoc `see` before it if
+  reproducing part of it by hand.
 - The filter ranks on **both** `name` and `uri`, case-folded, NOT NFKC-normalised
-  (these are identifiers, not prose) — a query that only matches one field of an item
-  still ranks it; an item matching neither field is dropped entirely, never shown at
-  a low rank. `probes/fixtures/README.md`'s worked examples (`gthb`, `rddt`, the
-  `ab`/`aabb` minimum-window case) are the edge cases a naive "contains" or greedy
-  subsequence scorer gets wrong.
-- The filter `TextInput` keeps focus while arrows/Home/End/Enter/Right/Left drive the
-  list (A11Y-NOTES.md's "Navigating a list while an Input keeps focus"): Up/Down/
-  Home/End are swallowed by the Input unless the browser intercepts them on a parent
-  with a capture-phase action listener — a filter that "looks" keyboard-driven in
-  isolation can still fail list navigation once it is the one holding focus.
+  (these are identifiers, not prose) — a query that only matches one field of an
+  item still ranks it; an item matching neither field is dropped entirely, never
+  shown at a low rank. `probes/fixtures/README.md`'s worked examples (`gthb`,
+  `rddt`, the `ab`/`aabb` minimum-window case) are the edge cases a naive "contains"
+  or greedy subsequence scorer gets wrong, and the scenario's 20 queries are chosen
+  to exercise them.
 - Today's stub shows only its static title and has no `TextInput` or `ListItem`
-  nodes at all, so this call fails at the first `see` until Phase 1 lands.
+  nodes at all, so both scenarios exit 1 at their first `see` until Phase 1 lands.

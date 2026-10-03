@@ -16,59 +16,68 @@ user actions (the hotkey, then one key) — Phase 1 R2 / spec U2's ceiling.
 
 - **Enter** and **Cmd-C** (`key {"keys": "enter"}`, `key {"keys": "cmd-c"}`) while
   the capture view shows a captured resource. Both must work independently; the
-  Phase 1 scenario drives Enter first, then a fresh instance for Cmd-C so neither
-  round depends on the other leaving the panel open.
+  frozen scenario drives Enter first, then restarts the instance for the Cmd-C round
+  so neither depends on the other leaving the panel open.
 - **Not driven here:** any mouse action — copying is keyboard-only by design.
 
 ## Drive it
 
+The acceptance proof is the frozen scenario `probes/copy-link.json`, run with the
+harness's `scenario` command (SKILL.md's Drive section). It drives both rounds (Enter,
+then Cmd-C after an in-scenario `restart`) and checks the pasteboard's actual content,
+not just that it changed.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/copy-link"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'load_fixture:{"kind":"capture","path":"{fixtures}/capture-ok.json"}' \
-  pasteboard:set_nonce \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'see:{"role":"Label","text":"Example Domain"}' \
-  'absent:{"text":"Copied"}' \
-  'key:{"keys":"enter"}' \
-  'see:{"role":"Label","text":"Copied"}' \
-  'pasteboard:{"changed":true}' \
-  opened
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name copy-link
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0; the final `opened` line reports
-`"result": []`. Repeat the same sequence on a second instance, substituting
-`'key:{"keys":"cmd-c"}'` for the Enter step, to cover the Cmd-C path independently
-(a fresh instance per the Phase 1 scenario's own restart-between-rounds design,
-`probes/copy-link.json`).
+Expected: exit 0. `$OUT/copy-link/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows a PASS line for each of "Enter: pbpaste prints the fixture
+URI, change count higher" and "Cmd-C: pbpaste prints the fixture URI, change count
+higher", with a "fresh instance for the Cmd-C round" `restart` line between them.
 
 ## Proof
 
-- **Two actions.** Between `trigger_hotkey` and the key step, no other action is
-  sent — only observations (`see`, `pasteboard`) — so the recorded call itself is
-  the "at most two actions" proof.
-- **Pasteboard.** `pasteboard:{"changed":true}` requires the change count to have
-  risen since the `set_nonce` baseline; record also captures the exact URI text with
-  `pbpaste` outside the call (Evidence section) since the pasteboard step here only
-  asserts the change, not the content — the Phase 1 scenario
-  (`probes/copy-link.json`) additionally reads back the fixture's exact URI with
-  `pasteboard: read, expect: ...`.
-- **Confirmation.** An a11y `Label` "Copied" appears after the key and must stay
-  visible at least a second if the view then dismisses the panel (README's Phase 1
-  view-state contract) — this call's `see` step only has to catch it once, since the
-  one-second hold is a timing guarantee the harness does not independently clock.
-- **Side effect.** The `opened` sink stays `[]`: copying never launches anything.
+- **Two actions, each round.** Between `trigger_hotkey` and the key step in each
+  round, the scenario only observes (`see`, `pasteboard`) — no other input — so the
+  scenario's own shape is the "at most two actions" proof.
+- **Pasteboard holds the exact URI.** "Enter/Cmd-C: pbpaste prints the fixture URI,
+  change count higher" is a `pasteboard: read` step whose `expect` is the fixture's
+  literal URI (not merely `changed: true`) and whose `changed: true` requires the
+  change count to have risen since that round's `set_nonce` — proving the content,
+  not only that something happened.
+- **Confirmation.** "Enter/Cmd-C: a11y Copied confirmation" requires a `Label`
+  "Copied" after the key, in both rounds.
+- **Independence.** The Cmd-C round runs after a real `restart` (fresh process,
+  `capture-ok.json` replayed), so it cannot be passing only because the Enter round
+  left the panel in a convenient state.
+- **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+
+Record it (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/copy-link"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature copy-link \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario copy-link (desktop-gpui/probes/copy-link.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "pasteboard carries the fixture's exact URI after each round; opened sink stayed []; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
-- `pasteboard:set_nonce` / `pasteboard:{"changed":true}` only track the pasteboard's
-  **change count**, not its text; when the exact URI matters for the record, follow
-  with `pasteboard:{"expect": "..."}` (a literal or `{nonce}`) the way
-  `probes/copy-link.json` reads the fixture's URI back with `pbpaste`.
-- This map deliberately asserts the fixture's `name` field ("Example Domain"), not
-  its URI, in the command above, so the literal fixture domain is never baked into
-  this file.
-- Today's stub never reaches a `captured` phase (phase stays `"stub"`), so this call
-  fails at the first `see` until Phase 1 lands.
+- `scenario` replaces the instance's process and temp root with a fresh one before
+  it runs, and the scenario's own `restart` step (run by probe.py inside
+  `scenario`, not a separate harness command) relaunches it again mid-run — do not
+  assume this instance's process is the one `launch` started by the time the
+  scenario finishes.
+- `pasteboard: set_nonce` saves your real pasteboard text and restores it when the
+  scenario's run ends, not after each round — do not read the pasteboard between
+  the two rounds expecting your own content back.
+- This feature is Phase 1 work: today's stub never reaches a `captured` phase
+  (phase stays `"stub"`), so `scenario --name copy-link` exits 1 at its first `see`
+  until Phase 1 lands.
