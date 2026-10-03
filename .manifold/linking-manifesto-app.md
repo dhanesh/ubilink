@@ -22,6 +22,12 @@ extended per-app by community integrations.
 
 **Architectural decisions locked in m1:**
 - **Framework:** Tauri (Rust core for OS automation + the link graph; web UI; capability-gated IPC).
+  **Desktop shell superseded 2026-10-04 (D22):** the UI panel was the Tauri webview
+  (D8/D11); it is now a native GPUI shell (`desktop-gpui/`, building `ubilink-next.app`)
+  — no second WebKit process, no bundler step. `desktop/` (Tauri) keeps shipping and
+  keeps passing `make verify` until Phase 2 removes it; command logic for both shells
+  lives in a GUI-free `app/` crate neither `tauri` nor `gpui` depend on, so the Rust
+  core/broker architecture (T1) is otherwise unchanged. See D22/D23.
 - **Extensibility:** third-party integrations = declarative manifest + sandboxed JS, distributed as installable bundles.
 - **Platform scope:** macOS-first with deep fidelity in v1; core is platform-agnostic so Windows/Linux are adapters, not rewrites.
 - **License:** MIT.
@@ -66,6 +72,11 @@ Rust core (OS automation + link graph) and a web UI, communicating over capabili
 Plugins run in a sandbox (WASM/JS) — never in the Rust core's trust domain.
 > **Rationale:** Small footprint, a real security boundary, and a first-class plugin model — the best fit for "secure + extensible".
 > **Type:** boundary · **Source:** interview · **Challenger:** stakeholder
+> **Shell evolution (D22, 2026-10-04):** "web UI" here was the Tauri webview (D8/D11).
+> It is superseded by a native GPUI shell (`desktop-gpui/`) that has no webview and no
+> core↔UI IPC boundary at all — it calls the same tested command logic in-process via
+> the GUI-free `app/` crate. T1's capability-gated-IPC property (core ↔ plugins via the
+> broker, S1/RT-5) is unchanged; only the removed layer is core ↔ UI webview IPC.
 
 #### T2: Bidirectional link graph in a local store
 Links are stored as a persistent, bidirectional graph (SQLite). Hooking A↔B is atomic and
@@ -104,30 +115,50 @@ and a defined fallback.
 Global hotkey → linking panel visible. **Target:** p99 < 200ms, p50 < 80ms (hotkey-to-visible).
 > **Rationale:** The manifesto's premise is flow preservation; a laggy panel *is* the context-switch it's meant to eliminate.
 > **Type:** boundary · **Source:** interview · **Challenger:** stakeholder · **Threshold:** statistical, p99 200ms / p50 80ms
+> **Evidence (GPUI Phase 0, D22 — RT-9):** `desktop-gpui/probes/panel-hotkey.json` —
+> shell hotkey-to-first-frame on stub views, debug automation build, 50 triggers:
+> p50 ≈ 19–21ms / p99 ≈ 25–66ms, inside budget with margin (VERIFIED, scoped to the
+> shell only). The full-view measurement on the release build is Phase 1's R15
+> make-budget probe (PENDING). Supersedes reliance on the Tauri panel's own
+> measurements (D8/D11 → D22).
 
 #### U2: Copy-link-to-current-resource in ≤ 2 user actions
 From a standing start (resource focused in another app), obtaining its link takes at most two
 user actions (e.g., hotkey + confirm/copy).
 > **Rationale:** Friction here defeats the purpose; copying a link must rival copying text in effort.
 > **Type:** goal · **Source:** interview · **Challenger:** stakeholder · **Threshold:** deterministic, ≤ 2 user actions
+> **Evidence (GPUI Phase 1, planned — RT-9):** `desktop-gpui/probes/copy-link.json`
+> (R2/U2) — Enter or Cmd-C in the captured state copies the link in exactly two
+> actions from the hotkey; not yet landed (PENDING).
 
 #### U3: Graceful, explained degradation — never silent failure
 When a resource or app cannot be linked (no adapter, permission missing, scheme unsupported),
 the UI explains *why* and what is possible instead — it never fails silently or pretends.
 > **Rationale:** [Pre-mortem, foreseeable] Off-macOS or for unsupported apps the tool must feel honest, not broken. Trust depends on transparency about limits.
 > **Type:** invariant · **Source:** validated-pre-mortem · **Challenger:** stakeholder
+> **Evidence (RT-7):** the capability-matrix degradation data path (O2) is SATISFIED
+> and shell-agnostic, unaffected by the shell swap (D22). The GPUI panel's own live
+> explained-failure render is `desktop-gpui/probes/capture-view.json` (R1/U3) — not
+> yet landed (PENDING).
 
 #### U4: Keyboard-first and accessible
 Core flows are fully keyboard-operable; UI elements carry screen-reader labels and meet
 reasonable contrast/focus standards.
 > **Rationale:** A productivity tool invoked dozens of times a day must be fast for keyboard users and usable with assistive tech.
 > **Type:** goal · **Source:** interview · **Challenger:** stakeholder
+> **Evidence (GPUI Phase 0, D22/D23 — RT-11, new):** `desktop-gpui/probes/a11y-spike.json`
+> (R7/TN5) — AccessKit roles + text for List/Input/Switch/Dialog, and keyboard-only
+> Tab/Escape/arrow-key navigation, verified on stub views (VERIFIED, partial). Live
+> VoiceOver parity is explicitly deferred to an attended Phase 2 check (PENDING, D22).
 
 #### U5: Backlinks are visible at the resource
 Opening or focusing a linked resource surfaces what is hooked to it (its backlinks), enabling
 graph navigation, not just one-shot link copying.
 > **Rationale:** Realizes the bidirectional model's value; "connected information" must be visibly connected from either end.
 > **Type:** goal · **Source:** interview · **Challenger:** stakeholder
+> **Evidence (GPUI Phase 1, planned — RT-12, new):** `desktop-gpui/probes/backlinks.json`
+> (R3/U5) — newest-first backlinks rendered in the panel; not yet landed (PENDING).
+> The bidirectional data layer itself is proven separately (RT-4).
 
 ### Security
 
@@ -288,6 +319,11 @@ Backward-reasoned from the outcome. Each RT is a TRUTH that must hold (not a bui
 `parent` and `[relevance, confidence]` edge. Greenfield, so nothing is SATISFIED yet:
 6 NOT_SATISFIED, 4 SPECIFICATION_READY. **Binding constraint: RT-5.**
 
+*(Text above is the original m3-anchor snapshot, kept historical. RT-11 and RT-12 were added
+2026-10-04 for GPUI Phase 0 (D22/D23, Task 18): U4 and U5 had no required truth to carry evidence
+against until the GPUI shell existed. See each RT below and the current satisfied count via
+`manifold status linking-manifesto-app`.)*
+
 ### RT-1: A stable, resolvable link to the active resource is obtainable per supported app
 For each supported app/platform, the system can produce a link (address + name) to the currently
 open/selected resource — the manifesto's literal demand. ← OUTCOME [rel 1.0, conf 1.0]
@@ -331,6 +367,10 @@ A per-app/per-platform descriptor states what linking works where; it scopes B1 
 and powers U3's explained degradation. ← OUTCOME [rel 0.7, conf 0.7]
 > **Gap:** No capability descriptor. (Concept defined in TN2/O2.)
 > **conf 0.7:** the outcome can technically ship without a *formal* matrix, but the TN2 resolution needs it.
+> **Note:** the capability-matrix data path (O2/U3) is SATISFIED and shell-agnostic — unaffected
+> by the Tauri→GPUI shell swap (D22). The GPUI panel's own live explained-failure render is a
+> separate, additional proof point (`desktop-gpui/probes/capture-view.json`, R1/U3), still PENDING
+> pre-Phase 1 — it does not change this RT's SATISFIED status.
 
 ### RT-8: Graph and metadata stay on-device with zero background egress
 No background phone-home; network access happens only on explicit, user-initiated action.
@@ -343,12 +383,46 @@ Hotkey-to-panel-visible meets p99<200ms/p50<80ms and copying a resource's link t
 ← OUTCOME [rel 0.7, conf 0.7]
 > **Gap:** No UI. Prefetch watcher (TN3) + panel unbuilt.
 > **conf 0.7:** performance target has graceful-degradation alternatives; the outcome's behaviors still hold if slower.
+> **Status update (GPUI Phase 0, D22):** NOT_SATISFIED → PARTIAL. The GPUI shell itself
+> (`desktop-gpui/probes/panel-hotkey.json`) measured hotkey-to-first-frame p50 ≈ 19–21ms /
+> p99 ≈ 25–66ms on stub views, debug automation build, 50 triggers — VERIFIED and inside
+> U1's budget, but only for the shell, not Phase 1's real views (that full-view, release-build
+> measurement is Phase 1's R15 budget probe, PENDING). U2's ≤2-action copy flow is still
+> entirely PENDING (`desktop-gpui/probes/copy-link.json`, R2/U2, not yet landed). This
+> evidence targets the GPUI shell (D22); the earlier Tauri-panel numbers recorded in
+> `.verify.json` were for the now-superseded webview (D8/D11).
 
 ### RT-10: Integrations are signed, versioned, and updatable independent of core
 Integration bundles carry a verifiable signature, declare a version, and can be installed/updated/
 removed without a core release. ← OUTCOME [rel 0.7, conf 0.7]
 > **Gap:** No installer, signing/verification, or registry client. (Lifecycle designed in TN4/O1.)
 > **conf 0.7:** the ecosystem could bootstrap via other distribution paths.
+
+### RT-11: The GPUI panel's accessibility surface carries the pattern keyboard and screen-reader use need
+List/Input/Switch/Dialog each emit an AccessKit node carrying their visible text and role, and
+core flows are keyboard-operable, once the accessibility tree is activated. ← OUTCOME [rel 0.7, conf 0.7]
+> **Gap:** Proven only on Phase 0's stub spike view (`desktop-gpui/src/views/a11y_spike.rs`); Phase 1's
+> real views (capture/browser/settings) must follow the same pattern, and VoiceOver itself has not
+> been run.
+> **conf 0.7:** the AccessKit pattern has one confirmed gpui-pre 0.3.7 gap (Dialog's own container
+> carries no role, pinned as an asserted-absent check per D22) — a future upstream fix is detectable,
+> not silently relied on.
+> **Added for GPUI Phase 0 (D22/D23):** U4 had no required truth before this shell existed — this RT
+> fills that gap. `desktop-gpui/probes/a11y-spike.json` (R7/TN5) is VERIFIED for the AccessKit-role +
+> keyboard-navigation pattern on stub views; live VoiceOver parity is explicitly deferred to an
+> attended Phase 2 check (PENDING, D22) — the in-process AccessKit tree the probes read is a proof
+> surface for agents, not a screen-reader audit.
+
+### RT-12: Backlinks are rendered at the resource in the GPUI panel
+Opening or focusing a linked resource surfaces its backlinks newest-first in the panel itself (not
+just in the underlying graph store). ← OUTCOME [rel 0.7, conf 0.7]
+> **Gap:** No GPUI view renders backlinks yet; Phase 0 shipped only stub views. The bidirectional
+> backlink DATA layer is proven separately (RT-4) — this RT is specifically about the panel's render.
+> **conf 0.7:** the render is a thin, mostly-mechanical layer over data already proven by RT-4;
+> alternatives (e.g. a separate "linked resources" view) could also satisfy U5's intent.
+> **Added for GPUI Phase 0 (D22/D23):** U5 had no required truth before this shell existed — this RT
+> fills that gap. `desktop-gpui/probes/backlinks.json` (R3/U5) is the Phase 1 acceptance scenario
+> (PENDING, not yet landed — fails by design pre-Phase 1).
 
 ---
 

@@ -831,8 +831,16 @@
             "path": "src-tauri/src/capabilities.rs",
             "test_name": "unsupported_app_degrades_with_explanation_not_silence",
             "status": "VERIFIED"
+          },
+          {
+            "id": "E23",
+            "type": "test_passes",
+            "path": "desktop-gpui/probes/capture-view.json",
+            "ref": "GPUI Phase 1 acceptance scenario (R1/U3): a failed capture explains what failed and what to do, read from the live panel's own accessibility tree — not yet landed",
+            "status": "PENDING"
           }
-        ]
+        ],
+        "note": "The capability-matrix degradation data path (O2/U3, E12/E13) is SATISFIED and shell-agnostic, so it is unaffected by the shell swap (D22). The GPUI panel's own live explained-failure render is additionally evidenced by the Phase 1 acceptance scenario capture-view.json, still PENDING pre-Phase 1."
       },
       {
         "id": "RT-8",
@@ -862,7 +870,7 @@
       },
       {
         "id": "RT-9",
-        "status": "NOT_SATISFIED",
+        "status": "PARTIAL",
         "maps_to": [
           "U1",
           "U2"
@@ -874,16 +882,25 @@
           {
             "id": "E15",
             "type": "metric_value",
-            "ref": "hotkey-to-panel-visible p99 < 200ms / p50 < 80ms",
+            "path": "desktop-gpui/probes/panel-hotkey.json",
+            "ref": "GPUI shell hotkey-to-first-frame on stub views (Phase 0, D22, debug automation build, 50 triggers): p50 ≈ 19-21ms, p99 ≈ 25-66ms — within U1's p99<200ms/p50<80ms budget, with margin for Phase 1's real views",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E19",
+            "type": "metric_value",
+            "ref": "hotkey-to-panel-visible p99<200ms/p50<80ms measured on Phase 1's real release-build views (not stubs) — the R15 make-budget probe",
             "status": "PENDING"
           },
           {
             "id": "E16",
             "type": "test_passes",
-            "ref": "copy link to current resource achievable in <= 2 user actions",
+            "path": "desktop-gpui/probes/copy-link.json",
+            "ref": "GPUI Phase 1 acceptance scenario (R2/U2): Enter or Cmd-C in the captured state copies the link in exactly two actions from the hotkey — not yet landed",
             "status": "PENDING"
           }
-        ]
+        ],
+        "note": "GPUI Phase 0 (D22) proved the shell's own hotkey-to-first-frame latency on stub views, inside U1's budget. The full-view release-build measurement (Phase 1 R15) and U2's <=2-action copy flow (Phase 1 copy-link.json) remain PENDING until Phase 1 lands. The .verify.json constraint-level matrix's earlier U1/U2 SATISFIED calls were measured on the now-superseded Tauri panel (D8/D11); this RT's evidence targets the GPUI shell (D22) instead."
       },
       {
         "id": "RT-10",
@@ -912,6 +929,50 @@
           }
         ],
         "note": "Signed (ed25519) + versioned + installable/updatable independent of core, full GAP-09 matrix tested. Registry distribution service is O4 (ENV-blocked)."
+      },
+      {
+        "id": "RT-11",
+        "status": "PARTIAL",
+        "maps_to": [
+          "U4"
+        ],
+        "relevance": 0.7,
+        "confidence": 0.7,
+        "evidence": [
+          {
+            "id": "E20",
+            "type": "test_passes",
+            "path": "desktop-gpui/probes/a11y-spike.json",
+            "ref": "GPUI Phase 0 a11y spike (R7/TN5, D22/D23): List/Input/Switch/Dialog each emit the AccessKit nodes a screen reader needs (role + text), and keyboard-only Tab/Escape/End/Home/Down/Up navigation is verified through the automation key verb on stub views. A known gpui-pre 0.3.7 upstream gap (Dialog's own container carries no role) is pinned as an asserted-absent check, not silently relied on.",
+            "status": "VERIFIED"
+          },
+          {
+            "id": "E21",
+            "type": "manual_review",
+            "ref": "Live VoiceOver parity pass on a real Mac, explicitly deferred to an attended Phase 2 check (D22) — the in-process AccessKit tree the probes read is a proof surface for agents, not a screen-reader audit",
+            "status": "PENDING"
+          }
+        ],
+        "note": "Added for GPUI Phase 0 (D22/D23): U4 had no required truth before this shell existed. The accessibility-tree pattern and keyboard navigation are proven on stub views; VoiceOver itself is PENDING by design until Phase 2's attended check."
+      },
+      {
+        "id": "RT-12",
+        "status": "NOT_SATISFIED",
+        "maps_to": [
+          "U5"
+        ],
+        "relevance": 0.7,
+        "confidence": 0.7,
+        "evidence": [
+          {
+            "id": "E24",
+            "type": "test_passes",
+            "path": "desktop-gpui/probes/backlinks.json",
+            "ref": "GPUI Phase 1 acceptance scenario (R3/U5): opening/focusing a linked resource lists its backlinks newest-first in the panel — not yet landed, probe fails by design pre-Phase 1",
+            "status": "PENDING"
+          }
+        ],
+        "note": "Added for GPUI Phase 0 (D22/D23): U5 had no required truth before this shell existed. The bidirectional backlink DATA layer is proven separately (RT-4); what's NOT_SATISFIED is the GPUI panel actually rendering them, scoped by the Phase 1 backlinks.json acceptance scenario."
       }
     ],
     "binding_constraint": {
