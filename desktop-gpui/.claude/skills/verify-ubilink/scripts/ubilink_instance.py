@@ -460,6 +460,8 @@ def cmd_launch(a):
             inst.stop()
         with contextlib.suppress(OSError):
             claim.unlink()
+        with contextlib.suppress(OSError):
+            d.rmdir()  # only when empty: a failed launch leaves no claim directory
         if leased:
             lease_update(a.verifier, drop=a.instance, launcher_done=True)
         raise
