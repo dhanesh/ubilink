@@ -78,9 +78,29 @@ What `launch` does, in order:
    (O_EXCL; it names one run directory, one verifier and that verifier's instances).
    Only one verifier at a time drives instances on this desktop, so two verifiers' GUI
    steps can never interleave between calls. If another verifier holds it, `launch`
-   waits up to 900 seconds (`--lease-timeout`) and then exits 3. A lease whose
-   instances and launcher are all dead is stale and gets replaced. Your last `stop`
-   releases it.
+   waits up to 900 seconds (`--lease-timeout`) and then exits 3. Your last `stop`
+   releases it. How a waiting `launch` treats someone else's lease:
+   - **Stale:** none of its instances is alive and none of its harness commands is
+     running. The lease is replaced; there is nothing to stop.
+   - **Idle:** no harness command of the holder has run for 600 seconds, and none is
+     running now. This is how a crashed verifier's orphans get cleaned up. The waiting
+     `launch` reclaims the lease:
+     - it stops the holder's instances by their recorded pids, each only after checking
+       that pid still runs our ubilink-next binary
+     - it removes their claims
+     - it writes `.verify-run/reclaims/<time>-<verifier>.json` under the holder's run
+       directory
+     - it logs `RECLAIMED ...` on stderr
+     - it takes the lease
+   - **Heartbeat:** your `launch`, `call` (after every step) and `doctor` refresh the
+     lease's `last_activity`, and mark your process active while they run. So however
+     long one command takes (a cold build, a desktop-lock wait, a long proof), it never
+     counts as idle. Only a gap of more than 10 minutes between your commands does.
+   - **Reclaimed:** if your lease was reclaimed, your next command on that instance
+     exits 3 with "lease reclaimed after idle" and drives nothing. Launch again; with
+     your new launch, the earlier evidence no longer applies.
+
+   The decision rules are unit-tested: `python3 "$SKILL"/scripts/test_ubilink_instance.py`.
 3. Builds the automation binary with probe.py's `build_binary` and clones the produced
    executable to `.verify-run/$INSTANCE/ubilink-next-automation`. The build is
    `cargo build --locked --features automation` in the warm shared target dir under
@@ -152,7 +172,7 @@ The JSON also reports `screen_recording` (needed only for screenshots) and the c
 1. holds probe.py's desktop lock throughout and keeps the display awake (the key window and pasteboard belong to the
    whole desktop; a concurrent `probe.py run` and you wait for each other, up to 15
    minutes)
-2. checks you still hold the session lease
+2. checks you still hold the session lease, and refreshes it after every step
 3. starts by closing any open panel (probe.py's `reset_panel`, saved as the call's first
    record)
 4. runs each step through probe.py's own runner
@@ -200,6 +220,11 @@ one JSON line (`ok`, `detail`, plus `result` for verb calls other than `a11y`). 
 the step exchanged, plus a line in `transcript.jsonl`. Files are numbered after whatever
 is already in that directory.
 
+Every exit path of `call` (and of every harness command) ends in one of these codes; a
+Python traceback is a harness bug and exits 2. If the proof cannot start from a closed
+panel because the app refuses to close it, that follows probe.py's rule: product failure,
+exit 1. Socket trouble during that reset exits 2.
+
 Exit codes:
 
 | exit | meaning |
@@ -207,7 +232,7 @@ Exit codes:
 | 0 | every step held |
 | 1 | the product did not do it: an `ok: false` reply, or a check that never held within `--timeout-ms` (default 5000) |
 | 2 | harness error: no such instance, socket gone, bad step |
-| 3 | environment-blocked: screen locked, display still asleep after the wake, no Screen Recording, the lease is not yours, or focus stolen twice |
+| 3 | environment-blocked: screen locked, display still asleep after the wake, no Screen Recording, the lease is not yours or was reclaimed after idle, or focus stolen twice |
 
 **Focus theft.** A capture or browser panel hides whenever it loses key status. When a
 visibility step fails and another app became frontmost during it (probe.py's
