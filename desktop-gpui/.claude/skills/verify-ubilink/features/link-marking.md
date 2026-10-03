@@ -23,6 +23,11 @@ filter — spec ruling R-n).
 
 ## Drive it
 
+Two commands: a `call` that marks A then B, then a real `restart` (SKILL.md's
+"Proving persistence" section) followed by a second `call` that reopens the browser
+and drills into B to see A listed among its connections — proving the link was
+written to the graph, not held only in the view's in-memory state.
+
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/captures/link-marking"
 python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
@@ -37,16 +42,29 @@ python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
   'see:{"role":"Label","text":"Linked “Decoy Unrelated” ↔ “Gamma Doc”"}' \
   'step:{"graph":true,"links":[["https://decoy.example/unrelated","https://gamma.example/three"]],"link_count":4}' \
   opened
-echo "exit $?"
+echo "mark exit $?"
+
+python3 "$H" restart --instance "$INSTANCE" --verifier "$VERIFIER"
+echo "restart exit $?"
+
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
+  'trigger_hotkey:{"action":"browser"}' \
+  'wait_state:{"shell.visible":true,"route":"browser"}' \
+  'see:{"role":"ListItem","nth":1,"state":{"selected":true},"text":"Gamma Doc","deep":true}' \
+  'key:{"keys":"right"}' \
+  'see:{"role":"ListItem","text":"Decoy Unrelated","deep":true}'
+echo "drill-after-restart exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0; the final `opened` line reports
-`"result": []`. The link row order and A = row 1 / B = row 2 pairing follow
-`probes/link-marking.json`'s own setup (`graph-backlinks.json`'s `list_links` order).
-Persistence across a real process restart — the Phase 1 scenario restarts the
-instance and drills into B to see A listed — is `scripts/probe.py run link-marking`'s
-job (the Gotchas section below explains why this skill's `call` proves the write
-itself instead).
+Expected: every `call` prints `"ok": true` lines and exits 0; `restart` prints
+`{"RESTARTED": {..., "data_dir_kept": true, ...}}` and exits 0 (`seed_graph` wrote
+straight to the instance's `ubilink-graph.sqlite`, not to the app's in-memory state,
+so nothing needs replaying for the graph itself to survive — only `load_fixture`
+kinds are replayed). The link row order and A = row 1 / B = row 2 pairing follow
+`probes/link-marking.json`'s own setup (`graph-backlinks.json`'s `list_links`
+order); after the restart, row 2 ("Gamma Doc", B) is selected again (`list_links`
+order is unchanged) and drilling right lists "Decoy Unrelated" (A) among its
+connections, in addition to the connection the fixture already seeded.
 
 ## Proof
 
@@ -57,16 +75,18 @@ itself instead).
   unordered pair and `links_of` reads either end, so this single check is the proof
   that both `links_of(A) ∋ B` and `links_of(B) ∋ A` hold, not just that *some* row
   was written.
+- **Survives a real restart.** After the mark and a real `restart` (same binary,
+  same data dir), reopening the browser and drilling into B lists A among its
+  connections — proof the link lives in the graph the view reads on every open, not
+  only in whatever state the view held before the restart.
 - **Side effect.** The `opened` sink stays `[]`: marking a link never opens it.
 
 ## Gotchas
 
-- This skill's `call` refuses the `restart` step (SKILL.md's Drive section: "`restart`
-  ... need `probe.py run` itself and are refused"), so this map proves persistence by
-  reading the graph file the mark wrote, in the same call, rather than by actually
-  restarting the process and drilling into B afterwards. That on-disk row is exactly
-  what a real restart would read back; `scripts/probe.py run link-marking` is the
-  tool that drives the full restart-then-drill proof end to end.
+- `restart` (SKILL.md's "Proving persistence" section) is a harness command run
+  between two `call`s, not a step inside `call` — `call` itself still refuses a
+  `restart` step. It keeps the temp root (so the instance's `ubilink-graph.sqlite`
+  survives untouched) and relaunches the same binary.
 - Plain `l` (no Cmd) must keep typing into the filter — a browser that intercepts
   bare `l` as a mark shortcut breaks `link-browser.md`'s filter contract for every
   query containing the letter.
