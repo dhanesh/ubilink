@@ -6,6 +6,7 @@
     "Where each sample is is the view's layout, so each view reports a region per sample in its state (view.theme_samples.surface/text/accent, window points, README contract); the colour is the probe's. The surface and accent are region means; the text is the best-matching pixel in its run (glyph cores carry the colour, antialiased edges do not).",
     "Same pid: the probe's own child process is still the one it launched (process: unchanged). Same window id: saved per view before the first switch.",
     "Screenshots go to ~/Library/Caches/ubilink-probe/shots/<run>/theming-<view>-<mode>.png (path printed at the end). Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL.",
+    "Each reported region must be at least 24 x 24 pt (STATE_REGION_MIN_PT, ruling R-q), so a view cannot point the probe at a token-coloured swatch painted for it.",
     "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions."
   ],
   "setup": {

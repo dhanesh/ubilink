@@ -4,7 +4,7 @@
   "notes": [
     "release_budget launches the release build (cargo build --release, no automation channel, TN3) as its own isolated instance (temp root, UBILINK_DATA_DIR, single-instance socket, no hotkeys), lets it settle 5 s, then measures CPU as the ps cumulative-CPU-time delta over 60 s of wall time, physical footprint with `vmmap --summary` ('Physical footprint:', Activity Monitor's Memory number), and the binary's size after `strip` (README).",
     "The latency loop and placement steps are panel-hotkey.json's, run first on a fresh automation instance before any a11y call (activating the a11y tree slows every later frame); the dismiss steps are panel-dismiss.json's. Copied here at Phase 0 because Phase 1 may change neither file.",
-    "PERFORMANCE.md's table format, required rows, budgets and the tolerances for 'agrees with this run' are in README 'PERFORMANCE.md format'. The first step checks only the doc (so a missing doc fails fast); the last compares it with this run's measurements and dry-runs `make -n budget` (R15's make target).",
+    "PERFORMANCE.md's table format, required rows, budgets and the tolerances for 'agrees with this run' are in README 'PERFORMANCE.md format'. The first step checks only the doc (so a missing doc fails fast); the last compares it with this run's measurements and dry-runs `make -n budget` (R15's make target), whose recipe must run `scripts/probe.py budget`, the measurement that writes the doc (a no-op target fails).",
     "Each latency trigger and each dismiss case is a block (focus-theft retry, README Unattended guards)."
   ],
   "steps": [
@@ -2250,7 +2250,7 @@
       }
     },
     {
-      "name": "PERFORMANCE.md agrees with this run, and `make budget` exists",
+      "name": "PERFORMANCE.md agrees with this run, and `make budget` runs probe.py budget",
       "perf_doc": "{repo}/docs/PERFORMANCE.md",
       "compare": true,
       "make_target": "budget"
