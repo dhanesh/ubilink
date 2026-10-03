@@ -84,10 +84,15 @@ Regenerate with `python3 scripts/probe.py fixtures --generate`; never hand-edit 
 
 ### `graph-ranking.json` (R5)
 
-The corpus `ranking-golden.json`'s queries match against: 20 resources (no links),
-each a realistic app/site URI (`github.com`, `notion.so`, `bear://...`, ...),
-picked so a handful of short acronym-style queries are genuine in-order-subsequence
-matches of exactly one or a few of them.
+The corpus `ranking-golden.json`'s queries match against: 22 resources (no links),
+each with a realistic `name` **and** `uri` (`"GitHub - ubilink"` /
+`https://github.com/ubilink/ubilink`, `"Triage inbox notes"` /
+`bear://x-callback-url/open-note?id=7f3a9c21`, ...). Most items' names and uris
+both contain the same obvious text (a browser tab's title usually echoes its
+domain), but a few deliberately don't: `r21` ("Triage inbox notes") has a title
+that carries a match while its Bear uri is an opaque id, and `r22` ("Reddit
+discussion", `https://rddt.example/thread/99231`) matches on both fields with
+genuinely different spans — see the worked examples below.
 
 ### `ranking-golden.json` (R5)
 
@@ -102,41 +107,61 @@ A JSON **list** of exactly 20 entries:
 - `query`: what the user types into the link-browser filter.
 - `expect_top3`: 1–3 URIs from `graph-ranking.json`, **in the order the filter must
   rank them** — the a11y rows' top matches (in document order) must equal this list
-  exactly (a `sequence` query with `mode: "prefix"` in a scenario).
+  exactly (a `sequence` query with `mode: "prefix"` in a scenario). An entry is
+  identified by its `uri` even though the match may have come from its `name`
+  (`uri` is the corpus's unique key; `name` is not).
 - `decoys`: at least one URI from `graph-ranking.json` that looks superficially
-  related but **never matches at all** (not "ranks low" — absent from the filtered
-  rows entirely, let alone the top 3).
+  related but **never matches at all, on either field** (not "ranks low" —
+  absent from the filtered rows entirely, let alone the top 3).
 
 #### The reference ranking rule (normative)
 
 R5 says the filter must "rank in-order subsequence matches above other matches".
 That alone under-specifies the order *among* several subsequence matches — which
-is exactly what this table pins down. `rank(query, uris)` in `scripts/probe.py` is
-the rule, byte for byte; `--check` recomputes every golden query's ranking with it
-and fails if `expect_top3` disagrees, so this table can never drift from the rule
-it claims to follow. **A Phase 1 Rust implementation of the filter must reproduce
-this rule's output for every query in this table** (it need not use the same
-internal algorithm — a different data structure that provably yields the same
-order is fine).
+is exactly what this table pins down. `rank(query, items)` in `scripts/probe.py`
+is the rule, byte for byte; `--check` recomputes every golden query's ranking with
+it and fails if `expect_top3` disagrees, so this table can never drift from the
+rule it claims to follow. **A Phase 1 Rust implementation of the filter must
+reproduce this rule's output for every query in this table** (it need not use the
+same internal algorithm — a different data structure that provably yields the
+same order is fine).
+
+Matching both `name` and `uri` is not a convenience: controller ruling R-m
+(Task 10 fix round 2) requires it for feature parity (B1) with the Tauri panel,
+whose filter already searches `${name} ${uri}` case-insensitively
+(`dist/browse-state.mjs`). A uri-only scorer would make the GPUI browser *worse*
+than the one it replaces — a Bear note is found by its title, not its opaque
+`bear://...?id=` uri, and the reverse holds for items whose name is generic but
+whose uri is distinctive.
 
 Rule, in order of precedence:
 
-1. **Match text**: the resource's `uri`, case-folded (NFKC is not applied — these
-   are URIs, not display text). `name` is **not** matched by this rule. (Phase 1
-   may additionally filter on `name`; this table only pins the `uri`-matching
-   behaviour, since that is what every query here was built against.)
-2. A hit requires `query` to be an in-order (not necessarily contiguous)
-   subsequence of that `uri`. Non-matches are dropped — never ranked, however
-   "close" they look.
-3. **Primary key — minimum window span**: the length of the SHORTEST contiguous
-   substring of the `uri` that still contains `query` as a subsequence, taken
-   over every possible embedding (not just the first/greedy-leftmost one — see
-   the worked example below, where they differ). Shorter span ranks first.
-4. **Tie-break 1 — earliest start**: among spans of equal minimum length, the
-   one starting earlier in the `uri` ranks first.
-5. **Tie-break 2 — none**: deliberately no word-boundary or prefix bonus. This
-   corpus does not need one, and leaving it out keeps the rule a single,
-   unambiguous number instead of a second scoring pass bolted on.
+1. **Match text — both fields**: the resource's `name` and its `uri`, each
+   case-folded independently (NFKC is not applied — these are identifiers and
+   URIs, not prose). An item matches if `query` is an in-order (not necessarily
+   contiguous) subsequence of **either** field. Non-matches on both fields are
+   dropped — never ranked, however "close" they look.
+2. **Primary key — minimum window span**: for whichever of the two fields gives
+   the better result, the length of the SHORTEST contiguous substring of that
+   field that still contains `query` as a subsequence, taken over every possible
+   embedding (not just the first/greedy-leftmost one — see the `ab`/`aabb`
+   worked example below, where they differ). Shorter span ranks first, and an
+   item's OWN span is always the smaller of its name-span and uri-span (its
+   worse field never matters once its better one is known).
+3. **Tie-break 1 — earliest start**: among spans of equal minimum length
+   (whether from the same field or a tie between an item's two fields), the one
+   starting earlier ranks first.
+4. **Tie-break 2 — field priority (name before uri)**: reached ONLY when a
+   single item's own name-match and uri-match tie on both span and start — an
+   edge case internal to one item, never a comparison between two different
+   items. `name` wins the tie because a title is what a user reads; this does
+   not mean `name` matches are ranked above `uri` matches in general (the
+   `rddt` worked example below shows a tighter `uri` match outranking a looser
+   `name` match on a DIFFERENT item).
+5. **Tie-break 3 — none**: deliberately no word-boundary or prefix bonus beyond
+   the above. This corpus does not need one, and leaving it out keeps the rule
+   a short, ordered list of unambiguous numbers instead of a second scoring
+   pass bolted on.
 6. **Final tie-break — uri ascending**: the `uri` itself, case-folded,
    lexicographic. Not "corpus file order" — `graph-ranking.json`'s array order is
    not part of the contract, and a real implementation's own corpus order has no
@@ -161,27 +186,39 @@ function min_window_span(query, text):
                                               # greedy-leftmost one
     return best
 
-function rank(query, uris):
-    hits = [(min_window_span(lower(query), lower(uri)), lower(uri), uri)
-            for uri in uris if min_window_span(lower(query), lower(uri)) is not None]
-    sort hits by (span.length, span.start, lower(uri))
-    return [uri for _, _, uri in hits]
+function rank(query, items):   # items = [(name, uri), ...]
+    hits = []
+    for (name, uri) in items:
+        # This item's own winner: smaller span, then earlier start, then
+        # field priority (name before uri) -- scoped to this one item only.
+        candidates = []  # each: (span, start, field)  where field: name=0, uri=1
+        name_window = min_window_span(lower(query), lower(name))
+        if name_window is not None:
+            candidates.append((name_window.length, name_window.start, 0))
+        uri_window = min_window_span(lower(query), lower(uri))
+        if uri_window is not None:
+            candidates.append((uri_window.length, uri_window.start, 1))
+        if candidates is empty:
+            continue  # matches neither field
+        (span, start, _field) = min(candidates)   # tuple order = rule precedence
+        hits.append((span, start, lower(uri), uri))
+    sort hits by (span, start, lower(uri))         # rules 2, 3, 6 (5 adds nothing)
+    return [uri for (_, _, _, uri) in hits]
 ```
 
 Worked examples:
 
-| query | uri | minimum window | why |
+| query | item | winning field & window | why |
 |---|---|---|---|
-| `gthb` | `https://github.com/ubilink/ubilink` | `"github"` (span 6, start 8) | `g`,`t`,`h`,`b` is a subsequence of `github` (skipping `i`,`u`); no shorter substring of the whole uri contains it. |
-| `ab` | `aabb` | span **2**, start 1 (`"ab"` at index 1–2) | The GREEDY-leftmost embedding (`a` at 0, `b` at 2) spans 3 characters (`"aab"`) — but a tighter embedding exists (`a` at 1, `b` at 2, span 2). `min_window_span` finds the true minimum (2), not the greedy one (3); this is exactly why `rank` cannot be built on `is_subsequence` alone. |
-| `lnr` | `https://linear.app/ubilink/issue/ub-42` vs. `https://gitlab.com/ubilink/ubilink-mirror` | `linear.app`'s window has span 6, start 8 (the literal substring `"linear"`) vs. `gitlab...`'s best embedding of `l`,`n`,`r` at span 8, start 30 | Both are genuine subsequence matches (`ranking-golden.json`'s `lnr` entry lists both in its top 3), but the tighter one (span 6 < 8) ranks first by rule 3. |
+| `gthb` | `r1`: name `"GitHub - ubilink"`, uri `https://github.com/ubilink/ubilink` | **name**, span 6, start 0 | `g`,`t`,`h`,`b` is a subsequence of `GitHub` (skipping `i`,`u`) in BOTH fields, but the name's match starts at index 0 (the field itself begins with `GitHub`) vs. the uri's match starting at index 8 (after `https://`) — same span (6), name wins on earlier start (rule 3). |
+| `ab` | (pure strings, not a corpus item) `"ab"` vs. text `"aabb"` | span **2**, start 1 (`"ab"` at index 1–2) | The GREEDY-leftmost embedding (`a` at 0, `b` at 2) spans 3 characters (`"aab"`) — but a tighter embedding exists (`a` at 1, `b` at 2, span 2). `min_window_span` finds the true minimum (2), not the greedy one (3); this is exactly why `rank` cannot be built on `is_subsequence` alone. |
+| `trgn` | `r21`: name `"Triage inbox notes"`, uri `bear://x-callback-url/open-note?id=7f3a9c21` | **name only** — span 9, start 0; the uri has no `g` at all, so it does not match at all | The title carries the only match (controller ruling R-m's required case): a Bear note's `bear://...?id=` uri is an opaque id, exactly like the real Tauri browser's parity requirement. |
+| `rddt` | `r22`: name `"Reddit discussion"` (span 6, start 0), uri `https://rddt.example/thread/99231` (span **4**, start 8) vs. `r6`: name `"Reddit r/rust"` (span 6, start 0), uri `https://reddit.com/...` (span 6, start 8) | `r22` ranks first: its OWN winning field is its uri (span 4 < its own name's span 6) | Both items are genuine `name`-based matches on `"Reddit"` (span 6 each), but `r22`'s uri contains the literal substring `rddt` (span 4) — a tighter match on a DIFFERENT field of a DIFFERENT item, so `r22` as a whole outranks `r6` even though `r6`'s `name` would tie `r22`'s `name`. This is the case rule 2 exists for: an item's span is always its better field, and better-field spans are compared across items regardless of which field won. |
 
-`is_subsequence(query, text)` (a plain boolean, no span) is what `decoys` are
-checked against conceptually, but `--check` actually calls `rank` and confirms
-the decoy is simply absent from its result — the same thing, expressed as "not
-ranked" rather than "not a match". `scripts/test_probe.py` unit-tests
-`min_window_span` (including the greedy-vs-minimum case above), `rank`'s
-tie-breaks, and that `--check` fails when the table disagrees with the scorer.
+`scripts/test_probe.py` unit-tests `min_window_span` (including the
+greedy-vs-minimum case above), `rank`'s field-OR logic and field-priority
+tie-break, that `rank`'s result doesn't depend on the input order, and that
+`--check` fails when the table disagrees with the scorer.
 
 ## Capture fixtures (R1, R2)
 

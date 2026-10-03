@@ -20,7 +20,9 @@
     { "guid": "r17", "name": "Apple support", "uri": "https://support.apple.com/guide/mac-help", "created_at": 1700000017000 },
     { "guid": "r18", "name": "Microsoft docs", "uri": "https://learn.microsoft.com/dotnet/csharp", "created_at": 1700000018000 },
     { "guid": "r19", "name": "Obsidian note", "uri": "obsidian://open?vault=Notes&file=Linking", "created_at": 1700000019000 },
-    { "guid": "r20", "name": "Bear note", "uri": "bear://x-callback-url/open-note?id=abc-123", "created_at": 1700000020000 }
+    { "guid": "r20", "name": "Bear note", "uri": "bear://x-callback-url/open-note?id=abc-123", "created_at": 1700000020000 },
+    { "guid": "r21", "name": "Triage inbox notes", "uri": "bear://x-callback-url/open-note?id=7f3a9c21", "created_at": 1700000021000 },
+    { "guid": "r22", "name": "Reddit discussion", "uri": "https://rddt.example/thread/99231", "created_at": 1700000022000 }
   ],
   "links": []
 }
