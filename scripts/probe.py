@@ -12,6 +12,7 @@ Usage:
     python3 scripts/probe.py toolchain --expect 1.98
     python3 scripts/probe.py deps-clean app/Cargo.toml
     python3 scripts/probe.py release-clean
+    python3 scripts/probe.py cargo-test capture_view_states [--features ""]
     python3 scripts/probe.py run shell [--instances 2]
     python3 scripts/probe.py doctor [--json] [--build]
 
@@ -200,23 +201,41 @@ _AUTOMATION_TOKENS = (
 )
 
 _GPUI_MANIFEST = REPO_ROOT / "desktop-gpui" / "Cargo.toml"
-_GPUI_RELEASE_BIN = REPO_ROOT / "desktop-gpui" / "target" / "release" / "ubilink-next"
 
 
-def _cargo_release_build(features):
-    cmd = ["cargo", "build", "--locked", "--release", "--manifest-path", str(_GPUI_MANIFEST)]
+def _cargo_release_build(features, target: Path, out_dir: Path, label: str):
+    """Build the desktop-gpui release binary into the shared `target` and copy it to
+    out_dir/ubilink-next-<label>. Returns (copy, None) or (None, why).
+
+    Final review C3: the factory verifier runs this in a fresh clone with 600 s per
+    command, so the build goes through the shared warm target (shared_target_dir(),
+    which honours an exported CARGO_TARGET_DIR, ruling R-ad) instead of the clone's
+    own empty desktop-gpui/target, and the binary is the `executable` cargo reports
+    (--message-format=json), never an assumed path. The caller holds the target
+    lock, and the copy is taken under it, so a parallel probe's build into the same
+    target cannot swap the binary before `strings` reads it.
+    """
+    cmd = ["cargo", "build", "--locked", "--release", "--message-format=json-render-diagnostics",
+           "--manifest-path", str(_GPUI_MANIFEST)]
     if features:
         cmd += ["--features", features]
-    print(f"probe: {' '.join(cmd)}", flush=True)
+    print(f"probe: CARGO_TARGET_DIR={target} {' '.join(cmd)}", flush=True)
+    env = dict(os.environ, CARGO_TARGET_DIR=str(target))
     try:
-        proc = subprocess.run(cmd, cwd=REPO_ROOT, check=False)
+        # JSON on stdout (parsed); cargo's progress and diagnostics on our stderr.
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE, text=True,
+                              check=False)
     except FileNotFoundError:
-        return "cargo not found on PATH"
+        return None, "cargo not found on PATH"
     if proc.returncode != 0:
-        return f"`{' '.join(cmd)}` exited {proc.returncode}"
-    if not _GPUI_RELEASE_BIN.is_file():
-        return f"build succeeded but {_GPUI_RELEASE_BIN} is missing"
-    return None
+        return None, f"`{' '.join(cmd)}` exited {proc.returncode}"
+    exe = executable_from_cargo_json(proc.stdout)
+    if not exe or not Path(exe).is_file():
+        return None, "cargo reported no ubilink-next executable"
+    own = Path(out_dir) / f"ubilink-next-{label}"
+    if subprocess.run(["cp", "-c", exe, str(own)], capture_output=True).returncode != 0:
+        shutil.copy2(exe, own)
+    return own, None
 
 
 def _tokens_in_binary(path: Path):
@@ -240,58 +259,65 @@ def cmd_release_clean(args: argparse.Namespace) -> int:
     if `strings` finds the socket name, the marker or an automation-only verb name.
     Then build the same profile WITH the feature and require the marker and socket
     name to be found — otherwise a check that can never find anything would pass.
-    The automation build overwrites target/release/ubilink-next, so the plain build is
-    re-run last (a no-op relink from cache) to leave the shipped binary in place.
+    Both builds go through the shared warm target under the target lock (C3), and
+    each binary is copied out under that lock and checked from the copy, so the
+    automation build overwriting target/release/ubilink-next no longer matters (the
+    old third "restore the shipped binary" build is gone with it).
     """
     failures = []
+    work = Path(tempfile.mkdtemp(prefix="ubprobe-release-clean-", dir=_tmpdir()))
+    write_owner(work, {"kind": "run", "owner_pid": os.getpid()})  # reapable if killed (I7)
+    try:
+        target = shared_target_dir()
+        try:
+            with file_lock(CACHE_ROOT / "target.lock", "target lock", blocked="build cache busy"):
+                print(f"probe: target dir {target}: {_seed_target_cache(target, _GPUI_SOURCE_TARGET)}",
+                      flush=True)
+                plain, err = _cargo_release_build(None, target, work, "release")
+                if err:
+                    print(f"FAIL: release-clean — release build: {err}")
+                    return 1
+                auto = None
+                if not args.skip_bite_check:
+                    auto, err = _cargo_release_build("automation", target, work, "automation")
+                    if err:
+                        print(f"FAIL: release-clean — automation build: {err}")
+                        return 1
+        except EnvBlocked as e:
+            print(f"ENV-BLOCKED: release-clean — {e}")
+            return 3
 
-    err = _cargo_release_build(None)
-    if err:
-        print(f"FAIL: release-clean — release build: {err}")
-        return 1
-    found = _tokens_in_binary(_GPUI_RELEASE_BIN)
-    if isinstance(found, str):
-        print(f"FAIL: release-clean — {found}")
-        return 1
-    if found:
-        failures.append(f"release binary contains automation token(s): {', '.join(found)}")
-    else:
-        print(f"probe: release binary clean of {len(_AUTOMATION_TOKENS)} automation tokens")
+        found = _tokens_in_binary(plain)
+        if isinstance(found, str):
+            print(f"FAIL: release-clean — {found}")
+            return 1
+        if found:
+            failures.append(f"release binary contains automation token(s): {', '.join(found)}")
+        else:
+            print(f"probe: release binary clean of {len(_AUTOMATION_TOKENS)} automation tokens")
 
-    if not args.skip_bite_check:
-        err = _cargo_release_build("automation")
-        if err:
-            print(f"FAIL: release-clean — automation build: {err}")
-            return 1
-        found_auto = _tokens_in_binary(_GPUI_RELEASE_BIN)
-        if isinstance(found_auto, str):
-            print(f"FAIL: release-clean — {found_auto}")
-            return 1
-        # Every token must be visible in the automation build, or its absence from the
-        # release build proves nothing (desktop-gpui logs its verb list at startup
-        # for exactly this reason: LLVM turns short string matches into integer
-        # compares, which leave no string behind).
-        missing = [t for t in _AUTOMATION_TOKENS if t not in found_auto]
-        if missing:
-            failures.append(
-                "the check does not bite: an --features automation build lacks "
-                + ", ".join(missing)
-            )
-        else:
-            print(
-                "probe: automation build contains "
-                f"{len(found_auto)}/{len(_AUTOMATION_TOKENS)} tokens ({', '.join(found_auto)})"
-            )
-        # Leave the shipped (feature-less) binary in target/release.
-        err = _cargo_release_build(None)
-        if err:
-            failures.append(f"rebuilding the release binary afterwards: {err}")
-        else:
-            again = _tokens_in_binary(_GPUI_RELEASE_BIN)
-            if again:
+        if auto is not None:
+            found_auto = _tokens_in_binary(auto)
+            if isinstance(found_auto, str):
+                print(f"FAIL: release-clean — {found_auto}")
+                return 1
+            # Every token must be visible in the automation build, or its absence from the
+            # release build proves nothing (desktop-gpui logs its verb list at startup
+            # for exactly this reason: LLVM turns short string matches into integer
+            # compares, which leave no string behind).
+            missing = [t for t in _AUTOMATION_TOKENS if t not in found_auto]
+            if missing:
                 failures.append(
-                    f"target/release/ubilink-next after the rebuild still carries: {again}"
+                    "the check does not bite: an --features automation build lacks "
+                    + ", ".join(missing)
                 )
+            else:
+                print(
+                    "probe: automation build contains "
+                    f"{len(found_auto)}/{len(_AUTOMATION_TOKENS)} tokens ({', '.join(found_auto)})"
+                )
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
     if failures:
         print(f"FAIL: release-clean — {len(failures)} issue(s):")
@@ -300,6 +326,102 @@ def cmd_release_clean(args: argparse.Namespace) -> int:
         return 1
     print("PASS: release-clean — release binary has no automation socket, marker or verb names")
     return 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `cargo-test`: a headless test that must exist and pass (final review I4)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Phase 1's headless criteria name one test each (`capture_view_states`, ...).
+# `cargo test <filter>` exits 0 when the filter matches nothing, so a criterion
+# written that way passes before the test is even written. `cargo-test <name>` lists
+# the crate's tests, selects those whose full path or last `::` segment is exactly
+# <name>, runs only those with `--exact`, and passes only when at least one ran and
+# every selected one reported `ok` (an ignored test is not a pass).
+
+_TEST_LIST_RE = re.compile(r"^(\S+): test$")
+_TEST_RESULT_RE = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)\b")
+
+
+def parse_test_list(stdout: str) -> list:
+    """Test paths from `cargo test -- --list` output (libtest's `<path>: test` lines,
+    across every test binary). Benchmarks and summary lines are skipped."""
+    return [m.group(1) for line in stdout.splitlines() if (m := _TEST_LIST_RE.match(line.strip()))]
+
+
+def select_tests(paths: list, name: str) -> list:
+    """The listed tests `name` means: an exact full path, else every test whose last
+    `::` segment equals name. Never a substring match (that is what made `cargo
+    test <filter>` vacuous or over-broad)."""
+    if "::" in name:
+        return [p for p in paths if p == name]
+    return [p for p in paths if p.rsplit("::", 1)[-1] == name]
+
+
+def parse_test_results(stdout: str) -> dict:
+    """{test path: "ok" | "FAILED" | "ignored"} from a libtest run's report lines."""
+    out = {}
+    for line in stdout.splitlines():
+        m = _TEST_RESULT_RE.match(line.strip())
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def cargo_test_verdict(name: str, selected: list, results: dict, returncode: int) -> tuple:
+    """(exit code, message) for `cargo-test`: 0 only when >= 1 selected test ran and
+    each reported ok and cargo exited 0; 1 otherwise. Pure (scripts/test_probe.py)."""
+    if not selected:
+        return 1, f"no test named {name!r} exists (an absent test is a FAIL, not a pass)"
+    bad = {p: results.get(p, "did not run") for p in selected if results.get(p) != "ok"}
+    if bad:
+        return 1, "; ".join(f"{p}: {v}" for p, v in sorted(bad.items()))
+    if returncode != 0:
+        return 1, f"cargo test exited {returncode} although {len(selected)} test(s) reported ok"
+    return 0, f"{len(selected)} test(s) passed: {', '.join(selected)}"
+
+
+def cmd_cargo_test(args: argparse.Namespace) -> int:
+    """Run one named desktop-gpui test (Phase 1's headless criteria). Exit 0 pass,
+    1 missing/failed/ignored, 2 build failure, 3 the shared build cache stayed busy."""
+    base = ["cargo", "test", "--locked", "--manifest-path", str(Path(args.manifest).resolve())]
+    if args.features:
+        base += ["--features", args.features]
+    target = shared_target_dir()
+    env = dict(os.environ, CARGO_TARGET_DIR=str(target))
+    try:
+        # One lock for the build (the --list step) and the run: the shared target is
+        # every clone's (C3), and cargo test rebuilds there if anything changed.
+        with file_lock(CACHE_ROOT / "target.lock", "target lock", blocked="build cache busy"):
+            print(f"probe: target dir {target}: {_seed_target_cache(target, _GPUI_SOURCE_TARGET)}",
+                  flush=True)
+            listing = base + ["--", "--list"]
+            print(f"probe: CARGO_TARGET_DIR={target} {' '.join(listing)}", flush=True)
+            try:
+                proc = subprocess.run(listing, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE,
+                                      text=True, check=False)
+            except FileNotFoundError:
+                print("ERROR: cargo-test — cargo not found on PATH")
+                return 2
+            if proc.returncode != 0:
+                print(f"ERROR: cargo-test — building the tests failed (`{' '.join(listing)}` "
+                      f"exited {proc.returncode})")
+                return 2
+            selected = select_tests(parse_test_list(proc.stdout), args.name)
+            results, rc = {}, 0
+            if selected:
+                run = base + ["--", "--exact", *selected]
+                print(f"probe: CARGO_TARGET_DIR={target} {' '.join(run)}", flush=True)
+                proc = subprocess.run(run, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE,
+                                      text=True, check=False)
+                sys.stdout.write(proc.stdout)
+                results, rc = parse_test_results(proc.stdout), proc.returncode
+    except EnvBlocked as e:
+        print(f"ENV-BLOCKED: cargo-test — {e}")
+        return 3
+    code, msg = cargo_test_verdict(args.name, selected, results, rc)
+    print(f"{'PASS' if code == 0 else 'FAIL'}: cargo-test {args.name} — {msg}")
+    return code
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -953,6 +1075,16 @@ CACHE_ROOT = Path(
 )
 PROBES_DIR = REPO_ROOT / "desktop-gpui" / "probes"
 _GPUI_SOURCE_TARGET = REPO_ROOT / "desktop-gpui" / "target"
+
+
+def shared_target_dir() -> Path:
+    """The warm cargo target every probe build uses (C3, ruling R-ad): an exported
+    CARGO_TARGET_DIR (the factory conductor exports one shared cache for all clones;
+    relative means relative to the repo, where cargo runs), else CACHE_ROOT/target."""
+    env = os.environ.get("CARGO_TARGET_DIR")
+    if env:
+        return Path(env) if Path(env).is_absolute() else (REPO_ROOT / env).resolve()
+    return CACHE_ROOT / "target"
 _OCR_SWIFT = REPO_ROOT / "scripts" / "ocr.swift"
 _QUARTZ_SWIFT = REPO_ROOT / "scripts" / "probe-helpers" / "quartz.swift"
 _ACTIVATOR_SWIFT = REPO_ROOT / "scripts" / "probe-helpers" / "activator.swift"
@@ -963,8 +1095,23 @@ _LAUNCH_TIMEOUT_S = 60.0
 # The app answers a request within its own 30 s REPLY_TIMEOUT (automation/mod.rs);
 # wait a little longer so its error, not ours, reaches the report.
 _CALL_TIMEOUT_S = 40.0
-# How long `run` waits for another probe to release the desktop.
-_LOCK_TIMEOUT_S = 900.0
+# Lock waits vs the factory verifier's per-command limit (final review I8). The
+# conductor kills a verify command after VERIFY_TIMEOUT = 600 s, so a probe must give
+# up waiting for another probe's desktop (or build cache) and say so (ENV-BLOCKED,
+# exit 3, "desktop busy") rather than be killed mid-wait with no verdict. Every
+# default-timeout lock wait ends by _WAIT_DEADLINE_S after this process started, which
+# leaves 120 s of the 600 for the scenario itself. GUI proofs therefore serialise on
+# one desktop; running tasks in parallel only overlaps their builds.
+_PROCESS_START = time.monotonic()
+_WAIT_DEADLINE_S = 480.0
+_LOCK_TIMEOUT_S = _WAIT_DEADLINE_S
+
+
+def default_lock_timeout(now: float = None) -> float:
+    """Seconds a default-timeout lock wait may still take: up to _WAIT_DEADLINE_S
+    after process start (I8), never less than 1 s so a free lock is still taken."""
+    now = time.monotonic() if now is None else now
+    return max(1.0, _WAIT_DEADLINE_S - (now - _PROCESS_START))
 
 
 class ScenarioError(Exception):
@@ -1112,7 +1259,8 @@ _builds = {}
 def build_binary(run_dir: Path, release: bool = False, out=print) -> Build:
     """Build ubilink-next and take this run's own copy of it, under the target lock.
 
-    The warm target dir is shared by every clone and commit (that is its point), so
+    The warm target dir (shared_target_dir(): an exported CARGO_TARGET_DIR, else
+    CACHE_ROOT/target) is shared by every clone and commit (that is its point), so
     its `ubilink-next` is whatever the last probe built. Building and cloning the
     produced executable into `run_dir` both happen while holding
     CACHE_ROOT/target.lock: no other probe can replace the binary between our build
@@ -1127,13 +1275,13 @@ def build_binary(run_dir: Path, release: bool = False, out=print) -> Build:
     key = "release" if release else "automation"
     if key in _builds:
         return _builds[key]
-    target = CACHE_ROOT / "target"
+    target = shared_target_dir()
     cmd = ["cargo", "build", "--locked", "--message-format=json-render-diagnostics"]
     cmd += ["--release"] if release else ["--features", "automation"]
     cmd += ["--manifest-path", str(_GPUI_MANIFEST)]
     env = dict(os.environ, CARGO_TARGET_DIR=str(target))
     commit, dirty = source_revision()
-    with file_lock(CACHE_ROOT / "target.lock", "target lock", out=out):
+    with file_lock(CACHE_ROOT / "target.lock", "target lock", out=out, blocked="build cache busy"):
         note = _seed_target_cache(target, _GPUI_SOURCE_TARGET)
         out(f"probe: target dir {target}: {note}")
         out(f"probe: CARGO_TARGET_DIR={target} {' '.join(cmd)}")
@@ -1300,6 +1448,10 @@ class Instance:
         self._sock = None
         self._reader = None
         self._fixtures = {}
+        # Who owns this process, for reap_orphans (I7): None = this probe process;
+        # the verify harness sets {"kind": "harness", "claim": <instance.json>}
+        # because its instances outlive the command that launched them.
+        self.owner = None
 
     # Paths --------------------------------------------------------------
     @property
@@ -1370,6 +1522,9 @@ class Instance:
             )
         finally:
             log.close()
+        write_owner(self.root, dict(self.owner or {"kind": "probe", "owner_pid": os.getpid()},
+                                    pid=self.proc.pid, binary=str(self.binary),
+                                    socket=str(self.socket_path)))
         # Ready = the automation socket answers; a release build has none, so its
         # single-instance socket (created before GPUI starts) is the signal instead.
         ready_on = self.si_socket_path if self.release else self.socket_path
@@ -1485,16 +1640,147 @@ class Instance:
         return False
 
 
+# ── orphan reaper (final review I7) ─────────────────────────────────────────
+#
+# Instances run in their own session (start_new_session) so a terminal's ^C does not
+# hit them mid-step, and the verify harness's instances must outlive its commands.
+# But the factory conductor SIGKILLs a verify command's process group on timeout
+# (and after every command): a `probe.py run` killed that way never reaches its
+# `finally`, and its instances keep running, holding focus or key-window status for
+# the next probe. So every instance root carries an owner record, and each `run`
+# (and each harness `launch`) first reaps instances whose owner is gone.
+
+OWNER_FILE = "owner.json"
+
+
+def write_owner(root, record: dict):
+    """Write `record` as root/owner.json (atomically; a reaper never reads half)."""
+    if root is None:
+        return
+    tmp = Path(root) / (OWNER_FILE + ".tmp")
+    tmp.write_text(json.dumps(record, sort_keys=True))
+    os.replace(tmp, Path(root) / OWNER_FILE)
+
+
+def pid_command(pid):
+    """The executable path `ps` reports for pid, or None when it is not running."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    r = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True)
+    out = r.stdout.strip()
+    return out if r.returncode == 0 and out else None
+
+
+def reap_decision(rec: dict, instance_alive: bool, owner_alive: bool, claim,
+                  claim_pid_alive: bool) -> str:
+    """What reap_orphans does with one owner record: "keep", "reap" (terminate the
+    instance and remove its root) or "clean" (nothing runs: remove the root). Pure.
+
+    - probe/run records: kept while the owning probe pid runs; once it is gone the
+      instance (if `instance_alive`, i.e. its pid still runs the recorded binary) is
+      reaped, and a dead one's root is cleaned.
+    - harness records: the harness's own lease/stop/reclaim owns these roots, so only
+      a live instance nothing accounts for is reaped: its claim file is gone, or the
+      claim names a different live pid, or a launch that never finished (status
+      launching, launcher pid recorded and dead). A restart in progress (claim still
+      naming the old, dead pid) is kept."""
+    kind = rec.get("kind")
+    if kind == "harness":
+        if not instance_alive:
+            return "keep"
+        if claim is None:
+            return "reap"
+        if claim.get("pid") == rec.get("pid"):
+            return "keep"
+        if claim.get("status") == "launching" and claim.get("launcher_pid") and not owner_alive:
+            return "reap"
+        if claim.get("pid") and claim_pid_alive:
+            return "reap"
+        return "keep"
+    if owner_alive:
+        return "keep"
+    return "reap" if instance_alive else "clean"
+
+
+def _read_json_file(path):
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _terminate_ours(pid: int, binary: str) -> str:
+    """SIGTERM pid, SIGKILL after 5 s; each only while pid still runs `binary` (never a
+    reused pid, never by name). Returns the signal that ended it."""
+    if pid_command(pid) != binary:
+        return "gone"
+    with contextlib.suppress(OSError):
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and pid_command(pid) == binary:
+        time.sleep(0.1)
+    if pid_command(pid) == binary:
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+        return "SIGKILL"
+    return "SIGTERM"
+
+
+def reap_orphans(tmp: Path = None, out=print) -> list:
+    """Reap instances (and clean temp roots) under $TMPDIR/ubprobe-* whose owner is
+    gone (reap_decision). Returns [(root, decision, detail)] for what it acted on."""
+    acted = []
+    for owner_file in sorted(Path(tmp or _tmpdir()).glob(f"ubprobe-*/{OWNER_FILE}")):
+        root = owner_file.parent
+        rec = _read_json_file(owner_file)
+        if rec is None:
+            continue
+        pid, binary = rec.get("pid"), rec.get("binary")
+        instance_alive = bool(pid and binary and pid_command(pid) == binary)
+        claim, claim_pid_alive = None, False
+        if rec.get("kind") == "harness":
+            claim = _read_json_file(rec.get("claim") or "/nonexistent")
+            owner_alive = bool(claim and pid_command(claim.get("launcher_pid")))
+            claim_pid_alive = bool(claim and claim.get("pid") != pid
+                                   and pid_command(claim.get("pid")) is not None)
+        else:
+            owner_alive = pid_command(rec.get("owner_pid")) is not None
+        what = reap_decision(rec, instance_alive, owner_alive, claim, claim_pid_alive)
+        if what == "keep":
+            continue
+        detail = ""
+        if what == "reap":
+            detail = _terminate_ours(pid, binary)
+            sock = rec.get("socket")
+            if sock:
+                with contextlib.suppress(OSError):
+                    os.unlink(sock)
+                with contextlib.suppress(OSError):
+                    os.rmdir(os.path.dirname(sock))
+        if rec.get("kind") != "harness" and root.name.startswith("ubprobe-"):
+            shutil.rmtree(root, ignore_errors=True)
+        out(f"probe: reaped orphan {root.name} ({what}"
+            + (f": pid {pid} {detail}" if detail else "") + ")")
+        acted.append((root, what, detail))
+    return acted
+
+
 # ── desktop lock (O4: "GUI probes hold a desktop lock") ─────────────────────
 
 
 @contextlib.contextmanager
-def file_lock(path: Path, what: str, timeout: float = _LOCK_TIMEOUT_S, out=print):
+def file_lock(path: Path, what: str, timeout: float = None, out=print, blocked: str = None):
     """Hold an exclusive flock on `path` for the duration; print who holds it if we wait.
 
     flock is released by the kernel if the holder dies, so a crashed probe never
     wedges the next one. The holder writes its pid into the file for that message.
+    `timeout` None means default_lock_timeout() (I8). On timeout: EnvBlocked(`blocked`)
+    when `blocked` names the contention (another probe busy is the host's state, not a
+    harness bug: exit 3), else ProbeError.
     """
+    if timeout is None:
+        timeout = default_lock_timeout()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -1511,7 +1797,10 @@ def file_lock(path: Path, what: str, timeout: float = _LOCK_TIMEOUT_S, out=print
                     break
                 except BlockingIOError:
                     if time.monotonic() > deadline:
-                        raise ProbeError(f"{what} {path} still held after {timeout:.0f}s")
+                        msg = f"{what} {path} still held (by pid {holder}) after {timeout:.0f}s"
+                        if blocked:
+                            raise EnvBlocked(f"{blocked}: {msg}")
+                        raise ProbeError(msg)
                     time.sleep(0.25)
         os.ftruncate(fd, 0)
         os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
@@ -1522,15 +1811,18 @@ def file_lock(path: Path, what: str, timeout: float = _LOCK_TIMEOUT_S, out=print
         os.close(fd)
 
 
-def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print):
+def desktop_lock(path: Path = None, timeout: float = None, out=print):
     """The desktop lock (O4: "GUI probes hold a desktop lock").
 
     The pasteboard, the key window and the cursor are one per desktop. Two probes
     (parallel Phase 1 tasks, TN4 of the Phase 1 spec) opening panels at once would
     steal key status from each other and race on the pasteboard, so every `run`
-    holds this lock around its scenarios.
+    holds this lock around its scenarios. A wait past default_lock_timeout() is
+    ENV-BLOCKED "desktop busy" (exit 3, final review I8), never a hang into the
+    conductor's 600 s kill.
     """
-    return file_lock(path or CACHE_ROOT / "desktop.lock", "desktop lock", timeout, out)
+    return file_lock(path or CACHE_ROOT / "desktop.lock", "desktop lock", timeout, out,
+                     blocked="desktop busy (another probe holds the GUI)")
 
 
 # ── matching helpers (pure; covered by scripts/test_probe.py) ───────────────
@@ -2337,6 +2629,8 @@ class RunContext:
         # The pid this scenario launched (or last restarted), for `process: unchanged`.
         proc = getattr(inst, "proc", None)
         self.start_pid = proc.pid if proc is not None else None
+        # The 1-based index of the step that came out ENV-BLOCKED (T8), else None.
+        self.blocked_at = None
 
     def owned_pids(self) -> set:
         proc = getattr(self.inst, "proc", None)
@@ -3225,6 +3519,9 @@ assert set(STEP_RUNNERS) == set(STEP_TYPES)
 class Tally:
     def __init__(self):
         self.passed = self.failed = self.blocked = self.errors = 0
+        # Steps not run because an earlier step of the same instance was ENV-BLOCKED
+        # (T8): reported, never counted as a pass or a FAIL.
+        self.skipped = 0
 
     def exit_code(self) -> int:
         # 2 = a scenario or the harness is wrong, 1 = the product failed,
@@ -3327,11 +3624,20 @@ def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
     asserts the panel's visibility fails and another app became frontmost during
     it, the failure may be that app's doing, not the product's. The iteration (its
     `block`, or the step alone) is re-run once from a closed panel; a second theft
-    makes it ENV-BLOCKED ("focus taken by <app>"), never a FAIL."""
+    makes it ENV-BLOCKED ("focus taken by <app>"), never a FAIL.
+
+    Once a step is ENV-BLOCKED (either way), every later step of this instance is
+    SKIPPED-after-blocked, not run (minor T8): the GUI state they build on is unknown
+    (the panel the blocked step should have opened, the focus it lost), so a later
+    failure would be the environment's, reported as a product FAIL (exit 1). The run
+    then exits 3 unless something else failed or erred first."""
     steps = ctx.scenario["steps"]
     for unit in step_units(steps):
         for attempt in (1, 2):
             outcome, passed = _run_unit(ctx, unit, tally, prefix, len(steps), retry_left=attempt == 1)
+            if outcome == "blocked":
+                skip_after_blocked(tally, prefix, ctx.blocked_at, len(steps))
+                return False
             if outcome == "retry":
                 tally.passed -= passed
                 try:
@@ -3363,7 +3669,8 @@ def _run_unit(ctx, unit, tally, prefix, total, retry_left):
         except EnvBlocked as e:
             tally.blocked += 1
             print(f"ENV-BLOCKED {head}\n      {e}")
-            continue
+            ctx.blocked_at = i
+            return "blocked", passed
         except ScenarioError as e:
             tally.errors += 1
             print(f"ERROR {head}\n      {e}")
@@ -3386,9 +3693,8 @@ def _run_unit(ctx, unit, tally, prefix, total, retry_left):
                 return "retry", passed
             if thief:
                 tally.blocked += 1
-                skipped = len(unit) - n - 1
-                print(f"ENV-BLOCKED {head}\n      focus taken by {thief} (twice): {e}"
-                      + (f"\n      ({skipped} later step(s) of this iteration skipped)" if skipped else ""))
+                print(f"ENV-BLOCKED {head}\n      focus taken by {thief} (twice): {e}")
+                ctx.blocked_at = i
                 return "blocked", passed
             tally.failed += 1
             print(f"FAIL  {head}")
@@ -3403,6 +3709,15 @@ def _run_unit(ctx, unit, tally, prefix, total, retry_left):
         passed += 1
         print(f"PASS  {head} — {detail}")
     return "ok", passed
+
+
+def skip_after_blocked(tally: Tally, prefix: str, blocked_at: int, total: int):
+    """T8: count and report the steps after ENV-BLOCKED step `blocked_at` as skipped."""
+    left = total - blocked_at
+    if left > 0:
+        tally.skipped += left
+        print(f"SKIPPED {prefix}: steps {blocked_at + 1}-{total} ({left}) not run after "
+              f"ENV-BLOCKED step {blocked_at}: the GUI state they depend on is unknown")
 
 
 def _check(tally: Tally, head: str, fn):
@@ -3568,7 +3883,11 @@ def run_loaded(scenarios: list, instances: int, label: str) -> int:
     # their temp roots: turn it into SystemExit so the finally blocks run.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     # This run's own copy of the binary lives here until the run ends (build_binary).
+    # I7: instances a SIGKILLed earlier run left behind would steal focus or key
+    # status from this one; reap them before building or touching the desktop.
+    reap_orphans()
     run_dir = Path(tempfile.mkdtemp(prefix="ubprobe-run-", dir=_tmpdir()))
+    write_owner(run_dir, {"kind": "run", "owner_pid": os.getpid()})
     global _RUN_DIR
     _RUN_DIR = run_dir
     build = None
@@ -3609,7 +3928,7 @@ def run_loaded(scenarios: list, instances: int, label: str) -> int:
     print(
         f"{verdict}: run {label} (instances={instances}) — "
         f"{tally.passed} passed, {tally.failed} failed, {tally.blocked} env-blocked, "
-        f"{tally.errors} scenario error(s)"
+        f"{tally.skipped} skipped after env-blocked, {tally.errors} scenario error(s)"
     )
     # Evidence names what ran: the exact binary and the source it came from.
     print(f"ran: {build.describe() if build else 'no binary'}")
@@ -4190,6 +4509,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the --features automation build that proves the check can find the marker.",
     )
     p_release_clean.set_defaults(func=cmd_release_clean)
+
+    # ── cargo-test ─────────────────────────────────────────────────────
+    p_cargo_test = subparsers.add_parser(
+        "cargo-test",
+        help="Run one named desktop-gpui test; FAIL unless it exists, ran and passed (I4).",
+    )
+    p_cargo_test.add_argument(
+        "name", help="The test's last path segment (e.g. capture_view_states) or its full path.")
+    p_cargo_test.add_argument(
+        "--features", default="automation",
+        help='Cargo features to test with (default "automation"; "" for none).')
+    p_cargo_test.add_argument("--manifest", default=str(_GPUI_MANIFEST), help=argparse.SUPPRESS)
+    p_cargo_test.set_defaults(func=cmd_cargo_test)
 
     # ── run ────────────────────────────────────────────────────────────
     p_run = subparsers.add_parser(
