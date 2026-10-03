@@ -69,3 +69,6 @@ dist-ssr/
 AGENTS.md
 CLAUDE.md
 GEMINI.md
+
+# Python bytecode from running scripts/test_probe.py (unittest imports the module).
+__pycache__/

@@ -12,12 +12,28 @@ Usage:
     python3 scripts/probe.py toolchain --expect 1.98
     python3 scripts/probe.py deps-clean app/Cargo.toml
     python3 scripts/probe.py release-clean
+    python3 scripts/probe.py run shell [--instances 2]
+
+`run` is the instance runner and scenario engine (R8): see
+desktop-gpui/probes/README.md for the scenario format.
 """
 
 import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
 import re
+import shutil
+import signal
+import socket
+import sqlite3
 import subprocess
 import sys
+import tempfile
+import time
+import unicodedata
 from pathlib import Path
 
 # scripts/probe.py -> repo root is this file's grandparent.
@@ -284,6 +300,1456 @@ def cmd_release_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# `run`: the instance runner and scenario engine (R8, O1, O4, TN5)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# R8: launch isolated automation instances of ubilink-next (own data dir, sockets,
+# fixtures, no real hotkeys), drive them through the automation socket (R6), and
+# check what they show with scenario files under desktop-gpui/probes/. The scenario
+# format is documented in desktop-gpui/probes/README.md; keep the two in step.
+
+# Everything the harness keeps between runs: the warm cargo target dir, compiled
+# Swift helpers and the desktop lock. ~/Library/Caches because macOS may purge it
+# and nothing in it is precious (a purge only costs a rebuild). The env override
+# exists for the self-tests, which must not touch the real cache.
+CACHE_ROOT = Path(
+    os.environ.get("UBILINK_PROBE_CACHE") or (Path.home() / "Library" / "Caches" / "ubilink-probe")
+)
+PROBES_DIR = REPO_ROOT / "desktop-gpui" / "probes"
+_GPUI_SOURCE_TARGET = REPO_ROOT / "desktop-gpui" / "target"
+_OCR_SWIFT = REPO_ROOT / "scripts" / "ocr.swift"
+_QUARTZ_SWIFT = REPO_ROOT / "scripts" / "probe-helpers" / "quartz.swift"
+
+# How long an instance may take to serve its socket after launch. A debug GPUI
+# binary starts in about a second; the margin covers a cold Metal shader cache.
+_LAUNCH_TIMEOUT_S = 60.0
+# The app answers a request within its own 30 s REPLY_TIMEOUT (automation/mod.rs);
+# wait a little longer so its error, not ours, reaches the report.
+_CALL_TIMEOUT_S = 40.0
+# How long `run` waits for another probe to release the desktop.
+_LOCK_TIMEOUT_S = 900.0
+
+
+class ScenarioError(Exception):
+    """The scenario file itself is wrong (bad JSON, unknown step, bad option)."""
+
+
+class EnvBlocked(Exception):
+    """The host cannot run this step (missing TCC grant, too few displays): not a product FAIL."""
+
+
+class StepFailed(Exception):
+    """The product did not do what the step expects."""
+
+    def __init__(self, message, expected=None, actual=None):
+        super().__init__(message)
+        self.expected = expected
+        self.actual = actual
+
+
+class ProbeError(Exception):
+    """The harness could not do its job (build failed, instance never served its socket)."""
+
+
+class CallError(Exception):
+    """The app answered a request with {"ok": false}."""
+
+
+# ── warm build (R8: "seed each build from a warm target directory") ─────────
+
+
+def _seed_target_cache(cache_target: Path, source_target: Path) -> str:
+    """Seed `cache_target` from `source_target` with an APFS clone; return what happened.
+
+    The factory verifier runs each command in a fresh git clone, whose own target dir
+    is empty: a cold GPUI build there takes many minutes. A shared CARGO_TARGET_DIR
+    under the cache keeps every registry crate built across clones (only the path
+    crates rebuild, since their source path differs). `cp -c` clones on APFS, so
+    seeding from the repo's existing target costs seconds and no disk. The clone goes
+    to a temp name and is renamed into place, so a concurrent probe never builds into
+    a half-copied directory.
+    """
+    if cache_target.is_dir() and any(cache_target.iterdir()):
+        return "warm"
+    if not source_target.is_dir():
+        return f"cold (nothing to seed from: {source_target} is missing)"
+    cache_target.parent.mkdir(parents=True, exist_ok=True)
+    staging = cache_target.with_name(f"{cache_target.name}.seed-{os.getpid()}")
+    proc = subprocess.run(
+        ["cp", "-c", "-R", str(source_target), str(staging)], capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        shutil.rmtree(staging, ignore_errors=True)
+        # Not falling back to a full copy: that is gigabytes, and a cold build is
+        # merely slow, never wrong.
+        return f"cold (APFS clone failed: {proc.stderr.strip() or proc.returncode})"
+    try:
+        if cache_target.is_dir():
+            cache_target.rmdir()  # empty, checked above
+        os.rename(staging, cache_target)
+    except OSError:
+        # Another probe seeded it first; theirs is as good as ours.
+        shutil.rmtree(staging, ignore_errors=True)
+        return "warm (seeded concurrently by another probe)"
+    return f"seeded by APFS clone of {source_target}"
+
+
+_built_binary = None
+
+
+def build_automation_binary() -> Path:
+    """Build (once per process) the `--features automation` debug binary; return its path."""
+    global _built_binary
+    if _built_binary is not None:
+        return _built_binary
+    target = CACHE_ROOT / "target"
+    note = _seed_target_cache(target, _GPUI_SOURCE_TARGET)
+    print(f"probe: target dir {target}: {note}", flush=True)
+    cmd = [
+        "cargo", "build", "--locked", "--features", "automation",
+        "--manifest-path", str(_GPUI_MANIFEST),
+    ]
+    env = dict(os.environ, CARGO_TARGET_DIR=str(target))
+    print(f"probe: CARGO_TARGET_DIR={target} {' '.join(cmd)}", flush=True)
+    try:
+        # cargo's progress goes to our stderr; stdout stays the step report.
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, env=env, stdout=sys.stderr, check=False)
+    except FileNotFoundError:
+        raise ProbeError("cargo not found on PATH")
+    if proc.returncode != 0:
+        raise ProbeError(f"automation build exited {proc.returncode}")
+    binary = target / "debug" / "ubilink-next"
+    if not binary.is_file():
+        raise ProbeError(f"build succeeded but {binary} is missing")
+    _built_binary = binary
+    return binary
+
+
+# ── Swift helpers (OCR, Quartz window list, cursor, pasteboard) ─────────────
+
+
+def _helper(source: Path) -> Path:
+    """Compile `source` with swiftc -O into the cache (once per source revision).
+
+    The binary name carries the source's hash, so an edited helper is rebuilt instead
+    of a stale one being run, and two probe clones on different revisions never
+    overwrite each other's helper.
+    """
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:12]
+    out = CACHE_ROOT / "bin" / f"{source.stem}-{digest}"
+    if out.is_file():
+        return out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f"{out.name}.tmp-{os.getpid()}")
+    try:
+        proc = subprocess.run(
+            ["swiftc", "-O", str(source), "-o", str(tmp)], capture_output=True, text=True
+        )
+    except FileNotFoundError:
+        raise EnvBlocked("swiftc not found (install the Xcode command line tools)")
+    if proc.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        raise ProbeError(f"swiftc failed on {source.name}:\n{proc.stderr.strip()}")
+    os.replace(tmp, out)
+    if source == _OCR_SWIFT:
+        _warm_ocr(out)
+    return out
+
+
+def _tiny_png(path: Path, w: int = 64, h: int = 32):
+    """Write a plain white RGB PNG with nothing but zlib (no imaging module)."""
+    import struct
+    import zlib
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+
+    raw = b"".join(b"\x00" + b"\xff" * (3 * w) for _ in range(h))
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+# Measured on macOS 27: the first Vision run of a newly written binary spends 40-70 s
+# compiling its text model for the Neural Engine, and the very first attempt can
+# even fail (e5rtError ... 13) before a retry succeeds; later runs take ~0.3 s. The
+# compiled model is cached per executable path, so the helper is warmed once, at its
+# final path, right after it is compiled, instead of inside some scenario's ocr step.
+_OCR_TIMEOUT_S = 180.0
+
+
+def _warm_ocr(binary: Path):
+    png = binary.with_name(f"warm-{os.getpid()}.png")
+    _tiny_png(png)
+    print(f"probe: warming {binary.name} (first Vision run compiles its model, ~1 min)", flush=True)
+    try:
+        for _ in range(3):
+            try:
+                if subprocess.run([str(binary), str(png)], capture_output=True,
+                                  timeout=_OCR_TIMEOUT_S).returncode == 0:
+                    return
+            except subprocess.TimeoutExpired:
+                pass
+    finally:
+        png.unlink(missing_ok=True)
+    # Not fatal: the ocr step retries and reports what Vision says.
+
+
+def _run_helper(source: Path, *args, timeout: float = 60.0, attempts: int = 1) -> object:
+    cmd = [str(_helper(source)), *map(str, args)]
+    err = ""
+    for _ in range(attempts):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            err = f"timed out after {timeout:.0f}s"
+            continue
+        if proc.returncode == 0:
+            return json.loads(proc.stdout)
+        err = proc.stderr.strip()
+    raise ProbeError(f"{source.stem} {' '.join(map(str, args))}: {err}")
+
+
+def quartz(*args) -> object:
+    return _run_helper(_QUARTZ_SWIFT, *args)
+
+
+# ── instances (O1: own data dir, sockets and fixtures; O4: no real hotkeys) ──
+
+
+def _tmpdir() -> str:
+    # The app finds its socket dir through Rust's std::env::temp_dir(), i.e. $TMPDIR.
+    # The probe passes this exact value down, so both sides agree on the path.
+    return os.environ.get("TMPDIR") or "/tmp"
+
+
+_INSTANCE_NAME_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def instance_name(label: str, pid: int = None) -> str:
+    """A UBILINK_INSTANCE value for `label`: unique per probe process, and inside the
+    app's `[A-Za-z0-9_-]{1,32}` rule (automation/socket.rs) so it is never refused."""
+    pid = os.getpid() if pid is None else pid
+    clean = _INSTANCE_NAME_RE.sub("-", label)
+    return f"p{pid}-{clean}"[:32]
+
+
+class Instance:
+    """One isolated ubilink-next automation process.
+
+    Isolation (O1): its own UBILINK_INSTANCE (so its own automation socket), its own
+    single-instance socket (UBILINK_INSTANCE_SOCKET, so it neither signals nor is
+    signalled by the user's app or another instance), its own data dir
+    (UBILINK_DATA_DIR, which the app pre-loads as the graph_dir fixture) and its own
+    copy of desktop-gpui/probes/fixtures, all under one temp root. No real hotkeys
+    (O4): UBILINK_SKIP_HOTKEYS=1. `restart()` keeps the temp root (the data must
+    survive a restart) and replays every fixture loaded so far, since fixtures live
+    in the app's memory.
+    """
+
+    def __init__(self, label: str, binary: Path):
+        self.label = label
+        self.name = instance_name(label)
+        self.binary_src = Path(binary)
+        self.root = None
+        self.proc = None
+        self._sock = None
+        self._reader = None
+        self._fixtures = {}
+
+    # Paths --------------------------------------------------------------
+    @property
+    def socket_path(self) -> Path:
+        return Path(_tmpdir()) / f"ubilink-{os.getuid()}" / self.name / "auto.sock"
+
+    @property
+    def data_dir(self) -> Path:
+        return self.root / "data"
+
+    @property
+    def fixtures_dir(self) -> Path:
+        return self.root / "fixtures"
+
+    @property
+    def log_path(self) -> Path:
+        return self.root / "app.log"
+
+    # Lifecycle ----------------------------------------------------------
+    def prepare(self):
+        """Create the temp root (data dir, fixture copy, binary clone) without launching."""
+        if self.root is not None:
+            return
+        self.root = Path(tempfile.mkdtemp(prefix=f"ubprobe-{self.name}-", dir=_tmpdir()))
+        self.data_dir.mkdir()
+        src_fixtures = PROBES_DIR / "fixtures"
+        if src_fixtures.is_dir():
+            # A private copy: a scenario may rewrite a fixture mid-run (onboarding
+            # flips a permission state) without touching the repo or a sibling.
+            shutil.copytree(src_fixtures, self.fixtures_dir)
+        else:
+            self.fixtures_dir.mkdir()
+        # A clone of the binary, so a probe in another clone rebuilding the shared
+        # target dir cannot swap the executable under a running instance.
+        binary = self.root / "ubilink-next"
+        if subprocess.run(["cp", "-c", str(self.binary_src), str(binary)]).returncode != 0:
+            shutil.copy2(self.binary_src, binary)
+        self.binary = binary
+
+    def env(self) -> dict:
+        # Drop any UBILINK_* the caller's shell exported: an instance must be
+        # configured only by what is set here.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("UBILINK_")}
+        env.update(
+            UBILINK_INSTANCE=self.name,
+            UBILINK_SKIP_HOTKEYS="1",
+            UBILINK_DATA_DIR=str(self.data_dir),
+            UBILINK_INSTANCE_SOCKET=str(self.root / "si.sock"),
+            TMPDIR=_tmpdir(),
+        )
+        return env
+
+    def start(self, timeout: float = _LAUNCH_TIMEOUT_S):
+        self.prepare()
+        self._launch(timeout)
+
+    def _launch(self, timeout: float):
+        # Launched directly, not through `open`: LaunchServices would fold it into the
+        # user's running ubilink-next (same bundle id) instead of starting an instance.
+        log = open(self.log_path, "ab")
+        try:
+            self.proc = subprocess.Popen(
+                [str(self.binary)],
+                env=self.env(),
+                cwd=self.root,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        finally:
+            log.close()
+        deadline = time.monotonic() + timeout
+        while True:
+            rc = self.proc.poll()
+            if rc is not None:
+                raise ProbeError(
+                    f"instance {self.name} exited {rc} before serving {self.socket_path}\n"
+                    + self.log_tail()
+                )
+            try:
+                self._connect()
+                break
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                raise ProbeError(
+                    f"instance {self.name} did not serve {self.socket_path} within {timeout:.0f}s "
+                    "(is this an --features automation build?)\n" + self.log_tail()
+                )
+            time.sleep(0.05)
+        for kind, path in list(self._fixtures.items()):
+            self.call("load_fixture", kind=kind, path=path)
+
+    def _connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.settimeout(_CALL_TIMEOUT_S)
+            s.connect(str(self.socket_path))
+        except OSError:
+            s.close()
+            raise
+        self._sock = s
+        self._reader = s.makefile("rb")
+
+    def log_tail(self, lines: int = 15) -> str:
+        try:
+            text = self.log_path.read_text(errors="replace").splitlines()
+        except OSError:
+            return "  (no app log)"
+        return "\n".join(f"  | {line}" for line in text[-lines:])
+
+    def request(self, verb: str, args: dict = None) -> dict:
+        """Send one request and return the raw response object."""
+        if self._sock is None:
+            raise ProbeError(f"instance {self.name} is not running")
+        line = json.dumps({"verb": verb, "args": args or {}}) + "\n"
+        try:
+            self._sock.sendall(line.encode())
+            reply = self._reader.readline()
+        except OSError as e:
+            raise ProbeError(f"instance {self.name}: {verb}: {e}\n{self.log_tail()}")
+        if not reply:
+            raise ProbeError(f"instance {self.name} closed the socket on {verb}\n{self.log_tail()}")
+        resp = json.loads(reply)
+        if verb == "load_fixture" and resp.get("ok"):
+            self._fixtures[(args or {}).get("kind")] = (args or {}).get("path")
+        return resp
+
+    def call(self, verb: str, **args):
+        resp = self.request(verb, args)
+        if not resp.get("ok"):
+            raise CallError(resp.get("error"))
+        return resp.get("result")
+
+    def restart(self, timeout: float = _LAUNCH_TIMEOUT_S):
+        self._terminate()
+        self._launch(timeout)
+
+    def _terminate(self):
+        if self._reader is not None:
+            self._reader.close()
+        if self._sock is not None:
+            self._sock.close()
+        self._sock = self._reader = None
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.send_signal(signal.SIGTERM)
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+        # The app does not unlink its socket on exit; remove it so a restart's wait
+        # never mistakes the stale file for the new process.
+        with contextlib.suppress(OSError):
+            self.socket_path.unlink()
+
+    def stop(self):
+        self._terminate()
+        with contextlib.suppress(OSError):
+            self.socket_path.parent.rmdir()  # this instance's 0700 dir
+        if self.root is not None:
+            shutil.rmtree(self.root, ignore_errors=True)
+            self.root = None
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop()
+        return False
+
+
+# ── desktop lock (O4: "GUI probes hold a desktop lock") ─────────────────────
+
+
+@contextlib.contextmanager
+def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print):
+    """Hold an exclusive flock on the desktop lock for the duration.
+
+    The pasteboard, the key window and the cursor are one per desktop. Two probes
+    (parallel Phase 1 tasks, TN4 of the Phase 1 spec) opening panels at once would
+    steal key status from each other and race on the pasteboard, so every `run`
+    holds this lock. flock is released by the kernel if the probe dies, so a crash
+    never wedges the next run.
+    """
+    path = Path(path) if path else CACHE_ROOT / "desktop.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = os.pread(fd, 64, 0).decode(errors="replace").strip() or "?"
+            out(f"probe: waiting for the desktop lock {path} (held by pid {holder})")
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() > deadline:
+                        raise ProbeError(f"desktop lock {path} still held after {timeout:.0f}s")
+                    time.sleep(0.25)
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+# ── matching helpers (pure; covered by scripts/test_probe.py) ───────────────
+
+_MISSING = object()
+
+
+def get_path(obj, path: str):
+    """Follow a dot path ("shell.window_kind", "items.0.uri", "" for the root)."""
+    if path in ("", "."):
+        return obj
+    for part in path.split("."):
+        if isinstance(obj, list):
+            try:
+                obj = obj[int(part)]
+            except (ValueError, IndexError):
+                return _MISSING
+        elif isinstance(obj, dict):
+            if part not in obj:
+                return _MISSING
+            obj = obj[part]
+        else:
+            return _MISSING
+    return obj
+
+
+_TYPE_NAMES = {
+    "list": list, "object": dict, "string": str, "bool": bool, "null": type(None),
+}
+
+
+def _type_ok(value, name: str) -> bool:
+    if name == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, _TYPE_NAMES[name])
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+# Operator name -> (actual, operand) -> bool. An expectation object whose keys are
+# ALL operator names is a matcher; anything else is compared for equality.
+_OPS = {
+    "eq": lambda a, b: a == b,
+    "ne": lambda a, b: a != b,
+    "in": lambda a, b: a in b,
+    "contains": lambda a, b: isinstance(a, (str, list)) and b in a,
+    "not_contains": lambda a, b: isinstance(a, (str, list)) and b not in a,
+    "text": lambda a, b: isinstance(a, str) and text_matches(b, a),
+    "len": lambda a, b: hasattr(a, "__len__") and len(a) == b,
+    "min_len": lambda a, b: hasattr(a, "__len__") and len(a) >= b,
+    "max_len": lambda a, b: hasattr(a, "__len__") and len(a) <= b,
+    "lt": lambda a, b: _num(a) and a < b,
+    "le": lambda a, b: _num(a) and a <= b,
+    "gt": lambda a, b: _num(a) and a > b,
+    "ge": lambda a, b: _num(a) and a >= b,
+    "type": lambda a, b: _type_ok(a, b),
+    "matches": lambda a, b: isinstance(a, str) and re.search(b, a) is not None,
+    "exists": lambda a, b: (a is not _MISSING) == b,
+}
+
+
+def is_matcher(spec) -> bool:
+    return isinstance(spec, dict) and bool(spec) and all(k in _OPS for k in spec)
+
+
+def validate_matcher(spec, where: str):
+    if is_matcher(spec):
+        if "type" in spec and spec["type"] not in (*_TYPE_NAMES, "number"):
+            raise ScenarioError(f"{where}: unknown type {spec['type']!r}")
+        if "matches" in spec:
+            try:
+                re.compile(spec["matches"])
+            except re.error as e:
+                raise ScenarioError(f"{where}: bad regex {spec['matches']!r}: {e}")
+
+
+def match_value(actual, spec) -> bool:
+    if is_matcher(spec):
+        if actual is _MISSING:
+            return spec.get("exists") is False and len(spec) == 1
+        return all(_OPS[op](actual, operand) for op, operand in spec.items())
+    return actual is not _MISSING and actual == spec
+
+
+def check_expect(result, expect: dict) -> list:
+    """Return [(path, expected, actual)] for every expectation `result` misses."""
+    misses = []
+    for path, spec in expect.items():
+        actual = get_path(result, path)
+        if not match_value(actual, spec):
+            misses.append((path, spec, "<missing>" if actual is _MISSING else actual))
+    return misses
+
+
+def norm_text(s: str) -> str:
+    # NFKC folds "…" into "..." and full-width forms into ASCII; casefold and
+    # whitespace collapse make "Capture  link" and "capture link" the same text.
+    s = unicodedata.normalize("NFKC", str(s)).casefold()
+    return " ".join(s.split())
+
+
+def text_matches(want: str, have: str, exact: bool = False) -> bool:
+    """Contains-normalised match that tolerates a UI's truncation with an ellipsis.
+
+    `want` matches `have` when, after normalising both, `want` is a substring of
+    `have` (or equal, with exact=True). If `have` was cut with a trailing ellipsis
+    ("Capture: https://exa…"), it also matches when the visible text before the
+    ellipsis ends with a prefix of `want` at least 6 characters long (or all of
+    `want`, if shorter); a leading ellipsis is handled the same way from the other
+    end. Rows in a narrow panel are truncated by design, and a probe must not fail
+    because the fixture URI is longer than the row.
+    """
+    w, h = norm_text(want), norm_text(have)
+    if not w:
+        return not h if exact else True
+    if (h == w) if exact else (w in h):
+        return True
+    need = min(len(w), 6)
+    if h.endswith("..."):
+        head = h[:-3].rstrip()
+        if exact:
+            if len(head) >= need and w.startswith(head):
+                return True
+        else:
+            for i in range(len(head)):
+                tail = head[i:]
+                if len(tail) >= need and w.startswith(tail):
+                    return True
+    if h.startswith("..."):
+        rest = h[3:].lstrip()
+        if exact:
+            if len(rest) >= need and w.endswith(rest):
+                return True
+        else:
+            for j in range(len(rest), 0, -1):
+                head = rest[:j]
+                if len(head) >= need and w.endswith(head):
+                    return True
+    return False
+
+
+def _norm_role(role) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(role or "").lower())
+
+
+def a11y_nodes(tree) -> list:
+    """Flatten a debug_a11y_tree_json dump into [(role, [texts])].
+
+    The dump is {"frame": ..., "nodes": {id: {"aria": {"role": ..., "value": ...}}}};
+    every string in `aria` other than the role counts as the node's text (value,
+    label, description, placeholder), so a probe need not know which field a given
+    gpui-component widget fills.
+    """
+    nodes = tree.get("nodes", {}) if isinstance(tree, dict) else {}
+    if isinstance(nodes, list):
+        nodes = dict(enumerate(nodes))
+    out = []
+    for node in nodes.values():
+        if not isinstance(node, dict):
+            continue
+        aria = node.get("aria") or {}
+        texts = []
+        for k, v in aria.items():
+            if k == "role":
+                continue
+            if isinstance(v, str):
+                texts.append(v)
+            elif isinstance(v, list):
+                texts.extend(x for x in v if isinstance(x, str))
+        out.append((aria.get("role"), texts))
+    return out
+
+
+def find_nodes(tree, role=None, text=None, exact=False) -> list:
+    hits = []
+    for r, texts in a11y_nodes(tree):
+        if role is not None and _norm_role(r) != _norm_role(role):
+            continue
+        if text is not None and not any(text_matches(text, t, exact) for t in texts):
+            continue
+        hits.append((r, texts))
+    return hits
+
+
+def _srgb_to_lab(rgb):
+    def lin(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (lin(float(c)) for c in rgb)
+    x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047
+    y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b
+    z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883
+
+    def f(t):
+        return t ** (1 / 3) if t > 216 / 24389 else (24389 / 27 * t + 16) / 116
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+
+
+def parse_hex(color: str):
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", color.strip())
+    if not m:
+        raise ScenarioError(f"not a #rrggbb colour: {color!r}")
+    v = m.group(1)
+    return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def delta_e(rgb1, rgb2) -> float:
+    """CIE76 ΔE between two sRGB colours (D65). ~2.3 is a just-noticeable difference."""
+    a, b = _srgb_to_lab(rgb1), _srgb_to_lab(rgb2)
+    return sum((p - q) ** 2 for p, q in zip(a, b)) ** 0.5
+
+
+def rect_within(inner: dict, outer: dict, slack: float = 0.5) -> bool:
+    return (
+        inner["x"] >= outer["x"] - slack
+        and inner["y"] >= outer["y"] - slack
+        and inner["x"] + inner["w"] <= outer["x"] + outer["w"] + slack
+        and inner["y"] + inner["h"] <= outer["y"] + outer["h"] + slack
+    )
+
+
+def order_displays(displays: list) -> list:
+    """Display index order for scenarios: the main display is 0, the rest left to right."""
+    return sorted(displays, key=lambda d: (not d.get("main"), d["bounds"]["x"], d["bounds"]["y"]))
+
+
+# ── scenario files ────────────────────────────────────────────────────────
+
+# Steps that only read state, so `retry_ms` may re-issue them until they pass.
+_READ_ONLY_VERBS = {"state", "metrics", "window_id", "a11y", "opened"}
+
+# Step type -> the option keys it accepts besides its own key. Unknown types and
+# unknown options are scenario errors, so a typo ("expcet") can never make a
+# step vacuously pass.
+STEP_TYPES = {
+    "call": {"args", "expect", "expect_error", "retry_ms"},
+    "see": {"absent", "count", "min_count", "max_count", "exact", "timeout_ms"},
+    "ocr": {"absent", "exact"},
+    "pixel": {"color", "delta_e"},
+    "pasteboard": {"expect", "changed"},
+    "graph": {"db", "export", "links", "no_links", "link_count", "resource_count", "timeout_ms"},
+    "file": {"exists", "expect", "timeout_ms"},
+    "winframe": {"timeout_ms"},
+    "warp_cursor": set(),
+    "activate_other": {"settle_ms"},
+    "restart": set(),
+    "sleep_ms": set(),
+}
+_COMMON_OPTIONS = {"name"}
+_SCENARIO_KEYS = {"description", "requirement", "notes", "setup", "steps"}
+_SETUP_KEYS = {"fixtures", "files"}
+
+
+def step_type(step, where: str) -> str:
+    if not isinstance(step, dict):
+        raise ScenarioError(f"{where}: a step must be an object, got {type(step).__name__}")
+    kinds = [k for k in step if k in STEP_TYPES]
+    if len(kinds) != 1:
+        raise ScenarioError(
+            f"{where}: unknown step {sorted(step)} (each step needs exactly one of: "
+            + ", ".join(STEP_TYPES) + ")"
+        )
+    kind = kinds[0]
+    extra = set(step) - {kind} - STEP_TYPES[kind] - _COMMON_OPTIONS
+    if extra:
+        raise ScenarioError(f"{where}: unknown option(s) {sorted(extra)} for a {kind} step")
+    return kind
+
+
+def validate_step(step, where: str) -> str:
+    kind = step_type(step, where)
+    v = step[kind]
+    if kind == "call":
+        if not isinstance(v, str):
+            raise ScenarioError(f"{where}: call takes a verb name")
+        if "retry_ms" in step and v not in _READ_ONLY_VERBS:
+            raise ScenarioError(f"{where}: retry_ms only on read-only verbs {sorted(_READ_ONLY_VERBS)}")
+        if "args" in step and not isinstance(step["args"], dict):
+            raise ScenarioError(f"{where}: args must be an object")
+        for path, spec in (step.get("expect") or {}).items():
+            validate_matcher(spec, f"{where}: expect[{path!r}]")
+    elif kind == "see":
+        for q in v if isinstance(v, list) else [v]:
+            if not isinstance(q, dict) or not set(q) <= {"role", "text"} or not q:
+                raise ScenarioError(f"{where}: see takes {{role, text}} (or a list of them)")
+    elif kind == "ocr":
+        if not isinstance(v, (str, list)):
+            raise ScenarioError(f"{where}: ocr takes a string or list of strings")
+    elif kind == "pixel":
+        if not isinstance(v, dict) or not {"x", "y"} <= set(v) or not set(v) <= {"x", "y", "w", "h"}:
+            raise ScenarioError(f"{where}: pixel takes {{x, y[, w, h]}} in window points")
+        if "color" not in step:
+            raise ScenarioError(f"{where}: pixel needs color")
+        parse_hex(step["color"])
+    elif kind == "pasteboard":
+        if v not in ("set_nonce", "read"):
+            raise ScenarioError(f"{where}: pasteboard is set_nonce or read")
+    elif kind == "graph":
+        if v is not True:
+            raise ScenarioError(f"{where}: graph takes true (options say what to check)")
+        if not any(k in step for k in ("links", "no_links", "link_count", "resource_count")):
+            raise ScenarioError(f"{where}: graph needs links, no_links, link_count or resource_count")
+    elif kind == "file":
+        if not isinstance(v, str):
+            raise ScenarioError(f"{where}: file takes a path")
+    elif kind == "winframe":
+        if not (v in ("any", "cursor", "state") or (isinstance(v, int) and not isinstance(v, bool))):
+            raise ScenarioError(f"{where}: winframe is any, cursor, state or a display index")
+    elif kind == "warp_cursor":
+        ok = isinstance(v, int) and not isinstance(v, bool) or (
+            isinstance(v, dict) and "display" in v and set(v) <= {"display", "x", "y"}
+        )
+        if not ok:
+            raise ScenarioError(f"{where}: warp_cursor takes a display index or {{display, x, y}}")
+    elif kind == "activate_other":
+        if not (v is True or isinstance(v, str)):
+            raise ScenarioError(f"{where}: activate_other takes an app name or true (Finder)")
+    elif kind == "restart":
+        if v is not True:
+            raise ScenarioError(f"{where}: restart takes true")
+    elif kind == "sleep_ms":
+        if not _num(v) or v < 0:
+            raise ScenarioError(f"{where}: sleep_ms takes a non-negative number")
+    return kind
+
+
+def load_scenario(name: str, probes_dir: Path = None) -> dict:
+    """Load and fully validate a scenario, before any instance is launched."""
+    probes_dir = probes_dir or PROBES_DIR
+    path = Path(name) if name.endswith(".json") else probes_dir / f"{name}.json"
+    if not path.is_file():
+        raise ScenarioError(f"no scenario {name!r} ({path} not found)")
+    try:
+        sc = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ScenarioError(f"{path}: bad JSON: {e}")
+    if not isinstance(sc, dict):
+        raise ScenarioError(f"{path}: top level must be an object")
+    extra = set(sc) - _SCENARIO_KEYS
+    if extra:
+        raise ScenarioError(f"{path}: unknown key(s) {sorted(extra)}")
+    setup = sc.get("setup", {})
+    if not isinstance(setup, dict) or set(setup) - _SETUP_KEYS:
+        raise ScenarioError(f"{path}: setup takes only {sorted(_SETUP_KEYS)}")
+    steps = sc.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ScenarioError(f"{path}: steps must be a non-empty list")
+    for i, step in enumerate(steps, 1):
+        validate_step(step, f"{path.name} step {i}")
+    sc["_name"] = path.stem
+    sc["_path"] = path
+    return sc
+
+
+def expand(obj, tokens: dict):
+    """Replace {root}, {data_dir}, {fixtures}, {probes}, {nonce}, {instance} in strings."""
+    if isinstance(obj, str):
+        for k, v in tokens.items():
+            obj = obj.replace("{" + k + "}", str(v))
+        return obj
+    if isinstance(obj, list):
+        return [expand(x, tokens) for x in obj]
+    if isinstance(obj, dict):
+        return {expand(k, tokens): expand(v, tokens) for k, v in obj.items()}
+    return obj
+
+
+def _short(v, limit: int = 300) -> str:
+    s = json.dumps(v, sort_keys=True, default=str) if not isinstance(v, str) else v
+    return s if len(s) <= limit else s[: limit - 3] + "..."
+
+
+# ── step runners ──────────────────────────────────────────────────────────
+
+
+class RunContext:
+    """Per-scenario, per-instance state the steps share."""
+
+    def __init__(self, inst: Instance, scenario: dict):
+        self.inst = inst
+        self.scenario = scenario
+        self.nonce = None
+        self.pb_count = None
+        self.shots = 0
+
+    def tokens(self) -> dict:
+        t = {
+            "root": self.inst.root,
+            "data_dir": self.inst.data_dir,
+            "fixtures": self.inst.fixtures_dir,
+            "probes": PROBES_DIR,
+            "instance": self.inst.name,
+        }
+        if self.nonce is not None:
+            t["nonce"] = self.nonce
+        return t
+
+
+def _poll(timeout_ms, attempt):
+    """Run attempt() until it returns without StepFailed or the time is up."""
+    deadline = time.monotonic() + (timeout_ms or 0) / 1000.0
+    while True:
+        try:
+            return attempt()
+        except StepFailed:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
+def run_call(ctx: RunContext, step: dict) -> str:
+    verb = step["call"]
+    args = expand(step.get("args", {}), ctx.tokens())
+    expect = expand(step.get("expect", {}), ctx.tokens())
+    want_error = step.get("expect_error")
+
+    def attempt():
+        resp = ctx.inst.request(verb, args)
+        if want_error is not None:
+            err = resp.get("error") or ""
+            if resp.get("ok") or (want_error is not True and str(want_error) not in err):
+                raise StepFailed(f"{verb} should fail", f"error containing {want_error!r}", resp)
+            return f"error: {err}"
+        if not resp.get("ok"):
+            raise StepFailed(f"{verb} returned an error", "ok", resp.get("error"))
+        misses = check_expect(resp.get("result"), expect)
+        if misses:
+            raise StepFailed(
+                f"{verb}: {len(misses)} expectation(s) not met",
+                {p: e for p, e, _ in misses},
+                {p: a for p, _, a in misses},
+            )
+        return f"{len(expect)} expectation(s) met" if expect else "ok"
+
+    return _poll(step.get("retry_ms"), attempt)
+
+
+def run_see(ctx: RunContext, step: dict) -> str:
+    queries = step["see"] if isinstance(step["see"], list) else [step["see"]]
+    queries = expand(queries, ctx.tokens())
+    absent = step.get("absent", False)
+    exact = step.get("exact", False)
+
+    def attempt():
+        try:
+            tree = ctx.inst.call("a11y")
+        except CallError as e:
+            raise StepFailed("a11y failed", "an accessibility tree", str(e))
+        for q in queries:
+            hits = find_nodes(tree, q.get("role"), q.get("text"), exact)
+            n = len(hits)
+            bad = (
+                (absent and n > 0)
+                or (not absent and n == 0)
+                or ("count" in step and n != step["count"])
+                or ("min_count" in step and n < step["min_count"])
+                or ("max_count" in step and n > step["max_count"])
+            )
+            if bad:
+                seen = [f"{r}: {' | '.join(t)}" for r, t in a11y_nodes(tree)][:40]
+                want = ("no node like " if absent else "node like ") + _short(q)
+                for k in ("count", "min_count", "max_count"):
+                    if k in step:
+                        want += f" ({k} {step[k]}, found {n})"
+                raise StepFailed("a11y tree mismatch", want, seen)
+        return f"{len(queries)} a11y quer{'y' if len(queries) == 1 else 'ies'} matched"
+
+    return _poll(step.get("timeout_ms", 3000), attempt)
+
+
+def _screen_access():
+    """Raise EnvBlocked unless this process may capture the screen (TN5, R9)."""
+    if not quartz("screen-access").get("granted"):
+        raise EnvBlocked(
+            "Screen Recording is not granted to the process running probe.py "
+            "(System Settings > Privacy & Security > Screen Recording); "
+            "ocr/pixel steps need it, a11y steps do not"
+        )
+
+
+def _panel_window(ctx: RunContext):
+    """(window number, bounds in points) of the instance's open panel."""
+    try:
+        wid = ctx.inst.call("window_id")["window_id"]
+    except CallError as e:
+        raise StepFailed("no panel window", "an open panel", str(e))
+    for w in quartz("windows", ctx.inst.proc.pid):
+        if w["number"] == wid:
+            return wid, w["bounds"]
+    raise StepFailed("panel not on screen", f"window {wid} on screen", "absent from CGWindowList")
+
+
+def _capture(ctx: RunContext):
+    _screen_access()
+    wid, bounds = _panel_window(ctx)
+    ctx.shots += 1
+    shot_dir = ctx.inst.root / "shots"
+    shot_dir.mkdir(exist_ok=True)
+    png = shot_dir / f"shot-{ctx.shots}.png"
+    # -x: no shutter sound; -o: no window shadow, so the image is the window's own
+    # pixels and point (0, 0) is its top-left corner.
+    proc = subprocess.run(
+        ["screencapture", "-x", "-o", f"-l{wid}", str(png)], capture_output=True, text=True
+    )
+    if proc.returncode != 0 or not png.is_file() or png.stat().st_size == 0:
+        raise EnvBlocked(f"screencapture -l{wid} produced no image: {proc.stderr.strip()}")
+    return png, bounds
+
+
+def run_ocr(ctx: RunContext, step: dict) -> str:
+    wants = step["ocr"] if isinstance(step["ocr"], list) else [step["ocr"]]
+    wants = expand(wants, ctx.tokens())
+    png, _ = _capture(ctx)
+    out = _run_helper(_OCR_SWIFT, png, timeout=_OCR_TIMEOUT_S, attempts=2)
+    lines = [line["text"] for line in out.get("lines", [])]
+    joined = " ".join(lines)
+    absent = step.get("absent", False)
+    exact = step.get("exact", False)
+    for w in wants:
+        found = any(text_matches(w, line, exact) for line in lines) or (
+            not exact and text_matches(w, joined)
+        )
+        if found == absent:
+            raise StepFailed(
+                "OCR mismatch", ("absent: " if absent else "present: ") + w, lines
+            )
+    return f"{len(wants)} OCR text(s) {'absent' if absent else 'present'} ({png.name})"
+
+
+def run_pixel(ctx: RunContext, step: dict) -> str:
+    region = step["pixel"]
+    want = parse_hex(step["color"])
+    limit = step.get("delta_e", 3.0)
+    png, bounds = _capture(ctx)
+    got = quartz(
+        "pixel", png, region["x"], region["y"], region.get("w", 1), region.get("h", 1), bounds["w"]
+    )
+    de = delta_e(want, got["rgb"])
+    if de > limit:
+        raise StepFailed(
+            f"colour off by ΔE {de:.1f} (limit {limit})", step["color"], got["hex"]
+        )
+    return f"{got['hex']} within ΔE {de:.1f} of {step['color']}"
+
+
+# The user's pasteboard text, saved before the first nonce of the run and put back
+# at the end (O4: a probe must leave the host as it found it). Text only: a richer
+# pasteboard (an image, files) is not restored, which the README states.
+_saved_pasteboard = None
+
+
+def _pbcount() -> int:
+    return quartz("pbcount")["change_count"]
+
+
+def run_pasteboard(ctx: RunContext, step: dict) -> str:
+    global _saved_pasteboard
+    if step["pasteboard"] == "set_nonce":
+        if _saved_pasteboard is None:
+            _saved_pasteboard = subprocess.run(["pbpaste"], capture_output=True).stdout
+        ctx.nonce = f"ubilink-probe-nonce-{os.getpid()}-{time.monotonic_ns()}"
+        subprocess.run(["pbcopy"], input=ctx.nonce.encode(), check=True)
+        ctx.pb_count = _pbcount()
+        return f"pasteboard = {ctx.nonce} (change count {ctx.pb_count})"
+    text = subprocess.run(["pbpaste"], capture_output=True).stdout.decode(errors="replace")
+    count = _pbcount()
+    if "expect" in step:
+        spec = expand(step["expect"], ctx.tokens())
+        if not match_value(text, spec):
+            raise StepFailed("pasteboard text", spec, text)
+    if "changed" in step:
+        if ctx.pb_count is None:
+            raise ScenarioError("pasteboard changed: needs an earlier set_nonce")
+        if (count > ctx.pb_count) != step["changed"]:
+            raise StepFailed(
+                "pasteboard change count",
+                f"{'>' if step['changed'] else '=='} {ctx.pb_count}",
+                count,
+            )
+    ctx.pb_count = count
+    return f"pasteboard {_short(text, 80)!r} (change count {count})"
+
+
+def restore_pasteboard():
+    global _saved_pasteboard
+    if _saved_pasteboard is not None:
+        subprocess.run(["pbcopy"], input=_saved_pasteboard)
+        _saved_pasteboard = None
+
+
+def read_graph(db: Path = None, export: Path = None):
+    """(set of frozenset({uri_a, uri_b}) links, resource count) from a graph.
+
+    `db` is ubilink-core's SQLite file (resources.id is the URI; links holds one row
+    per unordered pair), opened read-only so a probe can never change the graph it
+    checks. `export` is the JSON Settings > Export writes (ubilink.graph.v3:
+    resources carry guids, links name their ends by guid).
+    """
+    if export is not None:
+        doc = json.loads(Path(export).read_text(encoding="utf-8"))
+        uri_of = {r["guid"]: r["uri"] for r in doc.get("resources", [])}
+        links = {
+            frozenset((uri_of.get(k["a"], k["a"]), uri_of.get(k["b"], k["b"])))
+            for k in doc.get("links", [])
+        }
+        return links, len(uri_of)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT a.uri, b.uri FROM links l "
+            "JOIN resources a ON a.id = l.lo_id JOIN resources b ON b.id = l.hi_id"
+        ).fetchall()
+        n = conn.execute("SELECT COUNT(*) FROM resources").fetchone()[0]
+    finally:
+        conn.close()
+    return {frozenset(r) for r in rows}, n
+
+
+def run_graph(ctx: RunContext, step: dict) -> str:
+    step = expand(step, ctx.tokens())
+    export = Path(step["export"]) if "export" in step else None
+    db = Path(step.get("db") or ctx.inst.data_dir / "ubilink-graph.sqlite")
+
+    def attempt():
+        src = export or db
+        if not src.is_file():
+            raise StepFailed("no graph", f"a graph at {src}", "missing")
+        try:
+            links, n_res = read_graph(db=None if export else db, export=export)
+        except (sqlite3.Error, ValueError, KeyError) as e:
+            raise StepFailed("unreadable graph", str(src), str(e))
+        for a, b in step.get("links", []):
+            if frozenset((a, b)) not in links:
+                raise StepFailed("missing link", f"{a} <-> {b}", sorted(map(sorted, links))[:20])
+        for a, b in step.get("no_links", []):
+            if frozenset((a, b)) in links:
+                raise StepFailed("unexpected link", f"no {a} <-> {b}", "present")
+        if "link_count" in step and len(links) != step["link_count"]:
+            raise StepFailed("link count", step["link_count"], len(links))
+        if "resource_count" in step and n_res != step["resource_count"]:
+            raise StepFailed("resource count", step["resource_count"], n_res)
+        return f"{len(links)} link(s), {n_res} resource(s) in {src.name}"
+
+    return _poll(step.get("timeout_ms", 0), attempt)
+
+
+def run_file(ctx: RunContext, step: dict) -> str:
+    path = Path(expand(step["file"], ctx.tokens()))
+    expect = expand(step.get("expect", {}), ctx.tokens())
+    want_exists = step.get("exists", True)
+
+    def attempt():
+        if path.exists() != want_exists:
+            raise StepFailed("file existence", f"exists={want_exists}", f"exists={path.exists()}")
+        if not want_exists:
+            return f"{path} absent"
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise StepFailed("file is not JSON", str(path), str(e))
+        misses = check_expect(doc, expect)
+        if misses:
+            raise StepFailed(
+                f"{path.name}: {len(misses)} expectation(s) not met",
+                {p: e for p, e, _ in misses},
+                {p: a for p, _, a in misses},
+            )
+        return f"{path.name}: {len(expect)} expectation(s) met"
+
+    return _poll(step.get("timeout_ms", 0), attempt)
+
+
+def _display_for(target, displays: list, ctx: RunContext) -> dict:
+    ordered = order_displays(displays)
+    if target == "cursor":
+        c = quartz("cursor")
+        for d in ordered:
+            b = d["bounds"]
+            if b["x"] <= c["x"] < b["x"] + b["w"] and b["y"] <= c["y"] < b["y"] + b["h"]:
+                return d
+        raise StepFailed("cursor on no display", "a display under the cursor", c)
+    if target == "state":
+        did = (ctx.inst.call("state").get("shell") or {}).get("display_id")
+        for d in ordered:
+            if d["id"] == did:
+                return d
+        raise StepFailed("state.shell.display_id is no active display", [d["id"] for d in ordered], did)
+    if target >= len(ordered):
+        raise EnvBlocked(f"needs display {target}, the host has {len(ordered)}")
+    return ordered[target]
+
+
+def run_winframe(ctx: RunContext, step: dict) -> str:
+    target = step["winframe"]
+
+    def attempt():
+        wid, bounds = _panel_window(ctx)
+        displays = quartz("displays")
+        if target == "any":
+            if any(rect_within(bounds, d["bounds"]) for d in displays):
+                return f"window {wid} {bounds} lies within a display"
+            raise StepFailed("window off-screen", [d["bounds"] for d in displays], bounds)
+        d = _display_for(target, displays, ctx)
+        if not rect_within(bounds, d["bounds"]):
+            raise StepFailed(f"window not within display {d['id']}", d["bounds"], bounds)
+        return f"window {wid} {bounds} lies within display {d['id']}"
+
+    return _poll(step.get("timeout_ms", 2000), attempt)
+
+
+def run_warp_cursor(ctx: RunContext, step: dict) -> str:
+    v = step["warp_cursor"]
+    spec = v if isinstance(v, dict) else {"display": v}
+    d = _display_for(spec["display"], quartz("displays"), ctx)
+    b = d["bounds"]
+    x = b["x"] + b["w"] * spec.get("x", 0.5)
+    y = b["y"] + b["h"] * spec.get("y", 0.5)
+    now = quartz("warp", x, y)
+    return f"cursor at ({now['x']:.0f}, {now['y']:.0f}) on display {d['id']}"
+
+
+def run_activate_other(ctx: RunContext, step: dict) -> str:
+    app = "Finder" if step["activate_other"] is True else step["activate_other"]
+    # A real activation of another app: the panel loses key status the way it does
+    # when the user clicks elsewhere, not through the resign_key verb's shortcut.
+    proc = subprocess.run(["open", "-a", app], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise EnvBlocked(f"open -a {app} failed: {proc.stderr.strip()}")
+    time.sleep(step.get("settle_ms", 300) / 1000.0)
+    return f"activated {app}"
+
+
+def run_restart(ctx: RunContext, step: dict) -> str:
+    ctx.inst.restart()
+    return f"restarted (pid {ctx.inst.proc.pid}, {len(ctx.inst._fixtures)} fixture(s) replayed)"
+
+
+def run_sleep(ctx: RunContext, step: dict) -> str:
+    time.sleep(step["sleep_ms"] / 1000.0)
+    return f"slept {step['sleep_ms']} ms"
+
+
+STEP_RUNNERS = {
+    "call": run_call,
+    "see": run_see,
+    "ocr": run_ocr,
+    "pixel": run_pixel,
+    "pasteboard": run_pasteboard,
+    "graph": run_graph,
+    "file": run_file,
+    "winframe": run_winframe,
+    "warp_cursor": run_warp_cursor,
+    "activate_other": run_activate_other,
+    "restart": run_restart,
+    "sleep_ms": run_sleep,
+}
+assert set(STEP_RUNNERS) == set(STEP_TYPES)
+
+
+# ── the run command ───────────────────────────────────────────────────────
+
+
+class Tally:
+    def __init__(self):
+        self.passed = self.failed = self.blocked = self.errors = 0
+
+    def exit_code(self) -> int:
+        # 2 = a scenario is wrong, 1 = the product (or the harness) failed,
+        # 3 = only the environment blocked steps; 0 only if everything passed.
+        if self.errors:
+            return 2
+        if self.failed:
+            return 1
+        if self.blocked:
+            return 3
+        return 0
+
+
+def _describe(kind: str, step: dict) -> str:
+    v = step[kind]
+    if kind == "call" and step.get("args"):
+        v = f"{v} {_short(step['args'], 80)}"
+    elif not isinstance(v, str):
+        v = _short(v, 80)
+    label = f" ({step['name']})" if step.get("name") else ""
+    return f"{kind} {v}{label}"
+
+
+def _report_fail(e: StepFailed):
+    print(f"      {e}")
+    if e.expected is not None or e.actual is not None:
+        print(f"      expected: {_short(e.expected, 600)}")
+        print(f"      actual:   {_short(e.actual, 600)}")
+
+
+def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
+    """Run every step against one instance; stop at the first FAIL. Returns ok."""
+    steps = ctx.scenario["steps"]
+    for i, step in enumerate(steps, 1):
+        kind = step_type(step, f"step {i}")
+        head = f"{prefix} [{i}/{len(steps)}] {_describe(kind, step)}"
+        try:
+            detail = STEP_RUNNERS[kind](ctx, step)
+        except EnvBlocked as e:
+            tally.blocked += 1
+            print(f"ENV-BLOCKED {head}\n      {e}")
+            continue
+        except ScenarioError as e:
+            tally.errors += 1
+            print(f"ERROR {head}\n      {e}")
+            return False
+        except (StepFailed, ProbeError, CallError) as e:
+            tally.failed += 1
+            print(f"FAIL  {head}")
+            if isinstance(e, StepFailed):
+                _report_fail(e)
+            else:
+                print(f"      {e}")
+            if i < len(steps):
+                print(f"      (stopping: {len(steps) - i} later step(s) not run)")
+            return False
+        tally.passed += 1
+        print(f"PASS  {head} — {detail}")
+    return True
+
+
+def _check(tally: Tally, head: str, fn):
+    try:
+        detail = fn()
+    except (StepFailed, ProbeError, CallError) as e:
+        tally.failed += 1
+        print(f"FAIL  {head}")
+        if isinstance(e, StepFailed):
+            _report_fail(e)
+        else:
+            print(f"      {e}")
+        return
+    tally.passed += 1
+    print(f"PASS  {head} — {detail}")
+
+
+def side_by_side_checks(name: str, instances: list, tally: Tally):
+    """R8/O1 with --instances N: every instance still answers while all run, and none
+    shares a socket, data dir or fixture with another."""
+    for k, inst in enumerate(instances):
+        prefix = f"{name}#{k + 1}"
+
+        def answers_state(inst=inst):
+            st = inst.call("state")
+            if not isinstance(st, dict) or "shell" not in st:
+                raise StepFailed("state shape", "an object with shell", st)
+            # Isolation, observed from inside the app: its graph data dir is the one
+            # this probe gave it, not a sibling's and not the user's.
+            gd = (st.get("fixtures") or {}).get("graph_dir")
+            if gd != str(inst.data_dir):
+                raise StepFailed("instance data dir", str(inst.data_dir), gd)
+            return f"pid {inst.proc.pid}, socket {inst.socket_path}, data dir {gd}"
+
+        def opened_is_sink(inst=inst):
+            got = inst.call("opened")
+            if not isinstance(got, list):
+                raise StepFailed("opened sink", "a list of recorded opens", got)
+            return f"sink answers ({len(got)} recorded open(s), nothing launched)"
+
+        _check(tally, f"{prefix} [side-by-side] answers state while {len(instances)} run", answers_state)
+        _check(tally, f"{prefix} [side-by-side] opened reports the sink", opened_is_sink)
+
+    def distinct():
+        for attr in ("socket_path", "data_dir", "fixtures_dir", "root"):
+            vals = [str(getattr(i, attr)) for i in instances]
+            if len(set(vals)) != len(vals):
+                raise StepFailed(f"shared {attr}", "distinct per instance", vals)
+        pids = [i.proc.pid for i in instances]
+        if len(set(pids)) != len(pids) or any(i.proc.poll() is not None for i in instances):
+            raise StepFailed("processes", "distinct live pids", pids)
+        return f"{len(instances)} distinct pids, sockets, data dirs and fixture dirs"
+
+    _check(tally, f"{name} [side-by-side] isolation", distinct)
+
+
+def _copy_setup_files(inst: Instance, setup: dict):
+    tokens = {"root": inst.root, "data_dir": inst.data_dir, "fixtures": inst.fixtures_dir,
+              "probes": PROBES_DIR, "instance": inst.name}
+    for dest, src in (setup.get("files") or {}).items():
+        d = Path(expand(dest, tokens))
+        s = Path(expand(src, tokens))
+        if not s.is_absolute():
+            s = inst.fixtures_dir / s
+        if not s.exists():
+            raise ScenarioError(f"setup.files: {s} not found")
+        d.parent.mkdir(parents=True, exist_ok=True)
+        if s.is_dir():
+            shutil.copytree(s, d, dirs_exist_ok=True)
+        else:
+            shutil.copy2(s, d)
+    return tokens
+
+
+def run_scenario(sc: dict, binary: Path, n: int, tally: Tally):
+    name = sc["_name"]
+    print(f"── {name}: {sc.get('description', '')}".rstrip(": "))
+    instances = [Instance(f"{name}-{k + 1}" if n > 1 else name, binary) for k in range(n)]
+    try:
+        setup = sc.get("setup", {})
+        for inst in instances:
+            inst.prepare()
+            tokens = _copy_setup_files(inst, setup)
+            inst.start()
+            for kind, path in (setup.get("fixtures") or {}).items():
+                p = Path(expand(path, tokens))
+                if not p.is_absolute():
+                    p = inst.fixtures_dir / p
+                inst.call("load_fixture", kind=kind, path=str(p))
+        for k, inst in enumerate(instances):
+            prefix = f"{name}#{k + 1}" if n > 1 else name
+            run_steps(RunContext(inst, sc), tally, prefix)
+        if n > 1:
+            side_by_side_checks(name, instances, tally)
+    except ScenarioError as e:
+        tally.errors += 1
+        print(f"ERROR {name}: {e}")
+    except (ProbeError, CallError) as e:
+        tally.failed += 1
+        print(f"FAIL  {name}: {e}")
+    finally:
+        for inst in instances:
+            inst.stop()
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Run scenario files against fresh isolated automation instances (R8)."""
+    tally = Tally()
+    try:
+        scenarios = [load_scenario(n) for n in args.names]
+    except ScenarioError as e:
+        print(f"ERROR {e}")
+        return 2
+    if args.instances < 1:
+        print("ERROR --instances must be >= 1")
+        return 2
+
+    # A SIGTERM from a verifier's timeout must still stop the instances and remove
+    # their temp roots: turn it into SystemExit so the finally blocks run.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    try:
+        binary = build_automation_binary()
+        # Compile (and, for OCR, warm) helpers up front, so neither the swiftc log nor
+        # Vision's one-off model compile lands inside a step.
+        _helper(_QUARTZ_SWIFT)
+        if any(step_type(st, "") == "ocr" for sc in scenarios for st in sc["steps"]):
+            _helper(_OCR_SWIFT)
+        with desktop_lock():
+            for sc in scenarios:
+                run_scenario(sc, binary, args.instances, tally)
+    except ProbeError as e:
+        print(f"FAIL  {e}")
+        return 1
+    except EnvBlocked as e:
+        print(f"ENV-BLOCKED {e}")
+        return 3
+    finally:
+        restore_pasteboard()
+
+    code = tally.exit_code()
+    verdict = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code]
+    print(
+        f"{verdict}: run {' '.join(args.names)} (instances={args.instances}) — "
+        f"{tally.passed} passed, {tally.failed} failed, {tally.blocked} env-blocked, "
+        f"{tally.errors} scenario error(s)"
+    )
+    return code
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="probe.py",
@@ -330,6 +1796,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the --features automation build that proves the check can find the marker.",
     )
     p_release_clean.set_defaults(func=cmd_release_clean)
+
+    # ── run ────────────────────────────────────────────────────────────
+    p_run = subparsers.add_parser(
+        "run",
+        help="Run desktop-gpui/probes/<name>.json scenarios against isolated automation instances.",
+    )
+    p_run.add_argument("names", nargs="+", help="Scenario names (desktop-gpui/probes/<name>.json) or paths.")
+    p_run.add_argument(
+        "--instances",
+        type=int,
+        default=1,
+        help="Run each scenario against N simultaneous instances and check they stay isolated.",
+    )
+    p_run.set_defaults(func=cmd_run)
 
     return parser
 

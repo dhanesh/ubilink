@@ -77,6 +77,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// logged and the app runs without the channel — the probe then fails to connect,
 /// loudly, rather than the app refusing to start.
 pub fn start(inbox: Inbox) {
+    seed_data_dir(std::env::var_os(DATA_DIR_ENV).map(std::path::PathBuf::from));
     match listen(inbox) {
         // The verb list is printed as data, not only matched on: LLVM compiles short
         // string matches into integer compares, so without this the verb names would
@@ -87,6 +88,27 @@ pub fn start(inbox: Inbox) {
             protocol::VERBS.join(" ")
         ),
         Err(e) => eprintln!("[ubilink-next] automation channel unavailable: {e}"),
+    }
+}
+
+/// R8/O1: each probe instance gets its own data directory. `scripts/probe.py` sets this
+/// to a per-instance temp dir; it pre-loads the `graph_dir` fixture before the pump
+/// starts, so whatever reads the graph's data dir through `crate::fixtures::path`
+/// sees it from the first instant (a `load_fixture` call can still repoint it later).
+/// Automation builds only, like every other fixture source (TN1).
+pub const DATA_DIR_ENV: &str = "UBILINK_DATA_DIR";
+
+fn seed_data_dir(dir: Option<std::path::PathBuf>) {
+    match dir {
+        Some(d) if d.is_absolute() => {
+            store::set_fixture(crate::fixtures::Fixture::GraphDir, d);
+        }
+        // Same rule as `load_fixture`: the app's cwd is not the probe's.
+        Some(d) => eprintln!(
+            "[ubilink-next] {DATA_DIR_ENV} ignored, must be absolute: {}",
+            d.display()
+        ),
+        None => {}
     }
 }
 
