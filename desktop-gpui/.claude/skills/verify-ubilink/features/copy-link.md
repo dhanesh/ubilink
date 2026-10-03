@@ -60,8 +60,9 @@ Record it (SKILL.md, Evidence):
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/copy-link"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature copy-link \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario copy-link (desktop-gpui/probes/copy-link.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "pasteboard carries the fixture's exact URI after each round; opened sink stayed []; see result.json" \

@@ -61,8 +61,9 @@ Record it (SKILL.md, Evidence):
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/panel-hotkey"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature panel-hotkey \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario panel-hotkey (desktop-gpui/probes/panel-hotkey.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "no side effect asserted beyond timing and placement; see result.json" \

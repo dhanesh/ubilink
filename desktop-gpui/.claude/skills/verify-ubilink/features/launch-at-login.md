@@ -70,8 +70,9 @@ needed:
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/launch-at-login"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature launch-at-login \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario launch-at-login (desktop-gpui/probes/launch-at-login.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "the seam's status and calls survive a real restart for all three statuses; opened sink stayed []; see result.json" \

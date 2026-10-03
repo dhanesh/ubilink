@@ -71,15 +71,18 @@ Record it (SKILL.md, Evidence) by pinning `result.json` and every file in
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/capture-view"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature capture-view \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario capture-view (desktop-gpui/probes/capture-view.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "opened sink stayed [] across both the success and the failure path; see result.json" \
   $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
-Use `--result fail` with the transcript's failing step when `exit` is not 0.
+`RESULT` above is read straight from `result.json`'s own `exit` field (ruling
+R-ab: never hard-code `pass`), so a failing run records `--result fail`
+automatically; name the transcript's failing step in `--observed` when it does.
 
 ## Gotchas
 
