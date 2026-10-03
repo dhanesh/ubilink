@@ -48,7 +48,7 @@ one in Phase 2.
 - T1 [invariant]: `src-tauri/` (ubilink-core), `app/` (ubilink-app), `desktop/` and `dist/` are not modified, so the core's guards and the Tauri app stay as they were.
 - T2 [invariant]: No crate or crate feature is added, removed or bumped; `desktop-gpui/Cargo.toml` and every Cargo.lock are unchanged and builds run `--locked`.
 - T3 [invariant]: `make verify` passes on the final merged commit, including the Tauri crate and the `dist/` node tests.
-- T4 [boundary]: `desktop-gpui/probes/`, `scripts/probe.py` and `.github/` stay byte-identical to the Phase 0 baseline commit.
+- T4 [boundary]: `desktop-gpui/probes/`, `desktop-gpui/src/automation/`, `scripts/probe.py`, `scripts/probe-helpers/`, `scripts/ocr.swift` and `.github/` stay byte-identical to the Phase 0 baseline commit.
 - S1 [invariant]: The automation channel exists only in builds with the `automation` feature; the release binary contains no automation socket path or verb names.
 - S2 [invariant]: Opening, importing and capturing links go through the core's single validation policy (D16); the GPUI shell adds no opener of its own, and automation builds route opens to the opener sink.
 - O1 [boundary]: The release app idles at < 0.5 % CPU over 60 s and < 80 MB physical footprint, and the stripped release binary is < 20 MB.
@@ -73,14 +73,14 @@ one in Phase 2.
 - RT4 [SPECIFICATION_READY]: The link browser stays within a frame at 5,000 links and is fully keyboard-driven. (parent: RT1; maps_to: U4, B1; reqs: R4, R5, R6, R7, R8; confidence: 0.7; check: {python} scripts/probe.py run link-browser link-browser-filter browser-select browser-drill link-marking)
 - RT5 [SPECIFICATION_READY]: The trusted core, the Tauri app and the dependency set are untouched. (parent: OUTCOME; maps_to: T1, T2, S2; reqs: R15; confidence: 0.9; check: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock)
 - RT6 [SPECIFICATION_READY]: The old app keeps working until Phase 2 removes it. (parent: OUTCOME; maps_to: T3; reqs: R15; confidence: 0.85; check: make verify)
-- RT7 [SPECIFICATION_READY]: Proofs cannot be weakened by the tasks they judge. (parent: OUTCOME; maps_to: T4; reqs: R1, R15; confidence: 0.85; check: git diff --exit-code phase0-done -- desktop-gpui/probes scripts/probe.py .github)
+- RT7 [SPECIFICATION_READY]: Proofs cannot be weakened by the tasks they judge. (parent: OUTCOME; maps_to: T4; reqs: R1, R15; confidence: 0.85; check: git diff --exit-code phase0-done -- desktop-gpui/probes desktop-gpui/src/automation scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github)
 - RT8 [SPECIFICATION_READY]: The automation channel never ships. (parent: OUTCOME; maps_to: S1; reqs: R15; confidence: 0.85; check: {python} scripts/probe.py release-clean)
 - RT9 [SPECIFICATION_READY]: The release app is lighter than a webview shell at idle. (parent: OUTCOME; maps_to: O1; reqs: R15; confidence: 0.6; check: {python} scripts/probe.py run performance)
 - RT10 [SPECIFICATION_READY]: Views are isolated so parallel tasks merge cleanly. (parent: RT1; maps_to: O2; reqs: R1, R4, R9, R10, R14; confidence: 0.75; check: the reviewer compares `git diff --name-only` of the task against its [where:] paths)
 - RT11 [SPECIFICATION_READY]: The app looks native in both appearances and settings changes are durable. (parent: RT1; maps_to: B1, U4; reqs: R11, R12, R13, R14; confidence: 0.7; check: {python} scripts/probe.py run theming graph-roundtrip graph-reset launch-at-login)
 
 ## Requirements
-- R1: The capture view must open in the `capturing` state before the core answers, then render the frontmost resource's name and URI, and must show a message saying what failed and what to do when capture fails. [where: desktop-gpui/src/views/capture.rs] [feature: capture-view] [proof: with the 300 ms delayed capture fixture, `trigger_hotkey capture` shows an a11y "Capturing" node in the first frame, then a11y and OCR show the fixture name and URI; with the failure fixture an a11y error node states the failure and the next step] [parallel-safe]
+- R1: The capture view must open in the `capturing` state before the core answers, then render the frontmost resource's name and URI, and must show a message saying what failed and what to do when capture fails. [where: desktop-gpui/src/views/capture.rs] [feature: capture-view] [proof: with the 1 s delayed capture fixture, `trigger_hotkey capture` shows an a11y "Capturing" node in the first frame, then a11y and OCR show the fixture name and URI; with the failure fixture an a11y error node states the failure and the next step] [parallel-safe]
 - R2: Pressing Enter or ⌘C in the captured state must put the URI on the macOS pasteboard and show a copied confirmation, so copying takes at most two actions from the hotkey. [where: desktop-gpui/src/views/capture.rs] [feature: copy-link] [proof: probe puts a nonce on the pasteboard, then hotkey + `key enter` makes `pbpaste` print the fixture URI with a higher change count and an a11y "Copied" node; repeated with `key cmd-c`] [after: R1]
 - R3: The capture view must list the captured resource's backlinks from the graph in recency order. [where: desktop-gpui/src/views/capture.rs] [feature: backlinks] [proof: with a graph seeded with 3 backlinks at distinct known timestamps and 1 unrelated decoy, the a11y backlink list holds exactly the 3 URIs newest first and the decoy is absent; after the fixture adds a fourth, newer backlink and the view reopens, it appears first] [after: R2]
 - R4: The link browser must render the graph through a virtualised list that builds at most 60 row elements at 5,000 links and shows its first frame in under 100 ms. [where: desktop-gpui/src/views/browser.rs] [feature: link-browser] [proof: with the 5,000-link fixture, a11y holds at most 60 row nodes whose text matches fixture rows, `key end` brings row 5000 into the a11y tree, and metrics.browser_first_frame_ms < 100 timed at present] [parallel-safe]
@@ -99,39 +99,39 @@ one in Phase 2.
 ## Acceptance criteria
 - R1: Headless view-model test `capture_view_states` passes. [cmd: cargo test --locked --manifest-path desktop-gpui/Cargo.toml --features automation capture_view_states]
 - R1: The capture-view probe exits 0. [cmd: {python} scripts/probe.py run capture-view]
-- R1: Nothing under the baseline-protected paths changed. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R1: Nothing under the baseline-protected paths changed. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R2: The copy-link probe exits 0. [cmd: {python} scripts/probe.py run copy-link]
-- R2: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R2: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R3: The backlinks probe exits 0. [cmd: {python} scripts/probe.py run backlinks]
-- R3: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R3: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R4: Headless test `browser_virtualises_rows` passes. [cmd: cargo test --locked --manifest-path desktop-gpui/Cargo.toml --features automation browser_virtualises_rows]
 - R4: The link-browser probe exits 0. [cmd: {python} scripts/probe.py run link-browser]
-- R4: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R4: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R5: Headless test `fuzzy_filter_ranks_subsequence` passes. [cmd: cargo test --locked --manifest-path desktop-gpui/Cargo.toml --features automation fuzzy_filter_ranks_subsequence]
 - R5: The link-browser-filter probe exits 0. [cmd: {python} scripts/probe.py run link-browser-filter]
-- R5: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R5: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R6: The browser-select probe exits 0. [cmd: {python} scripts/probe.py run browser-select]
-- R6: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R6: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R7: The browser-drill probe exits 0. [cmd: {python} scripts/probe.py run browser-drill]
-- R7: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R7: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R8: The link-marking probe exits 0. [cmd: {python} scripts/probe.py run link-marking]
-- R8: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R8: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R9: The onboarding probe exits 0. [cmd: {python} scripts/probe.py run onboarding]
-- R9: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R9: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R10: The settings-adapters probe exits 0. [cmd: {python} scripts/probe.py run settings-adapters]
-- R10: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R10: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R11: The graph-roundtrip probe exits 0. [cmd: {python} scripts/probe.py run graph-roundtrip]
-- R11: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R11: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R12: The graph-reset probe exits 0. [cmd: {python} scripts/probe.py run graph-reset]
-- R12: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R12: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R13: The launch-at-login probe exits 0. [cmd: {python} scripts/probe.py run launch-at-login]
-- R13: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R13: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R14: Headless test `theme_matches_tokens` passes. [cmd: cargo test --locked --manifest-path desktop-gpui/Cargo.toml --features automation theme_matches_tokens]
 - R14: The theming probe exits 0. [cmd: {python} scripts/probe.py run theming]
-- R14: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R14: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R15: The performance probe exits 0 and agrees with docs/PERFORMANCE.md. [cmd: {python} scripts/probe.py run performance]
 - R15: The release build carries no automation channel. [cmd: {python} scripts/probe.py release-clean]
-- R15: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py .github]
+- R15: The baseline guard passes. [cmd: git diff --exit-code phase0-done -- src-tauri app desktop dist desktop-gpui/probes desktop-gpui/src/automation desktop-gpui/Cargo.toml desktop-gpui/Cargo.lock scripts/probe.py scripts/probe-helpers scripts/ocr.swift .github]
 - R15: The full gate passes. [cmd: make verify]
 
 ## Verification
@@ -160,6 +160,6 @@ Recommended: OPT-A — the only Medium option that satisfies every required trut
 - I2: Added TN3/TN4 after the pre-mortem (proof needs automation; parallel tasks collide); pinned probes as Phase 0 artifacts (T4).
 - I3: Serialised same-file tasks after the wave plan showed parallel edits to one file.
 - I4: Jev scored every proof < 0.7; rebuilt proofs on the in-process accessibility tree plus OCR and pixels, split navigation, export/reset and budget, moved hotkey and dismiss proofs to Phase 0 and into R15's regression run, pinned the guard to a baseline commit, and kept the full gate for R15 and integration.
-- I5: Jev re-scored proofs 0.23–0.67; tightened R3 (timestamps), R5 (20-query golden table) and R14 (narrowed to colours, three samples per view and mode). Post-convergence amendment from Phase 0 Task 11 (not a new loop pass): R8 uses ⌘L (Tauri parity — plain L types into the filter; ruling R-n); R13 proven through a fixture-fed SMAppService seam (ruling R-o).
+- I5: Jev re-scored proofs 0.23–0.67; tightened R3 (timestamps), R5 (20-query golden table) and R14 (narrowed to colours, three samples per view and mode). Post-convergence amendments from Phase 0 Task 11 (not new loop passes): the guard and T4 also protect desktop-gpui/src/automation, scripts/probe-helpers and scripts/ocr.swift; R1's delayed capture is 1 s so the capturing state is observable without flake; R8 uses ⌘L (Tauri parity — plain L types into the filter; ruling R-n); R13 proven through a fixture-fed SMAppService seam (ruling R-o).
 
 ## Open questions
