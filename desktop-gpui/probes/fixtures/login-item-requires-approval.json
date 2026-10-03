@@ -1,0 +1,5 @@
+{
+  "status": "not_registered",
+  "on_register": "requires_approval",
+  "explanation": "macOS needs your approval: turn on Ubilink in System Settings > General > Login Items."
+}

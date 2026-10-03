@@ -1846,6 +1846,23 @@ class ListCommand(unittest.TestCase):
         self.assertEqual(probe.first_problem_line(out), "FAIL  s [2/9] see ...")
 
 
+class LoginItemFixtures(unittest.TestCase):
+    def test_validator(self):
+        ok = {"status": "not_registered", "on_register": "not_found",
+              "explanation": "macOS cannot find this copy; move it to Applications and retry."}
+        self.assertEqual(probe._validate_login_item(ok, "not_found"), [])
+        for bad in (dict(ok, status="enabled"), dict(ok, explanation="nope"), dict(ok, calls=[]),
+                    {"status": "not_registered", "on_register": "not_found"}):
+            with self.subTest(bad=bad):
+                self.assertTrue(probe._validate_login_item(bad, "not_found"))
+        self.assertTrue(probe._validate_login_item(
+            {"status": "not_registered", "on_register": "enabled", "explanation": "x y z a b c"}, "enabled"))
+
+    def test_kind_is_one_the_app_accepts(self):
+        src = (probe.REPO_ROOT / "desktop-gpui" / "src" / "automation" / "protocol.rs").read_text()
+        self.assertIn('(Fixture::LoginItem, "login_item")', src)
+
+
 class CaptureSubjectFixture(unittest.TestCase):
     def test_subject_capture_must_be_the_backlinks_subject(self):
         good = {"name": "Subject Note", "uri": probe._BACKLINKS_SUBJECT_URI, "app": "Safari"}

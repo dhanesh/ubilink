@@ -126,12 +126,13 @@ pub fn route_named(name: &str) -> Option<Route> {
 
 /// `load_fixture`'s kind names. Kept here rather than on [`Fixture`] so the names exist
 /// only in automation builds (TN1).
-pub const FIXTURE_NAMES: [(Fixture, &str); 5] = [
+pub const FIXTURE_NAMES: [(Fixture, &str); 6] = [
     (Fixture::Capture, "capture"),
     (Fixture::Permission, "permission"),
     (Fixture::GraphDir, "graph_dir"),
     (Fixture::ExportPath, "export_path"),
     (Fixture::ImportPath, "import_path"),
+    (Fixture::LoginItem, "login_item"),
 ];
 
 pub fn fixture_name(kind: Fixture) -> &'static str {

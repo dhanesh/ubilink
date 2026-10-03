@@ -282,3 +282,30 @@ sorted case-insensitively by `app` (matching `list_plugins`'s own sort):
 
 `builtin: true` rows (`Finder`, `Safari`) can never be toggled off; the test for
 R10 (every adapter togglable + persisted) runs against the other eight.
+
+## `login-item-*.json` (R13)
+
+`load_fixture {kind: "login_item", path}`: the login-item store the automation
+build's launch-at-login seam (`desktop-gpui/src/login_item.rs`, spec D6, ruling R-o)
+uses instead of `SMAppService.mainApp`, so no probe ever registers a real login item.
+
+```json
+{ "status": "not_registered",
+  "on_register": "enabled" | "requires_approval" | "not_found",
+  "explanation": "<sentence: what the status means and what to do>" }
+```
+
+- `status`: what the seam reports now. Every committed file starts `not_registered`.
+- `on_register`: the status a register call moves it to; unregister always moves it
+  to `not_registered`.
+- `explanation`: required for `requires_approval` and `not_found` (the seam reports
+  it with that status, the view shows it verbatim, U3); absent for `enabled`.
+- `calls` is never committed: the seam writes the new `status` and appends
+  `"register"`/`"unregister"` to `calls` in the instance's private copy, so the status
+  survives a restart and a probe reads back which calls the view made.
+
+| file | register leads to |
+|---|---|
+| `login-item-enabled.json` | `enabled` |
+| `login-item-requires-approval.json` | `requires_approval`, with an explanation naming System Settings > General > Login Items |
+| `login-item-not-found.json` | `not_found`, with an explanation saying to move the app to Applications |
