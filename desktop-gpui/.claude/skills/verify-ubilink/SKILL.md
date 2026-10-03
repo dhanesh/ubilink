@@ -167,6 +167,63 @@ The JSON also reports `screen_recording` (needed only for screenshots) and the c
 
 ## Drive
 
+There are two ways to drive:
+
+- **`scenario` is the acceptance proof, and it is the preferred one.** It runs a frozen
+  scenario from `desktop-gpui/probes/<name>.json` through probe.py's own engine
+  (`run_scenario`, the step runners, the focus-theft retry, the tally) against your
+  instance. Every requirement the scenario checks (all golden queries, all latency
+  triggers with their p99, every adapter) is checked; nothing is sampled. Use it for
+  anything a feature map entry names a scenario for.
+- **`call` is for ad-hoc observation** and for behaviour no scenario covers. A
+  hand-written drive samples a requirement, so it is never a substitute for the
+  scenario that judges it.
+
+```sh
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name shell
+echo "exit $?"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name shell --instances 2
+```
+
+What `scenario` does:
+
+- **Before the run.** It checks the instance is yours and the build is this checkout's
+  clean `HEAD` (exit 2 otherwise: commit, stop, launch again). It compiles probe.py's
+  helpers and builds the release binary if a step needs it, before taking the desktop
+  lock, as `probe.py run` does. Then it holds the desktop lock and keeps the display
+  awake for the whole run, refuses a locked screen (exit 3), and refreshes your lease
+  heartbeat at every step.
+- **Your instance.** It replaces your instance's process and temp root with a fresh one
+  under the same name, binary and claim, because every acceptance scenario starts from
+  a fresh instance. It applies the scenario's `setup` (files, graph, fixtures), then
+  runs the steps. A `restart` step restarts your instance in place: the data dir is
+  kept, fixtures are replayed, and the new pid is written to your claim. When the
+  scenario ends, your instance is still running and its claim names the live process.
+- **Extra instances.** `--instances N` runs the scenario on your instance plus N-1 extra
+  instances (`<instance>-2`, ...), each claimed by you and added to your lease, and adds
+  probe.py's side-by-side isolation checks. The extra instances are stopped and their
+  claims removed when the command ends. A `release_budget` step starts and stops its own
+  release-build instance inside the step.
+- **Artifacts, all in `$OUT/<name>/`:**
+  - `transcript.txt`: probe.py's report, one PASS / FAIL / ENV-BLOCKED / RETRY line per
+    step
+  - one `<instance>-NN-<kind>.json` per step run: the step, its verdict, its detail or
+    expected/actual, every request and response it exchanged with the app (state, a11y
+    trees, metrics, ...) and the values saved so far (budget measurements)
+  - screenshots and OCR/pixel captures as `<instance>-NN-...png`
+  - `result.json`: scenario, requirement, `sha`, `exit`, `verdict`, counts, per-step
+    verdicts, the saved measurements and the artifact list
+
+  The directory is emptied at the start of each run of that scenario.
+- **Exit codes:** exactly probe.py's. 0 every step passed; 1 a product FAIL; 2 a
+  scenario or harness error; 3 only environment blocks (including focus stolen twice).
+  With several `--name`s, an error beats a failure beats a block.
+- **Read-only input:** the scenario files are only read. `--name` takes a name, never a
+  path.
+
+### Ad-hoc drives with `call`
+
 **One proof is one `call`**, and that includes its side-effect checks. A call:
 
 1. holds probe.py's desktop lock throughout and keeps the display awake (the key window and pasteboard belong to the
@@ -327,8 +384,26 @@ Check side effects inside the same `call` as the action:
   (`ubilink-graph.sqlite`, `plugins-state.json`) and fixture files the app rewrites
 - `pasteboard:{...}`: the pasteboard
 
-Once the drive has passed, record each proof. If it failed, record `--result fail` with
-what you saw:
+Record a scenario run by pinning its `result.json` and every artifact it lists. Use
+`--result pass` only when its `exit` is 0; otherwise record `--result fail` with the
+failing step from the transcript:
+
+```sh
+R="$OUT/shell"
+python3 "$H" doctor --instance "$INSTANCE"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature shell \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario shell (desktop-gpui/probes/shell.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "as asserted by the scenario's steps (opened sink, data_dir); see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
+
+`result.json`'s `sha` must equal the evidence record's commit. Both come from the same
+checkout: the recorder reads `--worktree "$WT"`, and `scenario` reads the same checkout.
+Record one scenario per feature record, because the recorder flattens artifacts by file
+name. For an ad-hoc `call`, once the drive has passed, record each proof the same way.
+If it failed, record `--result fail` with what you saw:
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
