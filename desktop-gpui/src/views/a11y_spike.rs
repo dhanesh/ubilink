@@ -141,13 +141,6 @@ impl A11ySpikeView {
 
 impl Render for A11ySpikeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.dialog_opened {
-            self.dialog_opened = true;
-            // The real widget (module doc): `WindowState` mounts it above this
-            // view's own content, so it is never a child of the div tree below.
-            window.open_dialog(cx, |dialog, _, _| dialog.title(text!("Spike dialog")));
-        }
-
         let list = self
             .list
             .get_or_insert_with(|| {
@@ -169,6 +162,20 @@ impl Render for A11ySpikeView {
                 })
             })
             .clone();
+
+        if !self.dialog_opened {
+            self.dialog_opened = true;
+            // Task 11 (coordinator ruling on concern 5): the Input holds keyboard
+            // focus from the first frame, the way Phase 1's browser filter must.
+            // GPUI dispatches keys from the focused element up its dispatch path, so
+            // with nothing focused neither typed text nor gpui-base Root's Tab
+            // binding (key context "Root") is reached. Focused before the dialog
+            // opens, so closing the dialog hands focus back to it.
+            input.update(cx, |state, cx| state.focus(window, cx));
+            // The real widget (module doc): `WindowState` mounts it above this
+            // view's own content, so it is never a child of the div tree below.
+            window.open_dialog(cx, |dialog, _, _| dialog.title(text!("Spike dialog")));
+        }
 
         let theme = cx.theme();
         div()

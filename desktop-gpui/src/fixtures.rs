@@ -27,6 +27,10 @@ pub enum Fixture {
     ExportPath,
     /// The path an import (open) dialog would return.
     ImportPath,
+    /// The login-item status store `SMAppService.mainApp` would be (Phase 1 R13,
+    /// spec D6): read and updated by [`crate::login_item`]'s seam, so a probe never
+    /// registers a real login item on the host (O4).
+    LoginItem,
 }
 
 /// The fixture path for `kind`, if an automation probe loaded one. Always `None` in a

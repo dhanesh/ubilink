@@ -809,6 +809,31 @@ def _validate_ranking_golden(doc, corpus_items: list) -> list:
     return issues
 
 
+_LOGIN_ITEM_STATUSES = {"not_registered", "enabled", "requires_approval", "not_found"}
+
+
+def _validate_login_item(doc, on_register: str) -> list:
+    # R13 (spec D6, ruling R-o): the automation seam's login-item store
+    # (desktop-gpui/src/login_item.rs). A committed fixture starts unregistered and
+    # has no `calls` (the seam appends them to the instance's copy); requires-approval
+    # and not-found carry the explanation the view must show (U3).
+    issues = []
+    allowed = {"status", "on_register", "explanation"}
+    if set(doc) - allowed:
+        issues.append(f"unexpected keys {sorted(set(doc) - allowed)} (calls are written by the seam, never committed)")
+    if doc.get("status") != "not_registered":
+        issues.append("status must start as not_registered")
+    if doc.get("on_register") != on_register:
+        issues.append(f"on_register must be {on_register!r}")
+    needs = on_register in ("requires_approval", "not_found")
+    exp = doc.get("explanation")
+    if needs and (not isinstance(exp, str) or len(exp.split()) < 6):
+        issues.append("explanation must say what the status means and what to do (U3)")
+    if not needs and "explanation" in doc:
+        issues.append(f"{on_register} carries no explanation")
+    return issues
+
+
 # Fixtures whose top level is a JSON list rather than an object.
 _LIST_FIXTURES = {"adapters.json", "ranking-golden.json"}
 
@@ -825,6 +850,9 @@ _FIXTURE_VALIDATORS = {
     "permissions-all-granted.json": _validate_permissions_all_granted,
     "adapters.json": _validate_adapters,
     "graph-empty.json": _validate_graph_empty,
+    "login-item-enabled.json": lambda d: _validate_login_item(d, "enabled"),
+    "login-item-requires-approval.json": lambda d: _validate_login_item(d, "requires_approval"),
+    "login-item-not-found.json": lambda d: _validate_login_item(d, "not_found"),
 }
 
 # Every fixture `--check` walks, in the order desktop-gpui/probes/fixtures/README.md
@@ -844,6 +872,9 @@ FIXTURE_FILES = [
     "permissions-all-granted.json",
     "adapters.json",
     "graph-empty.json",
+    "login-item-enabled.json",
+    "login-item-requires-approval.json",
+    "login-item-not-found.json",
 ]
 
 

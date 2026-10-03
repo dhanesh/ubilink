@@ -15,6 +15,7 @@
 #[cfg(feature = "automation")]
 mod automation;
 mod fixtures;
+mod login_item;
 mod opener;
 mod paths;
 mod shell;

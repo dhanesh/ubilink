@@ -1,0 +1,5 @@
+{
+  "status": "not_registered",
+  "on_register": "not_found",
+  "explanation": "macOS cannot find this copy of Ubilink as a login item. Move Ubilink to Applications, open it from there and try again."
+}
