@@ -862,7 +862,9 @@ class EnvBlockedIsNotAFail(unittest.TestCase):
         t.errors = 1
         self.assertEqual(t.exit_code(), 2)
 
-    def test_run_steps_reports_blocked_and_continues(self):
+    def test_run_steps_reports_blocked_and_skips_the_rest(self):
+        """T8: after an ENV-BLOCKED step, later steps are SKIPPED, not run: their GUI
+        state is unknown, so a later FAIL would be the environment's."""
         class FakeInst:
             def request(self, verb, args):
                 return {"ok": True, "result": {"x": 1}}
@@ -877,9 +879,45 @@ class EnvBlockedIsNotAFail(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 probe.run_steps(ctx, tally, "t")
             self.assertIn("ENV-BLOCKED t [1/2]", out.getvalue())
+            self.assertIn("SKIPPED t: steps 2-2 (1) not run after ENV-BLOCKED step 1", out.getvalue())
         finally:
             probe.quartz = saved
-        self.assertEqual((tally.blocked, tally.passed, tally.failed), (1, 1, 0))
+        self.assertEqual((tally.blocked, tally.passed, tally.failed, tally.skipped), (1, 0, 0, 1))
+        self.assertEqual(tally.exit_code(), 3)
+
+    def test_a_step_that_would_fail_after_a_block_is_skipped_not_a_fail(self):
+        """T8's case: the step after the blocked one would FAIL (the state it reads is
+        wrong because of the environment); the run must exit 3, not 1."""
+        class FakeInst:
+            def request(self, verb, args):
+                return {"ok": True, "result": {"shell": {"visible": False}}}
+
+        sc = {"steps": [{"warp_cursor": 7},
+                        {"call": "state", "expect": {"data_dir": "/never"}},
+                        {"call": "state", "expect": {"data_dir": "/never"}}]}
+        saved = probe.quartz
+        probe.quartz = lambda *a: [{"id": 1, "main": True, "bounds": {"x": 0, "y": 0, "w": 10, "h": 10}}]
+        try:
+            ctx = probe.RunContext(FakeInst(), sc)
+            ctx.tokens = lambda: {}
+            tally = probe.Tally()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                ok = probe.run_steps(ctx, tally, "t")
+        finally:
+            probe.quartz = saved
+        self.assertFalse(ok)
+        self.assertNotIn("FAIL ", out.getvalue())
+        self.assertEqual((tally.blocked, tally.failed, tally.skipped), (1, 0, 2))
+        self.assertEqual(tally.exit_code(), 3)
+
+    def test_skip_after_blocked_counts_only_later_steps(self):
+        tally = probe.Tally()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            probe.skip_after_blocked(tally, "t", 4, 4)
+        self.assertEqual((tally.skipped, out.getvalue()), (0, ""), "the last step: nothing left")
+        with contextlib.redirect_stdout(io.StringIO()):
+            probe.skip_after_blocked(tally, "t", 2, 5)
+        self.assertEqual(tally.skipped, 3)
 
 
 class UnattendedGuards(unittest.TestCase):
@@ -1030,8 +1068,14 @@ class DesktopLock(unittest.TestCase):
             proc = subprocess.Popen([sys.executable, "-c", holder], stdout=subprocess.PIPE, text=True)
             try:
                 self.assertEqual(proc.stdout.readline().strip(), "held")
-                with self.assertRaisesRegex(probe.ProbeError, "still held"):
+                # I8: a desktop held past the wait is ENV-BLOCKED "desktop busy"
+                # (exit 3), not a harness error.
+                with self.assertRaisesRegex(probe.EnvBlocked, "desktop busy.*still held"):
                     with probe.desktop_lock(lock, timeout=0.3, out=lambda m: None):
+                        pass
+                # A plain file_lock without `blocked` keeps raising ProbeError.
+                with self.assertRaisesRegex(probe.ProbeError, "still held"):
+                    with probe.file_lock(lock, "x", timeout=0.3, out=lambda m: None):
                         pass
                 # Once the holder exits the lock is free again.
                 proc.wait(timeout=10)
@@ -1964,3 +2008,248 @@ class CaptureSubjectFixture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LockWaitBudget(unittest.TestCase):
+    """I8: default lock waits end by _WAIT_DEADLINE_S after process start, inside the
+    conductor's 600 s per-command limit."""
+
+    def test_default_timeout_counts_down_from_process_start(self):
+        start = probe._PROCESS_START
+        self.assertLessEqual(probe._WAIT_DEADLINE_S, 480)
+        self.assertEqual(probe.default_lock_timeout(start), probe._WAIT_DEADLINE_S)
+        self.assertEqual(probe.default_lock_timeout(start + 100), probe._WAIT_DEADLINE_S - 100)
+        self.assertEqual(probe.default_lock_timeout(start + 10_000), 1.0, "never below 1 s")
+
+
+def _fake_cargo(bindir: Path, body: str) -> Path:
+    fake = bindir / "cargo"
+    fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(body))
+    fake.chmod(0o755)
+    return fake
+
+
+class _FakeCargoEnv:
+    """PATH with a fake cargo first, CACHE_ROOT in a temp dir, no CARGO_TARGET_DIR."""
+
+    def __init__(self, d: Path):
+        self.d = d
+
+    def __enter__(self):
+        self.saved = (probe.CACHE_ROOT, os.environ.get("PATH"), os.environ.get("CARGO_TARGET_DIR"),
+                      probe._GPUI_SOURCE_TARGET)
+        probe.CACHE_ROOT = self.d / "cache"
+        probe._GPUI_SOURCE_TARGET = self.d / "no-target"
+        os.environ["PATH"] = f"{self.d / 'bin'}:{os.environ['PATH']}"
+        os.environ.pop("CARGO_TARGET_DIR", None)
+        return self
+
+    def __exit__(self, *exc):
+        probe.CACHE_ROOT, path, ctd, probe._GPUI_SOURCE_TARGET = self.saved
+        os.environ["PATH"] = path
+        if ctd is None:
+            os.environ.pop("CARGO_TARGET_DIR", None)
+        else:
+            os.environ["CARGO_TARGET_DIR"] = ctd
+        return False
+
+
+class SharedTarget(unittest.TestCase):
+    def test_honours_an_exported_cargo_target_dir(self):
+        saved = os.environ.get("CARGO_TARGET_DIR")
+        try:
+            os.environ["CARGO_TARGET_DIR"] = "/warm/cache"
+            self.assertEqual(probe.shared_target_dir(), Path("/warm/cache"))
+            os.environ["CARGO_TARGET_DIR"] = "rel/t"
+            self.assertEqual(probe.shared_target_dir(), (probe.REPO_ROOT / "rel/t").resolve())
+            os.environ.pop("CARGO_TARGET_DIR")
+            self.assertEqual(probe.shared_target_dir(), probe.CACHE_ROOT / "target")
+        finally:
+            if saved is None:
+                os.environ.pop("CARGO_TARGET_DIR", None)
+            else:
+                os.environ["CARGO_TARGET_DIR"] = saved
+
+
+class ReleaseCleanSharedCache(unittest.TestCase):
+    """C3: release-clean builds through the shared target (CARGO_TARGET_DIR), takes
+    cargo's reported executable, and checks copies taken under the target lock."""
+
+    def _run(self, leak: bool):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "bin").mkdir()
+            log = d / "cargo.log"
+            tokens = list(probe._AUTOMATION_TOKENS)
+            _fake_cargo(d / "bin", f"""\
+                import fcntl, json, os, sys
+                auto = "automation" in sys.argv
+                target = os.environ["CARGO_TARGET_DIR"]
+                fd = os.open({str(d / 'cache' / 'target.lock')!r}, os.O_RDWR)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); held = "free"
+                except BlockingIOError:
+                    held = "held"
+                open({str(log)!r}, "a").write(f"{{held}} {{target}} {{auto}}\\n")
+                os.makedirs(os.path.join(target, "release"), exist_ok=True)
+                # Both builds write the SAME path, as real cargo does.
+                exe = os.path.join(target, "release", "ubilink-next")
+                words = {tokens!r} if (auto or {leak!r}) else ["clean"]
+                open(exe, "w").write("\\n".join(words) + "\\n")
+                print(json.dumps({{"reason": "compiler-artifact",
+                                  "target": {{"name": "ubilink-next", "kind": ["bin"]}},
+                                  "executable": exe}}))
+            """)
+            with _FakeCargoEnv(d):
+                os.environ["CARGO_TARGET_DIR"] = str(d / "warm")
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = probe.cmd_release_clean(argparse.Namespace(skip_bite_check=False))
+            lines = log.read_text().splitlines()
+            return code, out.getvalue(), lines, d
+
+    def test_clean_release_passes_from_the_shared_target(self):
+        code, out, lines, d = self._run(leak=False)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(lines, [f"held {d / 'warm'} False", f"held {d / 'warm'} True"],
+                         "two builds, both in the exported target, both under the lock")
+        self.assertIn("PASS: release-clean", out)
+
+    def test_a_leaking_release_build_fails(self):
+        code, out, _, _ = self._run(leak=True)
+        self.assertEqual(code, 1)
+        self.assertIn("release binary contains automation token(s)", out)
+
+
+class CargoTestParsing(unittest.TestCase):
+    LIST = textwrap.dedent("""\
+        views::capture::tests::capture_view_states: test
+        views::capture::tests::capture_view_states_extra: test
+        theme::tests::theme_matches_tokens: test
+        bench_x: benchmark
+
+        3 tests, 1 benchmark
+    """)
+
+    def test_list_and_select_are_exact(self):
+        paths = probe.parse_test_list(self.LIST)
+        self.assertEqual(len(paths), 3)
+        self.assertEqual(probe.select_tests(paths, "capture_view_states"),
+                         ["views::capture::tests::capture_view_states"])
+        self.assertEqual(probe.select_tests(paths, "capture_view"), [], "no substring match")
+        self.assertEqual(probe.select_tests(paths, "theme::tests::theme_matches_tokens"),
+                         ["theme::tests::theme_matches_tokens"])
+        self.assertEqual(probe.select_tests(paths, "tests::theme_matches_tokens"), [])
+
+    def test_results_and_verdict(self):
+        res = probe.parse_test_results(textwrap.dedent("""\
+            running 2 tests
+            test a::b ... ok
+            test a::c ... FAILED
+            test a::d ... ignored, slow
+        """))
+        self.assertEqual(res, {"a::b": "ok", "a::c": "FAILED", "a::d": "ignored"})
+        v = probe.cargo_test_verdict
+        self.assertEqual(v("b", ["a::b"], res, 0)[0], 0)
+        self.assertEqual(v("x", [], {}, 0)[0], 1, "no such test is a FAIL")
+        self.assertIn("no test named", v("x", [], {}, 0)[1])
+        self.assertEqual(v("c", ["a::c"], res, 101)[0], 1)
+        self.assertEqual(v("d", ["a::d"], res, 0)[0], 1, "ignored is not a pass")
+        self.assertEqual(v("e", ["a::e"], res, 0)[0], 1, "selected but did not run")
+        self.assertEqual(v("b", ["a::b"], res, 101)[0], 1, "cargo's own failure counts")
+
+
+class CargoTestCommand(unittest.TestCase):
+    """I4 end to end with a fake cargo: no match exits 1, a passing test 0, a build
+    failure 2; the run uses --exact with the selected full path."""
+
+    def _run(self, name, build_fails=False):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "bin").mkdir()
+            log = d / "argv.log"
+            _fake_cargo(d / "bin", f"""\
+                import json, sys
+                open({str(log)!r}, "a").write(json.dumps(sys.argv[1:]) + "\\n")
+                if {build_fails!r}:
+                    sys.exit(101)
+                if "--list" in sys.argv:
+                    print("views::capture::tests::capture_view_states: test")
+                    print("views::tests::router_registers_four_views: test")
+                else:
+                    for p in sys.argv[sys.argv.index("--exact") + 1:]:
+                        print(f"test {{p}} ... ok")
+            """)
+            with _FakeCargoEnv(d):
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = probe.main(["cargo-test", name])
+            calls = [json.loads(x) for x in log.read_text().splitlines()]
+            return code, out.getvalue(), calls
+
+    def test_no_match_is_a_fail(self):
+        code, out, calls = self._run("capture_view")
+        self.assertEqual(code, 1, out)
+        self.assertIn("no test named 'capture_view'", out)
+        self.assertEqual(len(calls), 1, "nothing is run when nothing matches")
+
+    def test_a_real_test_passes_and_runs_exactly(self):
+        code, out, calls = self._run("router_registers_four_views")
+        self.assertEqual(code, 0, out)
+        self.assertIn("--features", calls[0])
+        self.assertIn("automation", calls[0])
+        self.assertEqual(calls[1][-2:], ["--exact", "views::tests::router_registers_four_views"])
+
+    def test_build_failure_is_exit_2(self):
+        code, out, _ = self._run("x", build_fails=True)
+        self.assertEqual(code, 2, out)
+
+
+class OrphanReaper(unittest.TestCase):
+    """I7: instances whose owning probe was SIGKILLed are reaped; live owners' and
+    the harness's accounted-for instances are kept."""
+
+    def test_decisions(self):
+        d = probe.reap_decision
+        probe_rec = {"kind": "probe", "owner_pid": 1, "pid": 2}
+        self.assertEqual(d(probe_rec, True, True, None, False), "keep")
+        self.assertEqual(d(probe_rec, True, False, None, False), "reap")
+        self.assertEqual(d(probe_rec, False, False, None, False), "clean")
+        self.assertEqual(d({"kind": "run", "owner_pid": 1}, False, False, None, False), "clean")
+        h = {"kind": "harness", "claim": "/x/instance.json", "pid": 2}
+        self.assertEqual(d(h, False, False, None, False), "keep", "harness roots are the harness's")
+        self.assertEqual(d(h, True, False, None, False), "reap", "claim gone: nobody accounts for it")
+        self.assertEqual(d(h, True, False, {"status": "running", "pid": 2}, False), "keep")
+        self.assertEqual(d(h, True, False, {"status": "running", "pid": 9}, True), "reap",
+                         "the claim names another live process")
+        self.assertEqual(d(h, True, False, {"status": "running", "pid": 9}, False), "keep",
+                         "a restart in progress: the claim still names the old, dead pid")
+        self.assertEqual(d(h, True, False, {"status": "launching", "launcher_pid": 5}, False),
+                         "reap", "a launch killed before it finished")
+        self.assertEqual(d(h, True, True, {"status": "launching", "launcher_pid": 5}, False), "keep")
+
+    def test_reaps_a_live_orphan_and_keeps_a_live_owners_instance(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dead = subprocess.Popen(["/usr/bin/true"])
+            dead.wait()
+            orphan = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+            kept = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+            try:
+                for name, owner, proc in (("ubprobe-orphan", dead.pid, orphan),
+                                          ("ubprobe-kept", os.getpid(), kept)):
+                    (d / name).mkdir()
+                    probe.write_owner(d / name, {"kind": "probe", "owner_pid": owner,
+                                                 "pid": proc.pid, "binary": "/bin/sleep"})
+                (d / "ubprobe-run-x").mkdir()
+                probe.write_owner(d / "ubprobe-run-x", {"kind": "run", "owner_pid": dead.pid})
+                acted = probe.reap_orphans(d, out=lambda m: None)
+                self.assertEqual(sorted((r.name, w) for r, w, _ in acted),
+                                 [("ubprobe-orphan", "reap"), ("ubprobe-run-x", "clean")])
+                self.assertIsNotNone(orphan.wait(timeout=10), "the orphan was terminated")
+                self.assertIsNone(kept.poll(), "a live owner's instance is left alone")
+                self.assertFalse((d / "ubprobe-orphan").exists())
+                self.assertTrue((d / "ubprobe-kept").exists())
+            finally:
+                for p in (orphan, kept):
+                    if p.poll() is None:
+                        p.kill()
+                        p.wait()

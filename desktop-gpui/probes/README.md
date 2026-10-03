@@ -19,7 +19,9 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
 
 1. Builds the automation binary once with
    `cargo build --locked --message-format=json-render-diagnostics --features automation --manifest-path desktop-gpui/Cargo.toml`
-   using `CARGO_TARGET_DIR=~/Library/Caches/ubilink-probe/target`. The first time
+   using the shared warm target: an exported `CARGO_TARGET_DIR` if set (the factory
+   conductor exports one for every clone, ruling R-ad), else
+   `CARGO_TARGET_DIR=~/Library/Caches/ubilink-probe/target`. The first time
    that directory is empty, it is seeded from `desktop-gpui/target` with `cp -c -R`,
    an APFS clone that costs seconds and no disk space. Later builds, including ones
    from fresh git clones, only rebuild the path crates.
@@ -42,7 +44,11 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
 3. Takes the **desktop lock**, an exclusive `flock` on
    `~/Library/Caches/ubilink-probe/desktop.lock` (spec O4). The pasteboard, the key
    window and the cursor are shared by the whole desktop, so two probes never run
-   at once. A second probe waits, up to 15 minutes, and prints who holds the lock.
+   at once. A second probe waits and prints who holds the lock, but every lock wait
+   (this one and the target lock) ends 480 s after the probe started: it then exits 3,
+   ENV-BLOCKED "desktop busy" (or "build cache busy"), inside the factory verifier's
+   600 s per command (final review I8). GUI proofs serialise on one desktop; parallel
+   tasks overlap only their builds.
 4. For each scenario, launches N instances. Each one gets its own temp root under
    `$TMPDIR` (`ubprobe-<instance>-*`) and runs the binary directly, not through
    `open`, with:
@@ -58,7 +64,13 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
    - `UBILINK_SKIP_HOTKEYS=1`, so no real global hotkeys are registered (O4)
    - a private copy of `probes/fixtures/` at `<root>/fixtures`
 
-   Any `UBILINK_*` variable exported in your shell is dropped first.
+   Any `UBILINK_*` variable exported in your shell is dropped first. Each root gets
+   an `owner.json` (owning probe pid, instance pid, binary) at launch, and `run`
+   first reaps orphans (final review I7): an instance whose owning probe is dead
+   (SIGKILLed by a verifier timeout, so its teardown never ran) is terminated, after
+   checking its pid still runs the recorded binary, and its root removed. The verify
+   harness's instances outlive their commands by design; they are reaped only when no
+   harness claim accounts for them.
 5. Runs the steps, then stops every instance (SIGTERM, then SIGKILL after 5 s) and
    removes its socket directory and temp root. This also happens on a failure,
    Ctrl-C or SIGTERM.
@@ -249,7 +261,11 @@ trouble from passing for a product failure:
 
 The report has one line per step: `PASS`, `FAIL`, `ENV-BLOCKED` or `ERROR`. A
 failure also prints the expected and actual values. The first FAIL stops that
-instance's steps. ENV-BLOCKED steps are skipped and the run continues.
+instance's steps. The first ENV-BLOCKED step does too: every later step of that
+instance is reported `SKIPPED` (not run, counted as "skipped after env-blocked"),
+because the GUI state it builds on is unknown, so a later failure would be the
+environment's, not the product's (final review minor T8). Other scenarios in the run
+still run.
 
 | Exit | Meaning |
 |---|---|
@@ -262,6 +278,18 @@ With `--instances N` (N ≥ 2), every instance runs all the steps. While all of 
 are still running, the probe then checks that each one answers `state` with its own
 `data_dir`, that each `opened` sink answers, and that pids, sockets, data
 dirs and fixture dirs are all distinct (R8, O1).
+
+## Headless tests (`cargo-test`)
+
+`python3 scripts/probe.py cargo-test <name> [--features ""]` is how Phase 1's
+headless criteria run one named desktop-gpui test (final review I4). It lists the
+crate's tests (`cargo test --locked --features automation -- --list`, the default
+features), selects those whose full path or last `::` segment is exactly `<name>`
+(never a substring), runs only those with `--exact`, and exits 0 only when at least one
+ran and every one reported `ok`. A missing, failed or ignored test exits 1; a build
+failure exits 2; the shared build cache staying busy exits 3. Plain `cargo test
+<filter>` exits 0 when nothing matches, which is why the criteria do not use it. It
+builds in the same shared target, under the same target lock, as `run`.
 
 ## Release-build instances
 
