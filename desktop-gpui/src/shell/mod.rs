@@ -178,7 +178,9 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
 /// layer build (~85 ms vs ~15 ms after) and the main thread's first Core Animation
 /// commit for a window (~130–350 ms before the next run-loop task runs) — not
 /// per-window ones, so keeping a window alive for reuse would not remove them; doing
-/// them once at launch does (first show then ~75 ms, p99 under U1's 200 ms).
+/// them once at launch does (first show then 19–141 ms, p99 under U1's 200 ms).
+/// The prewarm panel hosts a neutral child (`PanelView::prewarm`), never a route's
+/// view, so warming has no side effects once Phase 1's views do real work.
 ///
 /// The panel is placed left of every display, so nothing appears on screen, and is
 /// never key (`focus: false`), so no app loses focus. It is not the shell's panel:
@@ -191,7 +193,7 @@ fn prewarm(cx: &mut App) {
     };
     let (displays, _) = native::displays(mtm);
     let opened = gpui_kit::open_window(panel::prewarm_options(&displays), cx, |window, cx| {
-        cx.new(|cx| panel::PanelView::new(Route::Capture, None, window, cx))
+        cx.new(|cx| panel::PanelView::prewarm(window, cx))
     });
     match opened {
         // The close runs as a foreground task, i.e. after this run-loop turn's Core

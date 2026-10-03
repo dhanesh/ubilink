@@ -2,6 +2,7 @@
  "description": "U1/R5: hotkey-to-first-frame p99 < 200 ms and p50 < 80 ms over 50 triggers (hidden between each), and the panel opens on the display under the cursor",
  "requirement": "R5 (GPUI Phase 0), U1",
  "notes": [
+  "Each trigger is a block (a focus theft re-runs it once, see probes/README.md), so counts are checked with ge: a re-run may add a sample.",
   "Generated: 50 x (trigger_hotkey open, wait for the sample, trigger_hotkey again to toggle it hidden), cycling capture/browser/settings. Each show is a fresh window.",
   "t0 = the shell receives the hotkey (shell::handle_event, where trigger_hotkey and a real Carbon event both enter); t1 = after the first platform frame's present returned (shell/panel.rs arm_first_frame explains the hook).",
   "No a11y call before the loop: activating a window's AccessKit tree makes GPUI build it on every frame for that window's life.",
@@ -25,6 +26,7 @@
   },
   {
    "name": "trigger 1/50 opens",
+   "block": "trigger-1",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -36,14 +38,18 @@
   },
   {
    "name": "trigger 1/50 timed",
+   "block": "trigger-1",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 1
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 1
+    }
    }
   },
   {
    "name": "trigger 1/50 hides",
+   "block": "trigger-1",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -55,6 +61,7 @@
   },
   {
    "name": "trigger 2/50 opens",
+   "block": "trigger-2",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -66,14 +73,18 @@
   },
   {
    "name": "trigger 2/50 timed",
+   "block": "trigger-2",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 2
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 2
+    }
    }
   },
   {
    "name": "trigger 2/50 hides",
+   "block": "trigger-2",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -85,6 +96,7 @@
   },
   {
    "name": "trigger 3/50 opens",
+   "block": "trigger-3",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -96,14 +108,18 @@
   },
   {
    "name": "trigger 3/50 timed",
+   "block": "trigger-3",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 3
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 3
+    }
    }
   },
   {
    "name": "trigger 3/50 hides",
+   "block": "trigger-3",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -115,6 +131,7 @@
   },
   {
    "name": "trigger 4/50 opens",
+   "block": "trigger-4",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -126,14 +143,18 @@
   },
   {
    "name": "trigger 4/50 timed",
+   "block": "trigger-4",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 4
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 4
+    }
    }
   },
   {
    "name": "trigger 4/50 hides",
+   "block": "trigger-4",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -145,6 +166,7 @@
   },
   {
    "name": "trigger 5/50 opens",
+   "block": "trigger-5",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -156,14 +178,18 @@
   },
   {
    "name": "trigger 5/50 timed",
+   "block": "trigger-5",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 5
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 5
+    }
    }
   },
   {
    "name": "trigger 5/50 hides",
+   "block": "trigger-5",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -175,6 +201,7 @@
   },
   {
    "name": "trigger 6/50 opens",
+   "block": "trigger-6",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -186,14 +213,18 @@
   },
   {
    "name": "trigger 6/50 timed",
+   "block": "trigger-6",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 6
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 6
+    }
    }
   },
   {
    "name": "trigger 6/50 hides",
+   "block": "trigger-6",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -205,6 +236,7 @@
   },
   {
    "name": "trigger 7/50 opens",
+   "block": "trigger-7",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -216,14 +248,18 @@
   },
   {
    "name": "trigger 7/50 timed",
+   "block": "trigger-7",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 7
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 7
+    }
    }
   },
   {
    "name": "trigger 7/50 hides",
+   "block": "trigger-7",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -235,6 +271,7 @@
   },
   {
    "name": "trigger 8/50 opens",
+   "block": "trigger-8",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -246,14 +283,18 @@
   },
   {
    "name": "trigger 8/50 timed",
+   "block": "trigger-8",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 8
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 8
+    }
    }
   },
   {
    "name": "trigger 8/50 hides",
+   "block": "trigger-8",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -265,6 +306,7 @@
   },
   {
    "name": "trigger 9/50 opens",
+   "block": "trigger-9",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -276,14 +318,18 @@
   },
   {
    "name": "trigger 9/50 timed",
+   "block": "trigger-9",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 9
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 9
+    }
    }
   },
   {
    "name": "trigger 9/50 hides",
+   "block": "trigger-9",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -295,6 +341,7 @@
   },
   {
    "name": "trigger 10/50 opens",
+   "block": "trigger-10",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -306,14 +353,18 @@
   },
   {
    "name": "trigger 10/50 timed",
+   "block": "trigger-10",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 10
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 10
+    }
    }
   },
   {
    "name": "trigger 10/50 hides",
+   "block": "trigger-10",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -325,6 +376,7 @@
   },
   {
    "name": "trigger 11/50 opens",
+   "block": "trigger-11",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -336,14 +388,18 @@
   },
   {
    "name": "trigger 11/50 timed",
+   "block": "trigger-11",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 11
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 11
+    }
    }
   },
   {
    "name": "trigger 11/50 hides",
+   "block": "trigger-11",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -355,6 +411,7 @@
   },
   {
    "name": "trigger 12/50 opens",
+   "block": "trigger-12",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -366,14 +423,18 @@
   },
   {
    "name": "trigger 12/50 timed",
+   "block": "trigger-12",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 12
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 12
+    }
    }
   },
   {
    "name": "trigger 12/50 hides",
+   "block": "trigger-12",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -385,6 +446,7 @@
   },
   {
    "name": "trigger 13/50 opens",
+   "block": "trigger-13",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -396,14 +458,18 @@
   },
   {
    "name": "trigger 13/50 timed",
+   "block": "trigger-13",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 13
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 13
+    }
    }
   },
   {
    "name": "trigger 13/50 hides",
+   "block": "trigger-13",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -415,6 +481,7 @@
   },
   {
    "name": "trigger 14/50 opens",
+   "block": "trigger-14",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -426,14 +493,18 @@
   },
   {
    "name": "trigger 14/50 timed",
+   "block": "trigger-14",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 14
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 14
+    }
    }
   },
   {
    "name": "trigger 14/50 hides",
+   "block": "trigger-14",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -445,6 +516,7 @@
   },
   {
    "name": "trigger 15/50 opens",
+   "block": "trigger-15",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -456,14 +528,18 @@
   },
   {
    "name": "trigger 15/50 timed",
+   "block": "trigger-15",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 15
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 15
+    }
    }
   },
   {
    "name": "trigger 15/50 hides",
+   "block": "trigger-15",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -475,6 +551,7 @@
   },
   {
    "name": "trigger 16/50 opens",
+   "block": "trigger-16",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -486,14 +563,18 @@
   },
   {
    "name": "trigger 16/50 timed",
+   "block": "trigger-16",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 16
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 16
+    }
    }
   },
   {
    "name": "trigger 16/50 hides",
+   "block": "trigger-16",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -505,6 +586,7 @@
   },
   {
    "name": "trigger 17/50 opens",
+   "block": "trigger-17",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -516,14 +598,18 @@
   },
   {
    "name": "trigger 17/50 timed",
+   "block": "trigger-17",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 17
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 17
+    }
    }
   },
   {
    "name": "trigger 17/50 hides",
+   "block": "trigger-17",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -535,6 +621,7 @@
   },
   {
    "name": "trigger 18/50 opens",
+   "block": "trigger-18",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -546,14 +633,18 @@
   },
   {
    "name": "trigger 18/50 timed",
+   "block": "trigger-18",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 18
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 18
+    }
    }
   },
   {
    "name": "trigger 18/50 hides",
+   "block": "trigger-18",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -565,6 +656,7 @@
   },
   {
    "name": "trigger 19/50 opens",
+   "block": "trigger-19",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -576,14 +668,18 @@
   },
   {
    "name": "trigger 19/50 timed",
+   "block": "trigger-19",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 19
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 19
+    }
    }
   },
   {
    "name": "trigger 19/50 hides",
+   "block": "trigger-19",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -595,6 +691,7 @@
   },
   {
    "name": "trigger 20/50 opens",
+   "block": "trigger-20",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -606,14 +703,18 @@
   },
   {
    "name": "trigger 20/50 timed",
+   "block": "trigger-20",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 20
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 20
+    }
    }
   },
   {
    "name": "trigger 20/50 hides",
+   "block": "trigger-20",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -625,6 +726,7 @@
   },
   {
    "name": "trigger 21/50 opens",
+   "block": "trigger-21",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -636,14 +738,18 @@
   },
   {
    "name": "trigger 21/50 timed",
+   "block": "trigger-21",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 21
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 21
+    }
    }
   },
   {
    "name": "trigger 21/50 hides",
+   "block": "trigger-21",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -655,6 +761,7 @@
   },
   {
    "name": "trigger 22/50 opens",
+   "block": "trigger-22",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -666,14 +773,18 @@
   },
   {
    "name": "trigger 22/50 timed",
+   "block": "trigger-22",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 22
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 22
+    }
    }
   },
   {
    "name": "trigger 22/50 hides",
+   "block": "trigger-22",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -685,6 +796,7 @@
   },
   {
    "name": "trigger 23/50 opens",
+   "block": "trigger-23",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -696,14 +808,18 @@
   },
   {
    "name": "trigger 23/50 timed",
+   "block": "trigger-23",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 23
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 23
+    }
    }
   },
   {
    "name": "trigger 23/50 hides",
+   "block": "trigger-23",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -715,6 +831,7 @@
   },
   {
    "name": "trigger 24/50 opens",
+   "block": "trigger-24",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -726,14 +843,18 @@
   },
   {
    "name": "trigger 24/50 timed",
+   "block": "trigger-24",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 24
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 24
+    }
    }
   },
   {
    "name": "trigger 24/50 hides",
+   "block": "trigger-24",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -745,6 +866,7 @@
   },
   {
    "name": "trigger 25/50 opens",
+   "block": "trigger-25",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -756,14 +878,18 @@
   },
   {
    "name": "trigger 25/50 timed",
+   "block": "trigger-25",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 25
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 25
+    }
    }
   },
   {
    "name": "trigger 25/50 hides",
+   "block": "trigger-25",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -775,6 +901,7 @@
   },
   {
    "name": "trigger 26/50 opens",
+   "block": "trigger-26",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -786,14 +913,18 @@
   },
   {
    "name": "trigger 26/50 timed",
+   "block": "trigger-26",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 26
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 26
+    }
    }
   },
   {
    "name": "trigger 26/50 hides",
+   "block": "trigger-26",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -805,6 +936,7 @@
   },
   {
    "name": "trigger 27/50 opens",
+   "block": "trigger-27",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -816,14 +948,18 @@
   },
   {
    "name": "trigger 27/50 timed",
+   "block": "trigger-27",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 27
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 27
+    }
    }
   },
   {
    "name": "trigger 27/50 hides",
+   "block": "trigger-27",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -835,6 +971,7 @@
   },
   {
    "name": "trigger 28/50 opens",
+   "block": "trigger-28",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -846,14 +983,18 @@
   },
   {
    "name": "trigger 28/50 timed",
+   "block": "trigger-28",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 28
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 28
+    }
    }
   },
   {
    "name": "trigger 28/50 hides",
+   "block": "trigger-28",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -865,6 +1006,7 @@
   },
   {
    "name": "trigger 29/50 opens",
+   "block": "trigger-29",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -876,14 +1018,18 @@
   },
   {
    "name": "trigger 29/50 timed",
+   "block": "trigger-29",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 29
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 29
+    }
    }
   },
   {
    "name": "trigger 29/50 hides",
+   "block": "trigger-29",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -895,6 +1041,7 @@
   },
   {
    "name": "trigger 30/50 opens",
+   "block": "trigger-30",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -906,14 +1053,18 @@
   },
   {
    "name": "trigger 30/50 timed",
+   "block": "trigger-30",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 30
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 30
+    }
    }
   },
   {
    "name": "trigger 30/50 hides",
+   "block": "trigger-30",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -925,6 +1076,7 @@
   },
   {
    "name": "trigger 31/50 opens",
+   "block": "trigger-31",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -936,14 +1088,18 @@
   },
   {
    "name": "trigger 31/50 timed",
+   "block": "trigger-31",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 31
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 31
+    }
    }
   },
   {
    "name": "trigger 31/50 hides",
+   "block": "trigger-31",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -955,6 +1111,7 @@
   },
   {
    "name": "trigger 32/50 opens",
+   "block": "trigger-32",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -966,14 +1123,18 @@
   },
   {
    "name": "trigger 32/50 timed",
+   "block": "trigger-32",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 32
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 32
+    }
    }
   },
   {
    "name": "trigger 32/50 hides",
+   "block": "trigger-32",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -985,6 +1146,7 @@
   },
   {
    "name": "trigger 33/50 opens",
+   "block": "trigger-33",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -996,14 +1158,18 @@
   },
   {
    "name": "trigger 33/50 timed",
+   "block": "trigger-33",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 33
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 33
+    }
    }
   },
   {
    "name": "trigger 33/50 hides",
+   "block": "trigger-33",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1015,6 +1181,7 @@
   },
   {
    "name": "trigger 34/50 opens",
+   "block": "trigger-34",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1026,14 +1193,18 @@
   },
   {
    "name": "trigger 34/50 timed",
+   "block": "trigger-34",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 34
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 34
+    }
    }
   },
   {
    "name": "trigger 34/50 hides",
+   "block": "trigger-34",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1045,6 +1216,7 @@
   },
   {
    "name": "trigger 35/50 opens",
+   "block": "trigger-35",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1056,14 +1228,18 @@
   },
   {
    "name": "trigger 35/50 timed",
+   "block": "trigger-35",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 35
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 35
+    }
    }
   },
   {
    "name": "trigger 35/50 hides",
+   "block": "trigger-35",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1075,6 +1251,7 @@
   },
   {
    "name": "trigger 36/50 opens",
+   "block": "trigger-36",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1086,14 +1263,18 @@
   },
   {
    "name": "trigger 36/50 timed",
+   "block": "trigger-36",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 36
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 36
+    }
    }
   },
   {
    "name": "trigger 36/50 hides",
+   "block": "trigger-36",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1105,6 +1286,7 @@
   },
   {
    "name": "trigger 37/50 opens",
+   "block": "trigger-37",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1116,14 +1298,18 @@
   },
   {
    "name": "trigger 37/50 timed",
+   "block": "trigger-37",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 37
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 37
+    }
    }
   },
   {
    "name": "trigger 37/50 hides",
+   "block": "trigger-37",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1135,6 +1321,7 @@
   },
   {
    "name": "trigger 38/50 opens",
+   "block": "trigger-38",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1146,14 +1333,18 @@
   },
   {
    "name": "trigger 38/50 timed",
+   "block": "trigger-38",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 38
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 38
+    }
    }
   },
   {
    "name": "trigger 38/50 hides",
+   "block": "trigger-38",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1165,6 +1356,7 @@
   },
   {
    "name": "trigger 39/50 opens",
+   "block": "trigger-39",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1176,14 +1368,18 @@
   },
   {
    "name": "trigger 39/50 timed",
+   "block": "trigger-39",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 39
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 39
+    }
    }
   },
   {
    "name": "trigger 39/50 hides",
+   "block": "trigger-39",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1195,6 +1391,7 @@
   },
   {
    "name": "trigger 40/50 opens",
+   "block": "trigger-40",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1206,14 +1403,18 @@
   },
   {
    "name": "trigger 40/50 timed",
+   "block": "trigger-40",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 40
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 40
+    }
    }
   },
   {
    "name": "trigger 40/50 hides",
+   "block": "trigger-40",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1225,6 +1426,7 @@
   },
   {
    "name": "trigger 41/50 opens",
+   "block": "trigger-41",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1236,14 +1438,18 @@
   },
   {
    "name": "trigger 41/50 timed",
+   "block": "trigger-41",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 41
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 41
+    }
    }
   },
   {
    "name": "trigger 41/50 hides",
+   "block": "trigger-41",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1255,6 +1461,7 @@
   },
   {
    "name": "trigger 42/50 opens",
+   "block": "trigger-42",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1266,14 +1473,18 @@
   },
   {
    "name": "trigger 42/50 timed",
+   "block": "trigger-42",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 42
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 42
+    }
    }
   },
   {
    "name": "trigger 42/50 hides",
+   "block": "trigger-42",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1285,6 +1496,7 @@
   },
   {
    "name": "trigger 43/50 opens",
+   "block": "trigger-43",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1296,14 +1508,18 @@
   },
   {
    "name": "trigger 43/50 timed",
+   "block": "trigger-43",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 43
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 43
+    }
    }
   },
   {
    "name": "trigger 43/50 hides",
+   "block": "trigger-43",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1315,6 +1531,7 @@
   },
   {
    "name": "trigger 44/50 opens",
+   "block": "trigger-44",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1326,14 +1543,18 @@
   },
   {
    "name": "trigger 44/50 timed",
+   "block": "trigger-44",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 44
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 44
+    }
    }
   },
   {
    "name": "trigger 44/50 hides",
+   "block": "trigger-44",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1345,6 +1566,7 @@
   },
   {
    "name": "trigger 45/50 opens",
+   "block": "trigger-45",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1356,14 +1578,18 @@
   },
   {
    "name": "trigger 45/50 timed",
+   "block": "trigger-45",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 45
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 45
+    }
    }
   },
   {
    "name": "trigger 45/50 hides",
+   "block": "trigger-45",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1375,6 +1601,7 @@
   },
   {
    "name": "trigger 46/50 opens",
+   "block": "trigger-46",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1386,14 +1613,18 @@
   },
   {
    "name": "trigger 46/50 timed",
+   "block": "trigger-46",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 46
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 46
+    }
    }
   },
   {
    "name": "trigger 46/50 hides",
+   "block": "trigger-46",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1405,6 +1636,7 @@
   },
   {
    "name": "trigger 47/50 opens",
+   "block": "trigger-47",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1416,14 +1648,18 @@
   },
   {
    "name": "trigger 47/50 timed",
+   "block": "trigger-47",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 47
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 47
+    }
    }
   },
   {
    "name": "trigger 47/50 hides",
+   "block": "trigger-47",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1435,6 +1671,7 @@
   },
   {
    "name": "trigger 48/50 opens",
+   "block": "trigger-48",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1446,14 +1683,18 @@
   },
   {
    "name": "trigger 48/50 timed",
+   "block": "trigger-48",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 48
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 48
+    }
    }
   },
   {
    "name": "trigger 48/50 hides",
+   "block": "trigger-48",
    "call": "trigger_hotkey",
    "args": {
     "action": "settings"
@@ -1465,6 +1706,7 @@
   },
   {
    "name": "trigger 49/50 opens",
+   "block": "trigger-49",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1476,14 +1718,18 @@
   },
   {
    "name": "trigger 49/50 timed",
+   "block": "trigger-49",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 49
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 49
+    }
    }
   },
   {
    "name": "trigger 49/50 hides",
+   "block": "trigger-49",
    "call": "trigger_hotkey",
    "args": {
     "action": "capture"
@@ -1495,6 +1741,7 @@
   },
   {
    "name": "trigger 50/50 opens",
+   "block": "trigger-50",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1506,14 +1753,18 @@
   },
   {
    "name": "trigger 50/50 timed",
+   "block": "trigger-50",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 50
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 50
+    }
    }
   },
   {
    "name": "trigger 50/50 hides",
+   "block": "trigger-50",
    "call": "trigger_hotkey",
    "args": {
     "action": "browser"
@@ -1527,7 +1778,9 @@
    "name": "U1 budget over 50 triggers",
    "call": "metrics",
    "expect": {
-    "summary.hotkey_to_first_frame.count": 50,
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 50
+    },
     "summary.hotkey_to_first_frame.p50": {
      "lt": 80
     },
@@ -1535,7 +1788,7 @@
      "lt": 200
     },
     "samples": {
-     "len": 50
+     "min_len": 50
     }
    }
   },
@@ -1552,7 +1805,8 @@
      "type": "number",
      "gt": 0
     }
-   }
+   },
+   "block": "placement"
   },
   {
    "name": "placement: real popup",
@@ -1563,19 +1817,23 @@
     "shell.window_kind": "popup",
     "shell.background": "blurred",
     "shell.visible": true
-   }
+   },
+   "block": "placement"
   },
   {
    "name": "within the cursor's display",
-   "winframe": "cursor"
+   "winframe": "cursor",
+   "block": "placement"
   },
   {
    "name": "within the display state names",
-   "winframe": "state"
+   "winframe": "state",
+   "block": "placement"
   },
   {
    "name": "within the main display",
-   "winframe": 0
+   "winframe": 0,
+   "block": "placement"
   },
   {
    "name": "hotkey toggles it away",
@@ -1585,17 +1843,21 @@
    },
    "expect": {
     "shell.visible": false
-   }
+   },
+   "block": "placement"
   },
   {
-   "winframe": "gone"
+   "winframe": "gone",
+   "block": "placement"
   },
   {
    "name": "51 timed shows, ring still typed",
    "call": "metrics",
    "retry_ms": 3000,
    "expect": {
-    "summary.hotkey_to_first_frame.count": 51,
+    "summary.hotkey_to_first_frame.count": {
+     "ge": 51
+    },
     "samples.0.kind": "hotkey_to_first_frame",
     "samples.0.route": "capture"
    }

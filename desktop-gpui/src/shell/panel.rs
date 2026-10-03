@@ -101,6 +101,31 @@ impl PanelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let child = views::build_for(route, cx);
+        Self::with_child(route, child, hotkey_at, window, cx)
+    }
+
+    /// The launch prewarm's panel (`shell::prewarm`): the real card and window, but a
+    /// neutral child instead of a route's view, so warming never runs a view's
+    /// constructor. Once Phase 1's views do real work (capture reads the frontmost
+    /// app, browser opens the graph), building one at launch would be a side effect
+    /// (O4). The child still draws a line of text in the theme font, so the text
+    /// system's first-use cost is paid here too, not by the user's first show.
+    pub fn prewarm(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let child = cx.new(|_| PrewarmChild).into();
+        // The route only feeds the click-away rule, which never fires: this window is
+        // never key (`prewarm_options` sets `focus: false`), and `panel_closed`
+        // ignores a window that is not the shell's panel anyway.
+        Self::with_child(Route::Capture, child, None, window, cx)
+    }
+
+    fn with_child(
+        route: Route,
+        child: AnyView,
+        hotkey_at: Option<std::time::Instant>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // Click-away (R5, proven in Task 5): capture and browser get out of the way when
         // the panel loses key status; settings and onboarding stay open. The rule itself
         // now lives in the router table (views::TABLE), not here.
@@ -108,7 +133,6 @@ impl PanelView {
             let active = window.is_window_active();
             this.activation_changed(active, window, cx);
         });
-        let child = views::build_for(route, cx);
         #[cfg(not(feature = "automation"))]
         let _ = hotkey_at;
         #[cfg(feature = "automation")]
@@ -193,6 +217,15 @@ impl PanelView {
         self.route = route;
         self.child = views::build_for(route, cx);
         cx.notify();
+    }
+}
+
+/// `PanelView::prewarm`'s child: static text, no state, no I/O.
+struct PrewarmChild;
+
+impl Render for PrewarmChild {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().child("ubilink")
     }
 }
 
