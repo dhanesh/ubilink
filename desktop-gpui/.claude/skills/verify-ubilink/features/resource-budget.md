@@ -65,8 +65,9 @@ Record it (SKILL.md, Evidence):
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/performance"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature resource-budget \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario performance (desktop-gpui/probes/performance.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"], r["saved"])' "$R/result.json")" \
   --side-effect "docs/PERFORMANCE.md agrees with this run's own idle_cpu_percent/physical_footprint_mb/stripped_binary_mb; see result.json" \

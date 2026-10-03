@@ -70,19 +70,33 @@ table's", "lists only its N subsequence match(es)", "decoys absent") for each of
 - **Side effect.** Both scenarios' "nothing launched" step requires the `opened`
   sink to equal `[]`.
 
-Record each scenario separately (SKILL.md, Evidence):
+This feature has **two** acceptance scenarios, but factory-conductor's evidence
+gate reads exactly one `.verify/<instance>/link-browser/<sha>/evidence.json`
+(SKILL.md's "The evidence gate" / `verify_evidence.py record`'s one-record-per-
+feature-per-head shape) — recording each scenario in its own `record` call would
+have the second call overwrite the first's `evidence.json` and same-named
+artifacts (`result.json`, `transcript.txt`, ...), silently losing the R4 proof
+behind the R5 one. Record **one** evidence set for both, with each scenario's
+artifacts renamed to a unique prefix first, and `--result` derived from **both**
+exit codes:
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
+REC="$WT/.verify-run/$INSTANCE/record-link-browser"
+rm -rf "$REC"; mkdir -p "$REC"
+RESULT=pass
 for name in link-browser link-browser-filter; do
   R="$OUT/$name"
-  python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature link-browser \
-    --verifier "$VERIFIER" --result pass \
-    --action "scenario $name (desktop-gpui/probes/$name.json) on instance $INSTANCE" \
-    --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
-    --side-effect "opened sink stayed []; see result.json" \
-    $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+  e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
+  [ "$e" -eq 0 ] || RESULT=fail
+  for f in "$R"/*; do cp "$f" "$REC/$name-$(basename "$f")"; done
 done
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature link-browser \
+  --verifier "$VERIFIER" --result "$RESULT" \
+  --action "scenario link-browser + link-browser-filter (desktop-gpui/probes/{link-browser,link-browser-filter}.json) on instance $INSTANCE" \
+  --observed "link-browser: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/link-browser/result.json"); link-browser-filter: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/link-browser-filter/result.json")" \
+  --side-effect "opened sink stayed [] in both scenarios; see each scenario's renamed result.json" \
+  $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
 ## Gotchas
@@ -90,6 +104,11 @@ done
 - `scenario` replaces the instance's process and temp root before each run, so run
   `link-browser` and `link-browser-filter` as two separate `scenario` invocations
   (above), not interleaved steps of one hand-written `call`.
+- Record both scenarios in **one** `verify_evidence.py record` call, not one per
+  scenario (above) — each writes to the same
+  `.verify/<instance>/link-browser/<sha>/`, so a second `record` to the same
+  feature and head would overwrite the first's `evidence.json` and any
+  same-named artifact.
 - Read `metrics` for the first-frame timing before any `see`/`a11y` call on that
   instance — activating the AccessKit tree makes GPUI build it on every frame for
   the window's life, which would slow the very frame being timed. The scenario

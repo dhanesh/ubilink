@@ -60,8 +60,9 @@ Record it (SKILL.md, Evidence):
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/theming"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature theming \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario theming (desktop-gpui/probes/theming.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "same pid/window id across every appearance switch, for all 4 views; see result.json" \

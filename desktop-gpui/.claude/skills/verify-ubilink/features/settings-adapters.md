@@ -62,8 +62,9 @@ needed:
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 R="$OUT/settings-adapters"
+RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature settings-adapters \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario settings-adapters (desktop-gpui/probes/settings-adapters.json) on instance $INSTANCE" \
   --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
   --side-effect "plugins-state.json's disabled list matches every toggle, before and after two real restarts; see result.json" \
