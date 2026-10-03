@@ -112,6 +112,253 @@ class A11y(unittest.TestCase):
         self.assertEqual(probe.find_nodes({"nodes": {}}, "Label"), [])
 
 
+class A11yStateAndOrder(unittest.TestCase):
+    """Fix round 1 (R-j): state flags, document order, nth and sequence queries.
+
+    The tree mirrors gpui-pre 0.3.7's node_to_json: ephemeral ids in AccessKit update
+    order (the window `e` comes last), `root`, `gpui_focus`, booleans for selected and
+    expanded, Debug-formatted toggled, and an `on_action` list that is NOT text.
+    """
+
+    tree = {
+        "root": "e",
+        "gpui_focus": "c",
+        "active_descendant_focus": None,
+        "nodes": {
+            "a": {"aria": {"role": "ListItem", "label": "gamma.md", "selected": False, "on_action": ["Click"]}},
+            "b": {"aria": {"role": "ListItem", "label": "alpha.md", "selected": False}},
+            "c": {"aria": {"role": "ListItem", "label": "beta.md", "selected": True}},
+            "d": {"aria": {"role": "Switch", "label": "Launch at login", "toggled": "True"}},
+            "f": {"aria": {"role": "List"}, "children": ["b", "c", "a"]},
+            "e": {"aria": {"role": "Window"}, "children": ["f", "d"]},
+        },
+    }
+
+    def test_document_order_follows_root_and_children(self):
+        nodes = probe.a11y_nodes(self.tree)
+        self.assertEqual([n["id"] for n in nodes], ["e", "f", "b", "c", "a", "d"])
+
+    def test_state_fields_are_kept_and_normalised(self):
+        by_id = {n["id"]: n for n in probe.a11y_nodes(self.tree)}
+        self.assertIs(by_id["c"]["state"]["selected"], True)
+        self.assertIs(by_id["c"]["state"]["focused"], True)
+        self.assertIs(by_id["b"]["state"]["focused"], False)
+        self.assertIs(by_id["d"]["state"]["toggled"], True)
+        self.assertEqual(by_id["a"]["state"]["actions"], ["Click"])
+        # Action names are not text: "Click" must not satisfy a text query.
+        self.assertEqual(probe.find_nodes(self.tree, text="Click"), [])
+
+    def test_state_on_a_node_query(self):
+        hits = probe.find_nodes(self.tree, "ListItem", state={"selected": True})
+        self.assertEqual([n["texts"] for n in hits], [["beta.md"]])
+        # A state the node does not report is null: `false` does not match it.
+        self.assertEqual(probe.find_nodes(self.tree, "Switch", state={"selected": False}), [])
+        self.assertEqual(len(probe.find_nodes(self.tree, "Switch", state={"selected": {"ne": True}})), 1)
+
+    def test_nth_query(self):
+        probe.check_a11y_query(self.tree, {"role": "ListItem", "nth": 1, "text": "beta", "state": {"selected": True}})
+        probe.check_a11y_query(self.tree, {"role": "ListItem", "nth": -1, "text": "gamma"})
+        with self.assertRaisesRegex(probe.StepFailed, "#0 mismatch"):
+            probe.check_a11y_query(self.tree, {"role": "ListItem", "nth": 0, "state": {"selected": True}})
+        with self.assertRaisesRegex(probe.StepFailed, "no ListItem node #3"):
+            probe.check_a11y_query(self.tree, {"role": "ListItem", "nth": 3})
+
+    def test_sequence_query(self):
+        seq = lambda texts, mode: {"sequence": {"role": "ListItem", "texts": texts, "mode": mode}}  # noqa: E731
+        probe.check_a11y_query(self.tree, seq(["alpha", "beta"], "prefix"))
+        probe.check_a11y_query(self.tree, seq(["alpha", "beta", "gamma"], "exact"))
+        probe.check_a11y_query(self.tree, seq(["alpha", "gamma"], "ordered"))
+        for texts, mode in [
+            (["beta", "alpha"], "prefix"),       # wrong order
+            (["alpha", "beta"], "exact"),        # a third row exists
+            (["gamma", "alpha"], "ordered"),     # alpha comes before gamma
+            (["alpha", "beta", "gamma", "delta"], "prefix"),  # too few rows
+        ]:
+            with self.subTest(texts=texts, mode=mode), self.assertRaises(probe.StepFailed):
+                probe.check_a11y_query(self.tree, seq(texts, mode))
+
+
+class NoVacuousPasses(unittest.TestCase):
+    """Fix round 1: nothing a scenario says may be satisfied by checking nothing."""
+
+    def load(self, doc):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "s.json"
+            p.write_text(json.dumps(doc))
+            return probe.load_scenario(str(p))
+
+    def test_empty_text_never_matches(self):
+        self.assertFalse(probe.text_matches("", "anything"))
+        self.assertFalse(probe.text_matches("   ", "anything"))
+        self.assertFalse(probe.text_matches("", ""))
+
+    def test_empty_queries_and_texts_are_refused(self):
+        bad = [
+            {"see": []},
+            {"see": {}},
+            {"see": {"text": ""}},
+            {"see": {"text": "   "}},
+            {"see": {"role": ""}},
+            {"see": {"role": "Label", "state": {}}},
+            {"see": {"role": "Button", "state": {"disabled": False}}},
+            {"see": {"role": "Button", "state": {"selcted": True}}},
+            {"see": {"text": "x", "nth": 0}},  # nth needs a role
+            {"see": {"role": "ListItem", "nth": 0}, "absent": True},
+            {"see": {"sequence": {"role": "ListItem", "texts": []}}},
+            {"see": {"sequence": {"role": "ListItem", "texts": ["a"], "mode": "sorted"}}},
+            {"see": {"sequence": {"role": "ListItem", "texts": ["a"]}}, "count": 1},
+            {"ocr": []},
+            {"ocr": ""},
+            {"ocr": ["ok", " "]},
+            {"graph": True, "links": []},
+            {"graph": True, "no_links": [[]]},
+            {"graph": True, "links": [["a:1", ""]]},
+            {"graph": True, "link_count": -1},
+            {"pasteboard": "read"},
+            {"call": "state", "expect": {"x": {"text": ""}}},
+            {"call": "state", "expect": {"x": {"contains": ""}}},
+            {"file": ""},
+        ]
+        for step in bad:
+            with self.subTest(step=step), self.assertRaises(probe.ScenarioError):
+                self.load({"steps": [step]})
+
+    def test_absent_on_an_empty_tree_fails(self):
+        class Inst:
+            root = data_dir = fixtures_dir = Path("/nonexistent")
+            name = "t"
+
+            def __init__(self, tree):
+                self.tree = tree
+
+            def call(self, verb, **args):
+                return self.tree
+
+        step = {"see": {"text": "Error"}, "absent": True, "timeout_ms": 0}
+        for tree in ({"nodes": {}}, {"root": "a", "nodes": {"a": {"aria": {"role": "Window"}}}}):
+            with self.subTest(tree=tree), self.assertRaisesRegex(probe.StepFailed, "rendered view"):
+                probe.run_see(probe.RunContext(Inst(tree), {}), step)
+        rendered = {"root": "a", "nodes": {"a": {"aria": {"role": "Window"}, "children": ["b"]},
+                                           "b": {"aria": {"role": "Label", "value": "Capture"}}}}
+        self.assertIn("absent", probe.run_see(probe.RunContext(Inst(rendered), {}), step))
+
+
+class BuildProvenance(unittest.TestCase):
+    """Fix round 1: the run owns the exact binary it built, and names its source."""
+
+    def test_executable_comes_from_cargo_json(self):
+        out = "\n".join([
+            json.dumps({"reason": "compiler-artifact", "target": {"name": "serde", "kind": ["lib"]},
+                        "executable": None}),
+            "not json",
+            json.dumps({"reason": "compiler-artifact", "target": {"name": "ubilink-next", "kind": ["bin"]},
+                        "executable": "/x/target/debug/ubilink-next", "fresh": True}),
+            json.dumps({"reason": "build-finished", "success": True}),
+        ])
+        self.assertEqual(probe.executable_from_cargo_json(out), "/x/target/debug/ubilink-next")
+        self.assertIsNone(probe.executable_from_cargo_json('{"reason": "build-finished"}'))
+
+    def test_source_revision_reports_dirty_build_inputs_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            git = lambda *a: subprocess.run(["git", *a], cwd=d, check=True, capture_output=True)  # noqa: E731
+            git("init", "-q")
+            git("config", "user.email", "t@t")
+            git("config", "user.name", "t")
+            (Path(d) / "app").mkdir()
+            (Path(d) / "app" / "lib.rs").write_text("1")
+            git("add", ".")
+            git("commit", "-qm", "c")
+            head, dirty = probe.source_revision(Path(d))
+            self.assertRegex(head, r"^[0-9a-f]{40}$")
+            self.assertFalse(dirty)
+            (Path(d) / "scratch.txt").write_text("not a build input")
+            self.assertFalse(probe.source_revision(Path(d))[1])
+            (Path(d) / "app" / "lib.rs").write_text("2")
+            self.assertTrue(probe.source_revision(Path(d))[1])
+
+    def test_build_copies_the_executable_while_holding_the_target_lock(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            cache, run_dir, bindir = d / "cache", d / "run", d / "bin"
+            for x in (cache, run_dir, bindir):
+                x.mkdir()
+            exe = d / "built-ubilink-next"
+            exe.write_bytes(b"binary from this commit")
+            probe_log = d / "lock-seen"
+            # A fake cargo: records whether target.lock is held while it "builds",
+            # then reports the artifact the way cargo's JSON does.
+            fake = bindir / "cargo"
+            fake.write_text(textwrap.dedent(f"""\
+                #!{sys.executable}
+                import fcntl, json, os
+                fd = os.open({str(cache / 'target.lock')!r}, os.O_RDWR)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held = "free"
+                except BlockingIOError:
+                    held = "held"
+                open({str(probe_log)!r}, "w").write(held)
+                print(json.dumps({{"reason": "compiler-artifact",
+                                  "target": {{"name": "ubilink-next", "kind": ["bin"]}},
+                                  "executable": {str(exe)!r}}}))
+            """))
+            fake.chmod(0o755)
+            saved = (probe.CACHE_ROOT, os.environ["PATH"], dict(probe._builds), probe._GPUI_SOURCE_TARGET)
+            probe.CACHE_ROOT = cache
+            probe._GPUI_SOURCE_TARGET = d / "no-target"  # don't clone the real 5 GB target
+            os.environ["PATH"] = f"{bindir}:{os.environ['PATH']}"
+            probe._builds.clear()
+            try:
+                b = probe.build_binary(run_dir, out=lambda m: None)
+            finally:
+                probe.CACHE_ROOT, os.environ["PATH"], probe._GPUI_SOURCE_TARGET = saved[0], saved[1], saved[3]
+                probe._builds.clear()
+                probe._builds.update(saved[2])
+            self.assertEqual(probe_log.read_text(), "held", "cargo ran under the target lock")
+            self.assertEqual(b.path.parent, run_dir)
+            self.assertEqual(b.path.read_bytes(), b"binary from this commit")
+            # The run's copy is independent of the shared target: replacing the shared
+            # executable afterwards (another clone's build) does not change ours.
+            exe.write_bytes(b"someone else's commit")
+            self.assertEqual(b.path.read_bytes(), b"binary from this commit")
+            self.assertEqual(b.sha256, probe._sha256_file(b.path))
+            self.assertIn(f"sha256={b.sha256}", b.describe())
+            self.assertRegex(b.describe(), r"commit=[0-9a-f]{40}|commit=unknown")
+
+
+class ReleaseInstance(unittest.TestCase):
+    def test_release_instance_has_isolation_but_no_channel(self):
+        inst = probe.Instance("perf", Path("/bin/true"), release=True)
+        inst.root = Path("/tmp/ubprobe-r")
+        env = inst.env()
+        self.assertEqual(env["UBILINK_DATA_DIR"], "/tmp/ubprobe-r/data")
+        self.assertEqual(env["UBILINK_SKIP_HOTKEYS"], "1")
+        with self.assertRaisesRegex(probe.ProbeError, "no automation channel"):
+            inst.call("state")
+
+    def test_release_instance_launches_and_stops(self):
+        # A stand-in "release binary" that creates its single-instance socket path
+        # the way ubilink-next does before GPUI starts, then idles.
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / "fake-release"
+            fake.write_text(textwrap.dedent("""\
+                #!/bin/sh
+                : > "$UBILINK_INSTANCE_SOCKET"
+                [ -d "$UBILINK_DATA_DIR" ] || exit 7
+                exec sleep 30
+            """))
+            fake.chmod(0o755)
+            inst = probe.Instance("rel", fake, release=True)
+            inst.start(timeout=10)
+            try:
+                self.assertIsNone(inst.proc.poll())
+                root = inst.root
+            finally:
+                inst.stop()
+            self.assertIsNotNone(inst.proc.poll())
+            self.assertFalse(root.exists())
+
+
 class Colour(unittest.TestCase):
     def test_delta_e(self):
         self.assertEqual(probe.delta_e((10, 20, 30), (10, 20, 30)), 0)
