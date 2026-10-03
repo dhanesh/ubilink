@@ -32,6 +32,12 @@ use tray_icon::{TrayIcon, TrayIconEvent};
 
 pub use state::ShellState;
 
+/// What the panel shows. Re-exported from `views` (Task 13's router), which is now the
+/// single place a route maps to its view constructor, its view-state and its dismiss
+/// policy; the shell only ever matches on the enum itself, never reimplements that
+/// table. See `views::Route` and `views::TABLE`.
+pub use crate::views::Route;
+
 /// Everything that can ask the shell to act, from any thread.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShellEvent {
@@ -72,44 +78,6 @@ pub fn inbox() -> (Inbox, Receiver<ShellEvent>) {
         },
         rx,
     )
-}
-
-/// What the panel shows. Task 13's router turns each into a real view.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Route {
-    Capture,
-    Browser,
-    Settings,
-    // Opened by Task 13's first-run flow; nothing in the shell opens it yet.
-    #[allow(dead_code)]
-    Onboarding,
-}
-
-impl Route {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Route::Capture => "capture",
-            Route::Browser => "browser",
-            Route::Settings => "settings",
-            Route::Onboarding => "onboarding",
-        }
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Route::Capture => "Capture",
-            Route::Browser => "Browse links",
-            Route::Settings => "Settings",
-            Route::Onboarding => "Welcome to ubilink",
-        }
-    }
-
-    /// R5: capture and browser hide on loss of key status; settings and onboarding are
-    /// places the user works in (and may switch apps from, to grant a permission), so
-    /// they stay open.
-    pub fn hides_on_deactivate(self) -> bool {
-        matches!(self, Route::Capture | Route::Browser)
-    }
 }
 
 /// What the tray, hotkeys and single-instance socket ask the shell to do.
