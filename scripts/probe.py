@@ -13,6 +13,7 @@ Usage:
     python3 scripts/probe.py deps-clean app/Cargo.toml
     python3 scripts/probe.py release-clean
     python3 scripts/probe.py run shell [--instances 2]
+    python3 scripts/probe.py doctor [--json] [--build]
 
 `run` is the instance runner and scenario engine (R8): see
 desktop-gpui/probes/README.md for the scenario format.
@@ -2347,6 +2348,355 @@ def cmd_run(args: argparse.Namespace) -> int:
     return code
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# `doctor`: read-only unattended-run preflight (R9, O4, TN5; Phase 1 D5)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Phase 1 runs `run` unattended under factory-conductor for hours; if the host
+# cannot do GUI probes (Screen Recording revoked, display asleep, no Swift
+# toolchain) that run should refuse to start instead of grinding through
+# ENV-BLOCKED or false FAILs with nobody watching. `doctor` is that gate (the
+# verify skill's Doctor section, task 14, calls it before a real run), and it
+# is read-only: no check here may grant a permission, flip a setting, or leave
+# a helper/caffeinate process running past its own check.
+
+_RUST_TOOLCHAIN_TOML = REPO_ROOT / "rust-toolchain.toml"
+_TOOLCHAIN_CHANNEL_RE = re.compile(r'^\s*channel\s*=\s*"([0-9][\w.\-]*)"\s*$')
+# How long the caffeinate check's throwaway assertion runs; short because doctor
+# itself must stay fast, long enough that `pmset -g assertions` reliably sees it.
+_CAFFEINATE_PROBE_S = 2.0
+
+
+def _process_name(pid: int) -> str:
+    """The short command name macOS shows for `pid` (e.g. "python3", "Terminal")."""
+    proc = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True)
+    name = proc.stdout.strip()
+    return os.path.basename(name) if name else f"pid {pid}"
+
+
+def _parent_pid(pid: int):
+    proc = subprocess.run(["ps", "-p", str(pid), "-o", "ppid="], capture_output=True, text=True)
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _process_chain(pid: int, depth: int = 6) -> list:
+    """[name at pid, name at its parent, ...], up to `depth` entries.
+
+    TCC grants Screen Recording to the *process* that calls the CGWindow API, not
+    to python3 in the abstract: when probe.py runs inside a Terminal tab, an IDE's
+    integrated shell, or a CI agent's own process, that host app is what System
+    Settings needs the grant for. `check_screen_recording` reports this chain as a
+    hint, never as a fix it applies itself (granting it is a human/System Settings
+    action, which a read-only doctor must not attempt).
+    """
+    chain = []
+    seen = set()
+    cur = pid
+    for _ in range(depth):
+        if cur is None or cur in seen or cur <= 1:
+            break
+        seen.add(cur)
+        chain.append(_process_name(cur))
+        cur = _parent_pid(cur)
+    return chain
+
+
+def check_screen_recording() -> dict:
+    """CGPreflightScreenCaptureAccess via quartz.swift; never prompts (TN5)."""
+    try:
+        granted = bool(quartz("screen-access").get("granted"))
+    except (ProbeError, EnvBlocked) as e:
+        return {
+            "name": "screen_recording", "status": "FAIL",
+            "detail": f"could not query CGPreflightScreenCaptureAccess: {e}",
+        }
+    if granted:
+        return {"name": "screen_recording", "status": "PASS", "detail": "granted to this process"}
+    chain = " -> ".join(_process_chain(os.getpid())) or f"pid {os.getpid()}"
+    return {
+        "name": "screen_recording", "status": "FAIL",
+        "detail": (
+            "denied - grant Screen Recording (System Settings > Privacy & Security > "
+            f"Screen Recording) to the host app in this process chain: {chain}"
+        ),
+    }
+
+
+def check_display_awake() -> dict:
+    """CGDisplayIsAsleep on the main display."""
+    try:
+        info = quartz("display-asleep")
+    except (ProbeError, EnvBlocked) as e:
+        return {"name": "display_awake", "status": "FAIL", "detail": f"could not query CGDisplayIsAsleep: {e}"}
+    if info.get("asleep"):
+        return {"name": "display_awake", "status": "FAIL", "detail": f"main display {info.get('id')} is asleep"}
+    return {"name": "display_awake", "status": "PASS", "detail": f"main display {info.get('id')} is awake"}
+
+
+def check_display_count() -> dict:
+    """Active display count via CGGetActiveDisplayList; >=1 required.
+
+    N=1 is a PASS, not a WARN: single-display scenarios run fine with one
+    display. It only means a *multi*-display scenario will be ENV-BLOCKED on
+    this host (`_display_for` in the `run` engine), which this check reports as
+    an informational note, not a reason to fail doctor.
+    """
+    try:
+        displays = quartz("displays")
+    except (ProbeError, EnvBlocked) as e:
+        return {
+            "name": "display_count", "status": "FAIL",
+            "detail": f"could not query CGGetActiveDisplayList: {e}",
+        }
+    n = len(displays)
+    if n < 1:
+        return {
+            "name": "display_count", "status": "FAIL",
+            "detail": "0 active displays (display asleep or no window server session)",
+        }
+    detail = f"{n} active display(s)"
+    if n == 1:
+        detail += " - a multi-display scenario will be ENV-BLOCKED on this host (informational)"
+    return {"name": "display_count", "status": "PASS", "detail": detail}
+
+
+def check_ocr_helper() -> dict:
+    """Compile scripts/ocr.swift if needed, then run it on a generated PNG.
+
+    The generated blank PNG (not a screencapture of the real screen) means this
+    check never depends on the Screen Recording grant `check_screen_recording`
+    reports separately - it proves the Vision pipeline itself compiles and runs,
+    not that it reads any particular text.
+    """
+    try:
+        binary = _helper(_OCR_SWIFT)
+    except (ProbeError, EnvBlocked) as e:
+        return {"name": "ocr_helper", "status": "FAIL", "detail": f"compile failed: {e}"}
+    png = binary.with_name(f"doctor-{os.getpid()}.png")
+    try:
+        _tiny_png(png)
+        out = _run_helper(_OCR_SWIFT, png, timeout=_OCR_TIMEOUT_S, attempts=2)
+    except (ProbeError, EnvBlocked, OSError) as e:
+        return {
+            "name": "ocr_helper", "status": "FAIL",
+            "detail": f"compiled at {binary.name} but failed to run: {e}",
+        }
+    finally:
+        png.unlink(missing_ok=True)
+    if not isinstance(out, dict) or "lines" not in out:
+        return {"name": "ocr_helper", "status": "FAIL", "detail": f"unexpected output: {out!r}"}
+    return {
+        "name": "ocr_helper", "status": "PASS",
+        "detail": f"compiled at {binary.name}, ran on a generated PNG ({len(out['lines'])} line(s) read)",
+    }
+
+
+def _start_caffeinate(seconds: float):
+    """Start a throwaway `caffeinate -d -u -t <seconds>`; None if not on PATH."""
+    if not shutil.which("caffeinate"):
+        return None
+    try:
+        return subprocess.Popen(
+            ["caffeinate", "-d", "-u", "-t", str(seconds)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+
+
+def _pmset_assertions() -> str:
+    try:
+        proc = subprocess.run(["pmset", "-g", "assertions"], capture_output=True, text=True)
+    except FileNotFoundError:
+        return ""
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def _pmset_has_assertion(text: str, pid: int, name: str) -> bool:
+    """Whether `pmset -g assertions`'s text lists assertion `name` owned by `pid`."""
+    marker = f"pid {pid}("
+    return any(marker in line and name in line for line in text.splitlines())
+
+
+def check_caffeinate() -> dict:
+    """Prove the run-time keep_awake() guard will work, without leaving anything running.
+
+    `cmd_run`'s `keep_awake()` holds a caffeinate assertion for the whole
+    unattended run (R9); doctor itself is short, so instead of trusting that
+    caffeinate exists, it starts a throwaway assertion and reads it back from
+    `pmset -g assertions` - the same ground truth an operator would check by
+    hand - then kills it rather than waiting out the full duration.
+    """
+    proc = _start_caffeinate(_CAFFEINATE_PROBE_S)
+    if proc is None:
+        return {
+            "name": "caffeinate", "status": "FAIL",
+            "detail": "caffeinate not found on PATH (or failed to start)",
+        }
+    try:
+        deadline = time.monotonic() + _CAFFEINATE_PROBE_S
+        while time.monotonic() < deadline:
+            if _pmset_has_assertion(_pmset_assertions(), proc.pid, "PreventUserIdleDisplaySleep"):
+                return {
+                    "name": "caffeinate", "status": "PASS",
+                    "detail": f"pid {proc.pid} holds a PreventUserIdleDisplaySleep assertion",
+                }
+            time.sleep(0.1)
+        return {
+            "name": "caffeinate", "status": "FAIL",
+            "detail": (
+                f"no PreventUserIdleDisplaySleep assertion from caffeinate pid {proc.pid} "
+                "appeared in pmset -g assertions"
+            ),
+        }
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=3)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=3)
+
+
+def _swiftc_version() -> str:
+    try:
+        proc = subprocess.run(["swiftc", "--version"], capture_output=True, text=True)
+    except FileNotFoundError:
+        return ""
+    text = (proc.stdout or proc.stderr).strip()
+    return text if proc.returncode == 0 else ""
+
+
+def check_xcode_swiftc() -> dict:
+    """Xcode command line tools: swiftc is what compiles every helper in this file."""
+    version = _swiftc_version()
+    if not version:
+        return {
+            "name": "xcode_swiftc", "status": "FAIL",
+            "detail": "swiftc not found (install the Xcode command line tools)",
+        }
+    return {"name": "xcode_swiftc", "status": "PASS", "detail": version.splitlines()[0]}
+
+
+def _rust_toolchain_channel(path: Path = None) -> str:
+    """The `[toolchain] channel` rust-toolchain.toml pins (R1's single source of
+    truth); raises ValueError if the file has no channel line."""
+    path = path or _RUST_TOOLCHAIN_TOML
+    text = path.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        m = _TOOLCHAIN_CHANNEL_RE.match(line)
+        if m:
+            return m.group(1)
+    raise ValueError(f"no [toolchain] channel found in {path}")
+
+
+def _rustc_version() -> str:
+    try:
+        proc = subprocess.run(["rustc", "--version"], cwd=REPO_ROOT, capture_output=True, text=True)
+    except FileNotFoundError:
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def check_rust_toolchain() -> dict:
+    """rustc --version against rust-toolchain.toml's channel.
+
+    Reuses only `cmd_toolchain`'s rustc check, not its workflow-file check: that
+    one fails until a pending patch to .github/workflows lands (see task 9's
+    brief), and doctor's job is "can this host build/run", not "is CI in sync".
+    """
+    try:
+        expect = _rust_toolchain_channel()
+    except (OSError, ValueError) as e:
+        return {
+            "name": "rust_toolchain", "status": "FAIL",
+            "detail": f"could not read rust-toolchain.toml: {e}",
+        }
+    rustc_version = _rustc_version()
+    if not rustc_version:
+        return {"name": "rust_toolchain", "status": "FAIL", "detail": "rustc not found on PATH"}
+    expected_prefix = f"rustc {expect}"
+    if not rustc_version.startswith(expected_prefix):
+        return {
+            "name": "rust_toolchain", "status": "FAIL",
+            "detail": f"rustc --version printed {rustc_version!r}, expected it to start with {expected_prefix!r}",
+        }
+    return {"name": "rust_toolchain", "status": "PASS", "detail": rustc_version}
+
+
+def check_automation_build(build: bool) -> dict:
+    """The locked `--features automation` build `run` needs; slow (a full cargo
+    build), so only runs with --build - doctor stays fast by default."""
+    if not build:
+        return {
+            "name": "automation_build", "status": "WARN",
+            "detail": "skipped (pass --build to run the locked automation build)",
+        }
+    run_dir = Path(tempfile.mkdtemp(prefix="ubprobe-doctor-", dir=_tmpdir()))
+    try:
+        built = build_binary(run_dir)
+    except ProbeError as e:
+        return {"name": "automation_build", "status": "FAIL", "detail": f"build failed: {e}"}
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+    return {"name": "automation_build", "status": "PASS", "detail": built.describe()}
+
+
+# Every check but automation_build (which needs the --build flag threaded through);
+# order here is the order doctor prints them in.
+_DOCTOR_CHECKS = (
+    check_screen_recording,
+    check_display_awake,
+    check_display_count,
+    check_xcode_swiftc,
+    check_rust_toolchain,
+    check_ocr_helper,
+    check_caffeinate,
+)
+
+
+def _run_doctor_checks(build: bool = False) -> list:
+    """Run every doctor check, never letting one crash stop the rest."""
+    checks = []
+    for fn in _DOCTOR_CHECKS:
+        try:
+            checks.append(fn())
+        except Exception as e:  # a check must never take doctor itself down
+            checks.append({
+                "name": fn.__name__[len("check_"):], "status": "FAIL",
+                "detail": f"check raised {e!r}",
+            })
+    try:
+        checks.append(check_automation_build(build))
+    except Exception as e:
+        checks.append({"name": "automation_build", "status": "FAIL", "detail": f"check raised {e!r}"})
+    return checks
+
+
+def doctor_status(checks: list) -> str:
+    """FAIL if any check FAILed; a WARN (the skipped --build check, or an
+    informational N=1 display note folded into a PASS) never fails doctor alone."""
+    return "FAIL" if any(c["status"] == "FAIL" for c in checks) else "PASS"
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Read-only preflight: can this Mac host GUI probes unattended? (R9, O4,
+    TN5; Phase 1 D5). See this section's banner comment above for why."""
+    checks = _run_doctor_checks(build=args.build)
+    status = doctor_status(checks)
+    if args.json:
+        print(json.dumps({"result": status, "checks": checks}, indent=2))
+    else:
+        for c in checks:
+            print(f"{c['status']} {c['name']}: {c['detail']}")
+        print(f"DOCTOR_RESULT: {status}")
+    return 0 if status == "PASS" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="probe.py",
@@ -2407,6 +2757,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run each scenario against N simultaneous instances and check they stay isolated.",
     )
     p_run.set_defaults(func=cmd_run)
+
+    # ── doctor ─────────────────────────────────────────────────────────
+    p_doctor = subparsers.add_parser(
+        "doctor",
+        help="Read-only preflight: can this Mac host GUI probes unattended? (R9)",
+    )
+    p_doctor.add_argument(
+        "--json", action="store_true", help="Machine-readable output instead of PASS/FAIL lines."
+    )
+    p_doctor.add_argument(
+        "--build", action="store_true",
+        help="Also run the locked --features automation build (slow; off by default).",
+    )
+    p_doctor.set_defaults(func=cmd_doctor)
 
     return parser
 

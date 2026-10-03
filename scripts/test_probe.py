@@ -9,6 +9,7 @@ product FAIL, and that the desktop lock really excludes a second holder.
     python3 -m unittest scripts/test_probe.py
 """
 
+import argparse
 import contextlib
 import io
 import json
@@ -719,6 +720,347 @@ class WarmTarget(unittest.TestCase):
             self.assertEqual(probe._seed_target_cache(cache, src), "warm")
             missing = Path(d) / "other" / "target"
             self.assertIn("cold", probe._seed_target_cache(missing, Path(d) / "nope"))
+
+
+class DoctorStatusAndOutput(unittest.TestCase):
+    """`doctor_status` (aggregation) and `cmd_doctor` (output format), with every
+    check mocked out - task 9's own unit tests, R9."""
+
+    def test_pass_unless_some_check_failed(self):
+        self.assertEqual(probe.doctor_status([]), "PASS")
+        self.assertEqual(probe.doctor_status([{"status": "PASS"}, {"status": "WARN"}]), "PASS")
+        self.assertEqual(
+            probe.doctor_status([{"status": "PASS"}, {"status": "FAIL"}, {"status": "WARN"}]), "FAIL"
+        )
+
+    def test_text_output_one_line_per_check_then_result(self):
+        checks = [
+            {"name": "a", "status": "PASS", "detail": "ok"},
+            {"name": "b", "status": "FAIL", "detail": "bad"},
+        ]
+        saved = probe._run_doctor_checks
+        probe._run_doctor_checks = lambda build=False: checks
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = probe.cmd_doctor(argparse.Namespace(json=False, build=False))
+        finally:
+            probe._run_doctor_checks = saved
+        lines = out.getvalue().splitlines()
+        self.assertIn("PASS a: ok", lines)
+        self.assertIn("FAIL b: bad", lines)
+        self.assertEqual(lines[-1], "DOCTOR_RESULT: FAIL")
+        self.assertEqual(code, 1)
+
+    def test_json_output_is_machine_readable(self):
+        checks = [{"name": "a", "status": "PASS", "detail": "ok"}]
+        saved = probe._run_doctor_checks
+        probe._run_doctor_checks = lambda build=False: checks
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = probe.cmd_doctor(argparse.Namespace(json=True, build=False))
+        finally:
+            probe._run_doctor_checks = saved
+        doc = json.loads(out.getvalue())
+        self.assertEqual(doc["result"], "PASS")
+        self.assertEqual(doc["checks"], checks)
+        self.assertEqual(code, 0)
+
+    def test_a_crashing_check_is_reported_as_a_fail_not_an_exception(self):
+        def boom():
+            raise RuntimeError("kaboom")
+
+        saved = probe._DOCTOR_CHECKS
+        probe._DOCTOR_CHECKS = (boom,)
+        try:
+            checks = probe._run_doctor_checks(build=False)
+        finally:
+            probe._DOCTOR_CHECKS = saved
+        # boom's own entry plus the always-run automation_build WARN.
+        self.assertEqual(checks[0]["status"], "FAIL")
+        self.assertIn("kaboom", checks[0]["detail"])
+
+
+class DoctorChecks(unittest.TestCase):
+    """Each check mocks only the helper it calls (quartz, swiftc, etc.), the same
+    way the rest of this file mocks `probe.quartz`."""
+
+    def test_screen_recording_granted(self):
+        saved = probe.quartz
+        probe.quartz = lambda *a: {"granted": True}
+        try:
+            c = probe.check_screen_recording()
+        finally:
+            probe.quartz = saved
+        self.assertEqual(c, {"name": "screen_recording", "status": "PASS", "detail": "granted to this process"})
+
+    def test_screen_recording_denied_reports_process_chain(self):
+        saved_q, saved_chain = probe.quartz, probe._process_chain
+        probe.quartz = lambda *a: {"granted": False}
+        probe._process_chain = lambda pid, depth=6: ["python3", "zsh", "Terminal"]
+        try:
+            c = probe.check_screen_recording()
+        finally:
+            probe.quartz, probe._process_chain = saved_q, saved_chain
+        self.assertEqual(c["status"], "FAIL")
+        self.assertIn("python3 -> zsh -> Terminal", c["detail"])
+
+    def test_display_awake(self):
+        saved = probe.quartz
+        probe.quartz = lambda *a: {"id": 1, "asleep": False}
+        try:
+            self.assertEqual(probe.check_display_awake()["status"], "PASS")
+        finally:
+            probe.quartz = saved
+
+    def test_display_asleep_fails(self):
+        saved = probe.quartz
+        probe.quartz = lambda *a: {"id": 1, "asleep": True}
+        try:
+            c = probe.check_display_awake()
+        finally:
+            probe.quartz = saved
+        self.assertEqual(c["status"], "FAIL")
+        self.assertIn("asleep", c["detail"])
+
+    def test_display_count_notes_single_display_as_informational(self):
+        saved = probe.quartz
+        probe.quartz = lambda *a: [{"id": 1, "main": True, "bounds": {}}]
+        try:
+            c = probe.check_display_count()
+        finally:
+            probe.quartz = saved
+        self.assertEqual(c["status"], "PASS")
+        self.assertIn("ENV-BLOCKED", c["detail"])
+
+    def test_display_count_zero_fails(self):
+        saved = probe.quartz
+        probe.quartz = lambda *a: []
+        try:
+            c = probe.check_display_count()
+        finally:
+            probe.quartz = saved
+        self.assertEqual(c["status"], "FAIL")
+
+    def test_ocr_helper_pass_when_helper_compiles_and_runs(self):
+        saved_helper, saved_run, saved_tiny = probe._helper, probe._run_helper, probe._tiny_png
+        probe._helper = lambda source: Path("/fake/ocr-bin")
+        probe._tiny_png = lambda path, **k: None
+        probe._run_helper = lambda source, *a, **k: {"lines": []}
+        try:
+            c = probe.check_ocr_helper()
+        finally:
+            probe._helper, probe._run_helper, probe._tiny_png = saved_helper, saved_run, saved_tiny
+        self.assertEqual(c["status"], "PASS")
+
+    def test_ocr_helper_fail_when_compile_raises(self):
+        saved = probe._helper
+
+        def boom(source):
+            raise probe.ProbeError("swiftc broke")
+
+        probe._helper = boom
+        try:
+            c = probe.check_ocr_helper()
+        finally:
+            probe._helper = saved
+        self.assertEqual(c["status"], "FAIL")
+        self.assertIn("swiftc broke", c["detail"])
+
+    def test_ocr_helper_fail_when_run_raises(self):
+        saved_helper, saved_run, saved_tiny = probe._helper, probe._run_helper, probe._tiny_png
+        probe._helper = lambda source: Path("/fake/ocr-bin")
+        probe._tiny_png = lambda path, **k: None
+
+        def boom(source, *a, **k):
+            raise probe.ProbeError("vision exploded")
+
+        probe._run_helper = boom
+        try:
+            c = probe.check_ocr_helper()
+        finally:
+            probe._helper, probe._run_helper, probe._tiny_png = saved_helper, saved_run, saved_tiny
+        self.assertEqual(c["status"], "FAIL")
+        self.assertIn("vision exploded", c["detail"])
+
+
+class CaffeinateAssertionParsing(unittest.TestCase):
+    SAMPLE = textwrap.dedent("""\
+        Assertion status system-wide:
+           PreventUserIdleDisplaySleep        1
+        Listed by owning process:
+            pid 4821(caffeinate): [0x4295000c2a] 00:00:01 PreventUserIdleDisplaySleep named: ""
+            pid 100(Terminal): [0x4295000aaa] 00:10:00 PreventUserIdleSystemSleep named: "x"
+        """)
+
+    def test_finds_matching_pid_and_assertion_name(self):
+        self.assertTrue(probe._pmset_has_assertion(self.SAMPLE, 4821, "PreventUserIdleDisplaySleep"))
+
+    def test_rejects_wrong_pid(self):
+        self.assertFalse(probe._pmset_has_assertion(self.SAMPLE, 9999, "PreventUserIdleDisplaySleep"))
+
+    def test_rejects_right_pid_wrong_assertion_name(self):
+        self.assertFalse(probe._pmset_has_assertion(self.SAMPLE, 100, "PreventUserIdleDisplaySleep"))
+
+
+class CaffeinateCheck(unittest.TestCase):
+    class FakeProc:
+        def __init__(self, pid):
+            self.pid = pid
+            self._dead = False
+
+        def poll(self):
+            return 0 if self._dead else None
+
+        def terminate(self):
+            self._dead = True
+
+        def kill(self):
+            self._dead = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    def test_pass_when_assertion_seen(self):
+        saved_start, saved_pm, saved_s = probe._start_caffeinate, probe._pmset_assertions, probe._CAFFEINATE_PROBE_S
+        probe._start_caffeinate = lambda seconds: self.FakeProc(4821)
+        probe._pmset_assertions = (
+            lambda: 'pid 4821(caffeinate): [0x1] 00:00:01 PreventUserIdleDisplaySleep named: ""'
+        )
+        probe._CAFFEINATE_PROBE_S = 0.05
+        try:
+            c = probe.check_caffeinate()
+        finally:
+            probe._start_caffeinate, probe._pmset_assertions = saved_start, saved_pm
+            probe._CAFFEINATE_PROBE_S = saved_s
+        self.assertEqual(c["status"], "PASS")
+
+    def test_fail_when_caffeinate_missing(self):
+        saved = probe._start_caffeinate
+        probe._start_caffeinate = lambda seconds: None
+        try:
+            c = probe.check_caffeinate()
+        finally:
+            probe._start_caffeinate = saved
+        self.assertEqual(c["status"], "FAIL")
+
+    def test_fail_when_assertion_never_appears(self):
+        saved_start, saved_pm, saved_s = probe._start_caffeinate, probe._pmset_assertions, probe._CAFFEINATE_PROBE_S
+        probe._start_caffeinate = lambda seconds: self.FakeProc(1)
+        probe._pmset_assertions = lambda: "nothing relevant here"
+        probe._CAFFEINATE_PROBE_S = 0.05
+        try:
+            c = probe.check_caffeinate()
+        finally:
+            probe._start_caffeinate, probe._pmset_assertions = saved_start, saved_pm
+            probe._CAFFEINATE_PROBE_S = saved_s
+        self.assertEqual(c["status"], "FAIL")
+
+
+class XcodeAndRustChecks(unittest.TestCase):
+    def test_swiftc_present(self):
+        saved = probe._swiftc_version
+        probe._swiftc_version = lambda: "Apple Swift version 6.0"
+        try:
+            c = probe.check_xcode_swiftc()
+        finally:
+            probe._swiftc_version = saved
+        self.assertEqual(c["status"], "PASS")
+
+    def test_swiftc_missing(self):
+        saved = probe._swiftc_version
+        probe._swiftc_version = lambda: ""
+        try:
+            c = probe.check_xcode_swiftc()
+        finally:
+            probe._swiftc_version = saved
+        self.assertEqual(c["status"], "FAIL")
+
+    def test_rust_toolchain_channel_parses_the_pin(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "rust-toolchain.toml"
+            p.write_text('[toolchain]\nchannel = "1.98.1"\ncomponents = ["rustfmt"]\n')
+            self.assertEqual(probe._rust_toolchain_channel(p), "1.98.1")
+
+    def test_rust_toolchain_channel_missing_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "rust-toolchain.toml"
+            p.write_text("[toolchain]\n")
+            with self.assertRaises(ValueError):
+                probe._rust_toolchain_channel(p)
+
+    def test_rust_toolchain_matches(self):
+        saved_chan, saved_ver = probe._rust_toolchain_channel, probe._rustc_version
+        probe._rust_toolchain_channel = lambda: "1.98.1"
+        probe._rustc_version = lambda: "rustc 1.98.1 (abc123 2026-01-01)"
+        try:
+            c = probe.check_rust_toolchain()
+        finally:
+            probe._rust_toolchain_channel, probe._rustc_version = saved_chan, saved_ver
+        self.assertEqual(c["status"], "PASS")
+
+    def test_rust_toolchain_mismatch_fails(self):
+        saved_chan, saved_ver = probe._rust_toolchain_channel, probe._rustc_version
+        probe._rust_toolchain_channel = lambda: "1.98.1"
+        probe._rustc_version = lambda: "rustc 1.90.0 (xyz 2024-01-01)"
+        try:
+            c = probe.check_rust_toolchain()
+        finally:
+            probe._rust_toolchain_channel, probe._rustc_version = saved_chan, saved_ver
+        self.assertEqual(c["status"], "FAIL")
+
+    def test_rust_toolchain_missing_rustc_fails(self):
+        saved_chan, saved_ver = probe._rust_toolchain_channel, probe._rustc_version
+        probe._rust_toolchain_channel = lambda: "1.98.1"
+        probe._rustc_version = lambda: ""
+        try:
+            c = probe.check_rust_toolchain()
+        finally:
+            probe._rust_toolchain_channel, probe._rustc_version = saved_chan, saved_ver
+        self.assertEqual(c["status"], "FAIL")
+
+
+class AutomationBuildCheck(unittest.TestCase):
+    def test_skipped_by_default_is_a_warn_not_a_fail(self):
+        c = probe.check_automation_build(False)
+        self.assertEqual(c["status"], "WARN")
+
+    def test_build_failure_is_reported(self):
+        saved = probe.build_binary
+
+        def boom(run_dir, release=False, out=print):
+            raise probe.ProbeError("cargo exploded")
+
+        probe.build_binary = boom
+        try:
+            c = probe.check_automation_build(True)
+        finally:
+            probe.build_binary = saved
+        self.assertEqual(c["status"], "FAIL")
+        self.assertIn("cargo exploded", c["detail"])
+
+
+class ProcessChain(unittest.TestCase):
+    def test_walks_parents_until_pid_1(self):
+        names = {10: "python3", 20: "zsh", 30: "Terminal"}
+        parents = {10: 20, 20: 30, 30: 1}
+        saved_name, saved_parent = probe._process_name, probe._parent_pid
+        probe._process_name = lambda pid: names[pid]
+        probe._parent_pid = lambda pid: parents.get(pid)
+        try:
+            chain = probe._process_chain(10)
+        finally:
+            probe._process_name, probe._parent_pid = saved_name, saved_parent
+        self.assertEqual(chain, ["python3", "zsh", "Terminal"])
+
+    def test_stops_at_depth(self):
+        saved_name, saved_parent = probe._process_name, probe._parent_pid
+        probe._process_name = lambda pid: f"p{pid}"
+        probe._parent_pid = lambda pid: pid + 1
+        try:
+            chain = probe._process_chain(1000, depth=3)
+        finally:
+            probe._process_name, probe._parent_pid = saved_name, saved_parent
+        self.assertEqual(len(chain), 3)
 
 
 if __name__ == "__main__":
