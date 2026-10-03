@@ -384,31 +384,52 @@ Check side effects inside the same `call` as the action:
   (`ubilink-graph.sqlite`, `plugins-state.json`) and fixture files the app rewrites
 - `pasteboard:{...}`: the pasteboard
 
-Record a scenario run by pinning its `result.json` and every artifact it lists. Use
-`--result pass` only when its `exit` is 0; otherwise record `--result fail` with the
-failing step from the transcript:
+Record every scenario a feature's map entry names in one feature record:
+
+- Copy each scenario's artifacts to a shared staging directory first, renamed with a
+  `<scenario>-` prefix. The recorder flattens artifacts by file name, so two scenarios'
+  `result.json` and `transcript.txt` would otherwise collide.
+- Derive `--result` from every scenario's exit code: `pass` only if all of them exited
+  0, otherwise `fail`.
+
+The example is for `shell`, whose map entry names one scenario; list every scenario the
+entry names in `SCENARIOS`:
 
 ```sh
-R="$OUT/shell"
+FEATURE=shell
+SCENARIOS="shell"
+REC="$WT/.verify-run/$INSTANCE/record-$FEATURE"
+rm -rf "$REC"; mkdir -p "$REC"
+RESULT=pass
+OBSERVED=""
+for name in $SCENARIOS; do
+  R="$OUT/$name"
+  e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
+  [ "$e" -eq 0 ] || RESULT=fail
+  OBSERVED="$OBSERVED $name: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json");"
+  for f in "$R"/*; do cp "$f" "$REC/$name-$(basename "$f")"; done
+done
 python3 "$H" doctor --instance "$INSTANCE"
-python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature shell \
-  --verifier "$VERIFIER" --result pass \
-  --action "scenario shell (desktop-gpui/probes/shell.json) on instance $INSTANCE" \
-  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
-  --side-effect "as asserted by the scenario's steps (opened sink, data_dir); see result.json" \
-  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature "$FEATURE" \
+  --verifier "$VERIFIER" --result "$RESULT" \
+  --action "scenarios $SCENARIOS (desktop-gpui/probes/*.json) on instance $INSTANCE" \
+  --observed "$OBSERVED" \
+  --side-effect "as asserted by the scenarios' steps (opened sink, data_dir, files, pasteboard); see each result.json" \
+  $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
-`result.json`'s `sha` must equal the evidence record's commit. Both come from the same
-checkout: the recorder reads `--worktree "$WT"`, and `scenario` reads the same checkout.
-Record one scenario per feature record, because the recorder flattens artifacts by file
-name. For an ad-hoc `call`, once the drive has passed, record each proof the same way.
-If it failed, record `--result fail` with what you saw:
+Each `result.json`'s `sha` must equal the evidence record's commit. Both come from the
+same checkout: the recorder reads `--worktree "$WT"`, and `scenario` reads the same
+checkout.
+
+For an ad-hoc `call`, save its exit code right after the drive (`DRIVE_EXIT=$?`) and
+derive `--result` from it the same way:
 
 ```sh
+[ "$DRIVE_EXIT" -eq 0 ] && RESULT=pass || RESULT=fail
 python3 "$H" doctor --instance "$INSTANCE"
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature shell \
-  --verifier "$VERIFIER" --result pass \
+  --verifier "$VERIFIER" --result "$RESULT" \
   --action "trigger_hotkey capture/browser/settings, resign_key and a real deactivation on each, open_view browser, on instance $INSTANCE" \
   --observed "capture and browser: verified popup, blurred, hide on loss of key; settings stays open; tray open_view switches route" \
   --side-effect "opened sink stayed [] (nothing launched); pasteboard unchanged; data_dir is the instance's own temp dir" \
