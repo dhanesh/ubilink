@@ -29,7 +29,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::{AnyWindowHandle, App};
@@ -195,14 +195,24 @@ fn run(verb: Verb, cx: &mut App) -> Outcome {
         Verb::State => Ok(state_json(cx)),
         Verb::Metrics => {
             let (capacity, samples) = store::metrics();
-            Ok(json!({"capacity": capacity, "samples": samples}))
+            // Additive to Task 6's shape: `summary.<kind>` = {count, p50, p99, max} in
+            // ms over the ring, so R5's probe asserts the budget without client maths.
+            let summary: Map<String, Value> = store::MetricKind::ALL
+                .iter()
+                .map(|k| {
+                    (
+                        k.as_str().to_string(),
+                        json!(store::summarise(&samples, *k)),
+                    )
+                })
+                .collect();
+            Ok(json!({"capacity": capacity, "samples": samples, "summary": summary}))
         }
         Verb::TriggerHotkey(route) => {
             let id = shell::hotkey_id_for(route, cx)
                 .ok_or_else(|| format!("no hotkey bound to {}", route.as_str()))?;
-            // Measured from here: R5's hotkey-to-first-frame clock starts when the
-            // hotkey path is entered, exactly where a real Carbon event would enter it.
-            store::mark_hotkey(route, Instant::now());
+            // R5's hotkey-to-first-frame clock starts inside `handle_event`, where a
+            // real Carbon event enters the shell too, so both are timed alike.
             shell::handle_event(ShellEvent::HotKey { id, pressed: true }, cx);
             Ok(state_json(cx))
         }

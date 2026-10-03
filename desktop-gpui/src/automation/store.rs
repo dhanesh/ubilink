@@ -69,20 +69,33 @@ pub fn fixtures() -> BTreeMap<Fixture, PathBuf> {
 
 // ── metrics ring buffer (R5's latency numbers) ──────────────────────────────
 //
-// Task 5 hand-off: once `a11y` activates a window's AccessKit tree it stays active
-// for that window's lifetime (GPUI then builds the tree on every frame), so measure
-// latency on fresh windows or before any `a11y` call on the window being timed.
+// Once `a11y` activates a window's AccessKit tree it stays active for that window's
+// lifetime (GPUI then builds the tree on every frame), so latency is measured on
+// fresh windows, before any `a11y` call: the panel-hotkey probe runs its 50-trigger
+// loop first. Producer: `shell::panel::PanelView` (timed at the first frame's
+// present, U1/R5); t0 comes from `mark_hotkey`, set by `shell::handle_event`.
 
 /// What a sample measures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-// Task 5 (R5 latency) records these; until it lands only tests construct them.
-#[allow(dead_code)]
 pub enum MetricKind {
     /// Hotkey press (or `trigger_hotkey`) to the panel's first painted frame.
     HotkeyToFirstFrame,
-    /// A view's construction to its first painted frame.
+    /// A view's construction to its first painted frame. Phase 1's views record it.
+    #[allow(dead_code)]
     ViewFirstFrame,
+}
+
+impl MetricKind {
+    pub const ALL: [MetricKind; 2] = [MetricKind::HotkeyToFirstFrame, MetricKind::ViewFirstFrame];
+
+    /// The serialised name, the key `metrics.summary` uses.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MetricKind::HotkeyToFirstFrame => "hotkey_to_first_frame",
+            MetricKind::ViewFirstFrame => "view_first_frame",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -135,7 +148,6 @@ static METRICS: Mutex<Ring> = Mutex::new(Ring::new(METRICS_CAPACITY));
 /// at the first frame and records `HotkeyToFirstFrame`.
 static HOTKEY_MARK: Mutex<Option<(Route, Instant)>> = Mutex::new(None);
 
-#[allow(dead_code)] // Task 5 (R5) is the producer.
 pub fn record_metric(sample: Sample) {
     lock(&METRICS).push(sample);
 }
@@ -145,11 +157,44 @@ pub fn metrics() -> (usize, Vec<Sample>) {
     (m.capacity(), m.snapshot())
 }
 
+/// Percentiles over one kind's samples in the ring, what R5's probe asserts on.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Summary {
+    pub count: usize,
+    pub p50: Option<f64>,
+    pub p99: Option<f64>,
+    pub max: Option<f64>,
+}
+
+/// Nearest-rank percentile (the smallest sample with at least `p`% of samples at or
+/// below it): no interpolation, so a reported p99 is always a latency that happened.
+fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let rank = ((p / 100.0) * sorted.len() as f64).ceil() as usize;
+    Some(sorted[rank.clamp(1, sorted.len()) - 1])
+}
+
+pub fn summarise(samples: &[Sample], kind: MetricKind) -> Summary {
+    let mut ms: Vec<f64> = samples
+        .iter()
+        .filter(|s| s.kind == kind)
+        .map(|s| s.ms)
+        .collect();
+    ms.sort_by(f64::total_cmp);
+    Summary {
+        count: ms.len(),
+        p50: percentile(&ms, 50.0),
+        p99: percentile(&ms, 99.0),
+        max: ms.last().copied(),
+    }
+}
+
 pub fn mark_hotkey(route: Route, at: Instant) {
     *lock(&HOTKEY_MARK) = Some((route, at));
 }
 
-#[allow(dead_code)] // Task 5 (R5) is the consumer.
 pub fn take_hotkey_mark() -> Option<(Route, Instant)> {
     lock(&HOTKEY_MARK).take()
 }
@@ -206,6 +251,30 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({"kind": "hotkey_to_first_frame", "route": "browser", "ms": 41.5})
+        );
+    }
+
+    #[test]
+    fn summary_uses_nearest_rank_percentiles_per_kind() {
+        let mut samples: Vec<Sample> = (1..=50)
+            .map(|i| {
+                let mut s = sample(f64::from(i));
+                s.kind = MetricKind::HotkeyToFirstFrame;
+                s
+            })
+            .collect();
+        samples.push(sample(999.0)); // another kind: not counted
+        let s = summarise(&samples, MetricKind::HotkeyToFirstFrame);
+        assert_eq!(s.count, 50);
+        assert_eq!(s.p50, Some(25.0));
+        assert_eq!(s.p99, Some(50.0), "ceil(0.99 * 50) = 50th of 50");
+        assert_eq!(s.max, Some(50.0));
+        let one = summarise(&samples, MetricKind::ViewFirstFrame);
+        assert_eq!((one.count, one.p50, one.p99), (1, Some(999.0), Some(999.0)));
+        let none = summarise(&[], MetricKind::HotkeyToFirstFrame);
+        assert_eq!(
+            (none.count, none.p50, none.p99, none.max),
+            (0, None, None, None)
         );
     }
 
