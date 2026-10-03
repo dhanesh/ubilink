@@ -1,0 +1,168 @@
+{
+  "description": "R3: the capture view lists the captured resource's backlinks newest first: exactly the 3 seeded ones, never the decoy; a fourth, newer backlink appears first after the view reopens",
+  "requirement": "R3 (GPUI Phase 1)",
+  "notes": [
+    "setup.graph seeds the instance's ubilink-graph.sqlite with graph-backlinks.json exactly as the core's import_json would write it (probes/README.md, seed_graph). Link timestamps are distinct; the decoy is a captured resource with no link to the subject.",
+    "capture-subject.json captures the graph's subject (an https URI, so the core's capture validation admits it).",
+    "Each backlink row is a ListItem whose subtree carries the resource's name and URI as text (deep match, README contract); the sequence is asserted on URIs AND on names, so an over-truncated URI label cannot make the order pass by its common 'https:' prefix.",
+    "seed_graph merges graph-backlinks-newer.json into the live graph (one more resource, one newer link); the view must re-query when it reopens."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "capture": "capture-subject.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "graph seeded: 3 backlinks + decoy",
+      "graph": true,
+      "link_count": 3,
+      "resource_count": 5
+    },
+    {
+      "name": "capture the subject",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "subject captured",
+      "see": {
+        "role": "Label",
+        "text": "https://subject.example/note"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "exactly the 3 backlinks, newest first (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://gamma.example/three",
+              "https://beta.example/two",
+              "https://alpha.example/one"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Gamma Doc",
+              "Beta Post",
+              "Alpha Paper"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        }
+      ],
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the decoy is not listed",
+      "see": [
+        {
+          "text": "https://decoy.example/unrelated"
+        },
+        {
+          "text": "Decoy Unrelated"
+        }
+      ],
+      "absent": true,
+      "route": "capture"
+    },
+    {
+      "name": "a fourth, newer backlink lands in the graph",
+      "seed_graph": "graph-backlinks-newer.json"
+    },
+    {
+      "graph": true,
+      "link_count": 4,
+      "resource_count": 6
+    },
+    {
+      "name": "close the view",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "reopen it",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "the newer backlink comes first, then the other three",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://delta.example/four",
+              "https://gamma.example/three",
+              "https://beta.example/two",
+              "https://alpha.example/one"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Delta Memo",
+              "Gamma Doc",
+              "Beta Post",
+              "Alpha Paper"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        }
+      ],
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "see": {
+        "text": "https://decoy.example/unrelated"
+      },
+      "absent": true,
+      "route": "capture"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

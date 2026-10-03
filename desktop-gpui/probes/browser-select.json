@@ -1,0 +1,150 @@
+{
+  "description": "R6: Down/Up move the selection (row 3, then row 2 carries the selected flag) and Enter opens row 2's URI through the core opener (the opened sink)",
+  "requirement": "R6 (GPUI Phase 1)",
+  "notes": [
+    "graph-backlinks.json seeded; rows in list_links order (updated_at DESC, rowid DESC): row 1 Decoy Unrelated, row 2 Gamma Doc, row 3 Beta Post.",
+    "Selection starts on row 1. The selected flag is gpui-component List's own aria_selected on the ListItem (A11Y-NOTES.md).",
+    "Automation builds route the core opener to the opened sink (S2/O4), so nothing launches; the sink's target is the URI that would have opened."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json"
+  },
+  "steps": [
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "rows in list order",
+      "see": {
+        "sequence": {
+          "role": "ListItem",
+          "texts": [
+            "https://decoy.example/unrelated",
+            "https://gamma.example/three",
+            "https://beta.example/two"
+          ],
+          "mode": "prefix",
+          "deep": true
+        }
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "row 1 selected at open",
+      "see": {
+        "role": "ListItem",
+        "nth": 0,
+        "state": {
+          "selected": true
+        }
+      },
+      "route": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "down down"
+      }
+    },
+    {
+      "name": "row 3 carries the selected flag",
+      "see": [
+        {
+          "role": "ListItem",
+          "nth": 2,
+          "state": {
+            "selected": true
+          },
+          "text": "https://beta.example/two",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "nth": 0,
+          "state": {
+            "selected": {
+              "ne": true
+            }
+          }
+        },
+        {
+          "role": "ListItem",
+          "nth": 1,
+          "state": {
+            "selected": {
+              "ne": true
+            }
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "up"
+      }
+    },
+    {
+      "name": "row 2 carries the selected flag",
+      "see": [
+        {
+          "role": "ListItem",
+          "nth": 1,
+          "state": {
+            "selected": true
+          },
+          "text": "https://gamma.example/three",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "nth": 2,
+          "state": {
+            "selected": {
+              "ne": true
+            }
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "nothing opened yet",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "the opened sink reports row 2's URI, once",
+      "call": "opened",
+      "retry_ms": 3000,
+      "expect": {
+        "": {
+          "len": 1
+        },
+        "0.target": "https://gamma.example/three"
+      }
+    }
+  ]
+}

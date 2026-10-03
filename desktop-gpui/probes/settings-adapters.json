@@ -1,0 +1,1014 @@
+{
+  "description": "R10: every non-built-in adapter's switch toggles off from the keyboard and is written to plugins-state.json, stays off across a restart, and toggling back on survives a restart too",
+  "requirement": "R10 (GPUI Phase 1)",
+  "notes": [
+    "Adapters are fixtures/adapters.json (ubilink-core's defaults, cross-checked by fixtures --check). The 8 non-built-in ones are toggled; Finder and Safari are built-in and must stay on.",
+    "Each Switch's accessible name is the adapter's app name exactly (README contract). It is reached with Tab (key_until, U4) and toggled with Space.",
+    "plugins-state.json is ubilink-app's format ({\"disabled\": [lowercased app names]}, app/src/state.rs), in the instance's data dir."
+  ],
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "every adapter has a switch, all on",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Arc",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Bear",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Brave Browser",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Google Chrome",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Microsoft Edge",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Opera",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Things3",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Vivaldi",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Finder",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Safari",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no override file yet",
+      "file": "{data_dir}/plugins-state.json",
+      "exists": false
+    },
+    {
+      "name": "off 1/8: Tab to Arc",
+      "key_until": {
+        "role": "Switch",
+        "text": "Arc",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 1/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 1/8: Arc switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Arc",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 1/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "arc"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 2/8: Tab to Bear",
+      "key_until": {
+        "role": "Switch",
+        "text": "Bear",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 2/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 2/8: Bear switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Bear",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 2/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "bear"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 3/8: Tab to Brave Browser",
+      "key_until": {
+        "role": "Switch",
+        "text": "Brave Browser",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 3/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 3/8: Brave Browser switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Brave Browser",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 3/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "brave browser"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 4/8: Tab to Google Chrome",
+      "key_until": {
+        "role": "Switch",
+        "text": "Google Chrome",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 4/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 4/8: Google Chrome switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Google Chrome",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 4/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "google chrome"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 5/8: Tab to Microsoft Edge",
+      "key_until": {
+        "role": "Switch",
+        "text": "Microsoft Edge",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 5/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 5/8: Microsoft Edge switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Microsoft Edge",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 5/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "microsoft edge"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 6/8: Tab to Opera",
+      "key_until": {
+        "role": "Switch",
+        "text": "Opera",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 6/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 6/8: Opera switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Opera",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 6/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "opera"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 7/8: Tab to Things3",
+      "key_until": {
+        "role": "Switch",
+        "text": "Things3",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 7/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 7/8: Things3 switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Things3",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 7/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "things3"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 8/8: Tab to Vivaldi",
+      "key_until": {
+        "role": "Switch",
+        "text": "Vivaldi",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "off 8/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "off 8/8: Vivaldi switch off",
+      "see": {
+        "role": "Switch",
+        "text": "Vivaldi",
+        "exact": true,
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "off 8/8: written to plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "contains": "vivaldi"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "len": 8
+        }
+      }
+    },
+    {
+      "name": "restart",
+      "restart": true
+    },
+    {
+      "name": "open settings after restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "every adapter still off; built-ins on",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Arc",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Bear",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Brave Browser",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Google Chrome",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Microsoft Edge",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Opera",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Things3",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Vivaldi",
+          "exact": true,
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Finder",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Safari",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "on 1/8: Tab to Arc",
+      "key_until": {
+        "role": "Switch",
+        "text": "Arc",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 1/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 1/8: Arc switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Arc",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 1/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "arc"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 2/8: Tab to Bear",
+      "key_until": {
+        "role": "Switch",
+        "text": "Bear",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 2/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 2/8: Bear switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Bear",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 2/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "bear"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 3/8: Tab to Brave Browser",
+      "key_until": {
+        "role": "Switch",
+        "text": "Brave Browser",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 3/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 3/8: Brave Browser switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Brave Browser",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 3/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "brave browser"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 4/8: Tab to Google Chrome",
+      "key_until": {
+        "role": "Switch",
+        "text": "Google Chrome",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 4/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 4/8: Google Chrome switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Google Chrome",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 4/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "google chrome"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 5/8: Tab to Microsoft Edge",
+      "key_until": {
+        "role": "Switch",
+        "text": "Microsoft Edge",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 5/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 5/8: Microsoft Edge switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Microsoft Edge",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 5/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "microsoft edge"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 6/8: Tab to Opera",
+      "key_until": {
+        "role": "Switch",
+        "text": "Opera",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 6/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 6/8: Opera switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Opera",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 6/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "opera"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 7/8: Tab to Things3",
+      "key_until": {
+        "role": "Switch",
+        "text": "Things3",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 7/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 7/8: Things3 switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Things3",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 7/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "things3"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 8/8: Tab to Vivaldi",
+      "key_until": {
+        "role": "Switch",
+        "text": "Vivaldi",
+        "exact": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "on 8/8: Space",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "on 8/8: Vivaldi switch on",
+      "see": {
+        "role": "Switch",
+        "text": "Vivaldi",
+        "exact": true,
+        "state": {
+          "toggled": true
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "on 8/8: removed from plugins-state.json",
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "not_contains": "vivaldi"
+        }
+      },
+      "timeout_ms": 2000
+    },
+    {
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "len": 0
+        }
+      }
+    },
+    {
+      "name": "restart again",
+      "restart": true
+    },
+    {
+      "name": "open settings after the second restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "every adapter still on",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Arc",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Bear",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Brave Browser",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Google Chrome",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Microsoft Edge",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Opera",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Things3",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Vivaldi",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Finder",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Switch",
+          "text": "Safari",
+          "exact": true,
+          "state": {
+            "toggled": true
+          }
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{data_dir}/plugins-state.json",
+      "expect": {
+        "disabled": {
+          "len": 0
+        }
+      }
+    }
+  ]
+}

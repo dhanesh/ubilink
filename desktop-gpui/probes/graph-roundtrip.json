@@ -1,0 +1,201 @@
+{
+  "description": "R11: Settings exports the graph to the fixture path as JSON whose link set equals the seed; after the graph is emptied, importing that file restores graph_stats and the a11y counts",
+  "requirement": "R11 (GPUI Phase 1)",
+  "notes": [
+    "Seed: graph-backlinks.json (5 resources, 3 links). export_path and import_path are the same fixture-supplied file, so this is a true export -> import round trip with no dialog (O4).",
+    "graph_stats = the graph step's resource_count/link_count read from the instance's ubilink-graph.sqlite; the a11y count is the stats line, worded as the Tauri settings view does (B1): '<resources> link(s) · <links> connection(s)' (README contract).",
+    "The 'empty-graph fixture': seed_graph with replace clears the live graph (like LinkGraph::clear) and imports graph-empty.json. Import merges, so importing an empty file alone could never empty the graph.",
+    "Settings re-reads the counts each time it is shown (README contract), so it is closed and reopened after the out-of-band change."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "export_path": "{root}/roundtrip-export.json",
+      "import_path": "{root}/roundtrip-export.json"
+    }
+  },
+  "steps": [
+    {
+      "graph": true,
+      "resource_count": 5,
+      "link_count": 3
+    },
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "a11y counts",
+      "see": {
+        "role": "Label",
+        "text": "5 links · 3 connections"
+      },
+      "exact": true,
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no export yet",
+      "file": "{root}/roundtrip-export.json",
+      "exists": false
+    },
+    {
+      "name": "Tab to Export",
+      "key_until": {
+        "role": "Button",
+        "text": "Export",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "exported to the fixture path as ubilink.graph.v3",
+      "file": "{root}/roundtrip-export.json",
+      "expect": {
+        "schema": "ubilink.graph.v3",
+        "resources": {
+          "len": 5
+        },
+        "links": {
+          "len": 3
+        }
+      },
+      "timeout_ms": 3000
+    },
+    {
+      "name": "its link set equals the seed",
+      "graph": true,
+      "export": "{root}/roundtrip-export.json",
+      "links": [
+        [
+          "https://subject.example/note",
+          "https://alpha.example/one"
+        ],
+        [
+          "https://subject.example/note",
+          "https://beta.example/two"
+        ],
+        [
+          "https://subject.example/note",
+          "https://gamma.example/three"
+        ]
+      ],
+      "link_count": 3,
+      "resource_count": 5
+    },
+    {
+      "name": "empty the graph (empty-graph fixture)",
+      "seed_graph": "graph-empty.json",
+      "replace": true
+    },
+    {
+      "graph": true,
+      "resource_count": 0,
+      "link_count": 0
+    },
+    {
+      "name": "close settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "reopen settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "a11y counts read 0",
+      "see": {
+        "role": "Label",
+        "text": "0 links · 0 connections"
+      },
+      "exact": true,
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Tab to Import",
+      "key_until": {
+        "role": "Button",
+        "text": "Import",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "graph_stats equal the original",
+      "graph": true,
+      "links": [
+        [
+          "https://subject.example/note",
+          "https://alpha.example/one"
+        ],
+        [
+          "https://subject.example/note",
+          "https://beta.example/two"
+        ],
+        [
+          "https://subject.example/note",
+          "https://gamma.example/three"
+        ]
+      ],
+      "resource_count": 5,
+      "link_count": 3,
+      "timeout_ms": 3000
+    },
+    {
+      "name": "a11y counts equal the original",
+      "see": {
+        "role": "Label",
+        "text": "5 links · 3 connections"
+      },
+      "exact": true,
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

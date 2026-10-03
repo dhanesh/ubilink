@@ -1,0 +1,65 @@
+{
+  "description": "The 15 GPUI Phase 1 acceptance scenarios (spec docs/superpowers/specs/2026-10-03-gpui-phase1-port.md, Requirements R1-R15), fixed at Phase 0 (T4). `probe.py list` reads this.",
+  "scenarios": [
+    {
+      "name": "capture-view",
+      "requirement": "R1"
+    },
+    {
+      "name": "copy-link",
+      "requirement": "R2"
+    },
+    {
+      "name": "backlinks",
+      "requirement": "R3"
+    },
+    {
+      "name": "link-browser",
+      "requirement": "R4"
+    },
+    {
+      "name": "link-browser-filter",
+      "requirement": "R5"
+    },
+    {
+      "name": "browser-select",
+      "requirement": "R6"
+    },
+    {
+      "name": "browser-drill",
+      "requirement": "R7"
+    },
+    {
+      "name": "link-marking",
+      "requirement": "R8"
+    },
+    {
+      "name": "onboarding",
+      "requirement": "R9"
+    },
+    {
+      "name": "settings-adapters",
+      "requirement": "R10"
+    },
+    {
+      "name": "graph-roundtrip",
+      "requirement": "R11"
+    },
+    {
+      "name": "graph-reset",
+      "requirement": "R12"
+    },
+    {
+      "name": "launch-at-login",
+      "requirement": "R13"
+    },
+    {
+      "name": "theming",
+      "requirement": "R14"
+    },
+    {
+      "name": "performance",
+      "requirement": "R15"
+    }
+  ]
+}

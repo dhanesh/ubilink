@@ -1,0 +1,558 @@
+{
+  "description": "R14: each of the 4 views, in light and dark, switches appearance live (same pid and window id) and samples its opaque surface, primary text and accent control within ΔE 3 of the token colours, with screenshots of all 8 states recorded",
+  "requirement": "R14 (GPUI Phase 1)",
+  "notes": [
+    "Expected colours come from design/ubilink-tokens.json via the converter's mapping (theme/mod.rs): surface = color.uiBg, text = color.text1, accent = color.accent. uiBg and text1 are translucent and the panel is blurred, so an 'opaque surface' is uiBg's RGB painted at full opacity (light #fafafc, dark #1c1c1e) and the expected text colour is text1 alpha-composited over that surface (light rgba(0,0,0,.88) -> #1e1e1e, dark rgba(255,255,255,.96) -> #f6f6f6). accent is opaque (#007aff / #0a84ff). The values are written here, not read from design/, so the proof cannot move with the tokens.",
+    "Where each sample is is the view's layout, so each view reports a region per sample in its state (view.theme_samples.surface/text/accent, window points, README contract); the colour is the probe's. The surface and accent are region means; the text is the best-matching pixel in its run (glyph cores carry the colour, antialiased edges do not).",
+    "Same pid: the probe's own child process is still the one it launched (process: unchanged). Same window id: saved per view before the first switch.",
+    "Screenshots go to ~/Library/Caches/ubilink-probe/shots/<run>/theming-<view>-<mode>.png (path printed at the end). Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL.",
+    "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions."
+  ],
+  "setup": {
+    "graph": "graph-ranking.json",
+    "fixtures": {
+      "capture": "capture-ok.json",
+      "permission": "permissions-two-missing.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "capture: open",
+      "call": "open_view",
+      "args": {
+        "route": "capture"
+      },
+      "expect": {
+        "route": "capture",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "capture: window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid_capture": "window_id"
+      }
+    },
+    {
+      "name": "capture/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light",
+        "override": "light"
+      }
+    },
+    {
+      "name": "capture/light: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "capture/light: same window, still on capture",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_capture"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "capture/light: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#fafafc",
+      "delta_e": 3
+    },
+    {
+      "name": "capture/light: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#1e1e1e",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "capture/light: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3
+    },
+    {
+      "name": "capture/light: screenshot recorded",
+      "screenshot": "capture-light"
+    },
+    {
+      "name": "capture/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark",
+        "override": "dark"
+      }
+    },
+    {
+      "name": "capture/dark: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "capture/dark: same window, still on capture",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_capture"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "capture/dark: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#1c1c1e",
+      "delta_e": 3
+    },
+    {
+      "name": "capture/dark: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#f6f6f6",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "capture/dark: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#0a84ff",
+      "delta_e": 3
+    },
+    {
+      "name": "capture/dark: screenshot recorded",
+      "screenshot": "capture-dark"
+    },
+    {
+      "name": "browser: open",
+      "call": "open_view",
+      "args": {
+        "route": "browser"
+      },
+      "expect": {
+        "route": "browser",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "browser: window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid_browser": "window_id"
+      }
+    },
+    {
+      "name": "browser/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light",
+        "override": "light"
+      }
+    },
+    {
+      "name": "browser/light: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "browser/light: same window, still on browser",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_browser"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "browser",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "browser/light: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#fafafc",
+      "delta_e": 3
+    },
+    {
+      "name": "browser/light: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#1e1e1e",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "browser/light: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3
+    },
+    {
+      "name": "browser/light: screenshot recorded",
+      "screenshot": "browser-light"
+    },
+    {
+      "name": "browser/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark",
+        "override": "dark"
+      }
+    },
+    {
+      "name": "browser/dark: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "browser/dark: same window, still on browser",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_browser"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "browser",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "browser/dark: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#1c1c1e",
+      "delta_e": 3
+    },
+    {
+      "name": "browser/dark: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#f6f6f6",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "browser/dark: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#0a84ff",
+      "delta_e": 3
+    },
+    {
+      "name": "browser/dark: screenshot recorded",
+      "screenshot": "browser-dark"
+    },
+    {
+      "name": "onboarding: open",
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "onboarding: window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid_onboarding": "window_id"
+      }
+    },
+    {
+      "name": "onboarding/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light",
+        "override": "light"
+      }
+    },
+    {
+      "name": "onboarding/light: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "onboarding/light: same window, still on onboarding",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_onboarding"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "onboarding",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "onboarding/light: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#fafafc",
+      "delta_e": 3
+    },
+    {
+      "name": "onboarding/light: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#1e1e1e",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "onboarding/light: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3
+    },
+    {
+      "name": "onboarding/light: screenshot recorded",
+      "screenshot": "onboarding-light"
+    },
+    {
+      "name": "onboarding/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark",
+        "override": "dark"
+      }
+    },
+    {
+      "name": "onboarding/dark: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "onboarding/dark: same window, still on onboarding",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_onboarding"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "onboarding",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "onboarding/dark: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#1c1c1e",
+      "delta_e": 3
+    },
+    {
+      "name": "onboarding/dark: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#f6f6f6",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "onboarding/dark: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#0a84ff",
+      "delta_e": 3
+    },
+    {
+      "name": "onboarding/dark: screenshot recorded",
+      "screenshot": "onboarding-dark"
+    },
+    {
+      "name": "settings: open",
+      "call": "open_view",
+      "args": {
+        "route": "settings"
+      },
+      "expect": {
+        "route": "settings",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "settings: window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid_settings": "window_id"
+      }
+    },
+    {
+      "name": "settings/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light",
+        "override": "light"
+      }
+    },
+    {
+      "name": "settings/light: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "settings/light: same window, still on settings",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_settings"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "settings",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "settings/light: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#fafafc",
+      "delta_e": 3
+    },
+    {
+      "name": "settings/light: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#1e1e1e",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "settings/light: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3
+    },
+    {
+      "name": "settings/light: screenshot recorded",
+      "screenshot": "settings-light"
+    },
+    {
+      "name": "settings/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark",
+        "override": "dark"
+      }
+    },
+    {
+      "name": "settings/dark: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "settings/dark: same window, still on settings",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid_settings"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "expect": {
+        "route": "settings",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "settings/dark: opaque surface",
+      "pixel": "view.theme_samples.surface",
+      "color": "#1c1c1e",
+      "delta_e": 3
+    },
+    {
+      "name": "settings/dark: primary text run",
+      "pixel": "view.theme_samples.text",
+      "color": "#f6f6f6",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "settings/dark: accent control",
+      "pixel": "view.theme_samples.accent",
+      "color": "#0a84ff",
+      "delta_e": 3
+    },
+    {
+      "name": "settings/dark: screenshot recorded",
+      "screenshot": "settings-dark"
+    },
+    {
+      "name": "back to the system appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "system"
+      },
+      "expect": {
+        "override": "system"
+      }
+    }
+  ]
+}

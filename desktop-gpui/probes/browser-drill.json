@@ -1,0 +1,160 @@
+{
+  "description": "R7: Right drills into the selected link's connections with a visible trail naming the parent and the child list; Left empties the trail and restores the selection on row 2",
+  "requirement": "R7 (GPUI Phase 1)",
+  "notes": [
+    "graph-backlinks.json seeded; rows in list_links order (updated_at DESC, rowid DESC): row 1 Decoy Unrelated, row 2 Gamma Doc, row 3 Beta Post.",
+    "Gamma Doc's only connection in the fixture is the subject (https://subject.example/note).",
+    "Trail text follows the Tauri browser (B1, README contract): 'Your links' at the top level, 'Linked to <names joined by ' › '>' when drilled."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json"
+  },
+  "steps": [
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "top level: no trail",
+      "see": {
+        "role": "Label",
+        "text": "Your links"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "down"
+      }
+    },
+    {
+      "name": "row 2 selected",
+      "see": {
+        "role": "ListItem",
+        "nth": 1,
+        "state": {
+          "selected": true
+        },
+        "text": "https://gamma.example/three",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "right"
+      }
+    },
+    {
+      "name": "the trail names the parent",
+      "see": {
+        "role": "Label",
+        "text": "Linked to Gamma Doc"
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "the child list is the parent's connections, exactly",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://subject.example/note"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Subject Note"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser"
+    },
+    {
+      "name": "top-level rows are gone while drilled",
+      "see": {
+        "role": "ListItem",
+        "text": "https://decoy.example/unrelated",
+        "deep": true
+      },
+      "absent": true,
+      "route": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "left"
+      }
+    },
+    {
+      "name": "the trail is empty again",
+      "see": {
+        "text": "Linked to"
+      },
+      "absent": true,
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "see": {
+        "role": "Label",
+        "text": "Your links"
+      },
+      "route": "browser"
+    },
+    {
+      "name": "row 2 carries the selected flag again",
+      "see": [
+        {
+          "role": "ListItem",
+          "nth": 1,
+          "state": {
+            "selected": true
+          },
+          "text": "https://gamma.example/three",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "nth": 0,
+          "state": {
+            "selected": {
+              "ne": true
+            }
+          }
+        }
+      ],
+      "route": "browser"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

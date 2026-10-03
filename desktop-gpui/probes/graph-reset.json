@@ -1,0 +1,210 @@
+{
+  "description": "R12: Reset asks for confirmation first; Cancel leaves graph_stats unchanged; confirming empties the graph and the a11y count reads 0",
+  "requirement": "R12 (GPUI Phase 1)",
+  "notes": [
+    "The confirmation is asserted by its text and its two buttons, not by role=Dialog: gpui-component's Dialog container emits no Dialog node in gpui-pre 0.3.7 (A11Y-NOTES.md). Wording follows the Tauri settings view (B1, README contract).",
+    "Buttons are reached with Tab (key_until) and activated with Enter."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json"
+  },
+  "steps": [
+    {
+      "graph": true,
+      "resource_count": 5,
+      "link_count": 3
+    },
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "see": {
+        "role": "Label",
+        "text": "5 links · 3 connections"
+      },
+      "exact": true,
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no confirmation before Reset",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "absent": true,
+      "route": "settings"
+    },
+    {
+      "name": "Tab to Reset",
+      "key_until": {
+        "role": "Button",
+        "text": "Reset",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "confirmation shown: question, Delete everything, Cancel",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Delete all captured links and connections?"
+        },
+        {
+          "role": "Button",
+          "text": "Delete everything"
+        },
+        {
+          "role": "Button",
+          "text": "Cancel"
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "asking deleted nothing",
+      "graph": true,
+      "resource_count": 5,
+      "link_count": 3
+    },
+    {
+      "name": "Tab to Cancel",
+      "key_until": {
+        "role": "Button",
+        "text": "Cancel",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "confirmation gone",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "absent": true,
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "Cancel left graph_stats unchanged",
+      "graph": true,
+      "resource_count": 5,
+      "link_count": 3,
+      "links": [
+        [
+          "https://subject.example/note",
+          "https://alpha.example/one"
+        ],
+        [
+          "https://subject.example/note",
+          "https://beta.example/two"
+        ],
+        [
+          "https://subject.example/note",
+          "https://gamma.example/three"
+        ]
+      ]
+    },
+    {
+      "see": {
+        "role": "Label",
+        "text": "5 links · 3 connections"
+      },
+      "exact": true,
+      "route": "settings"
+    },
+    {
+      "name": "Tab to Reset again",
+      "key_until": {
+        "role": "Button",
+        "text": "Reset",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "see": {
+        "role": "Label",
+        "text": "Delete all captured links and connections?"
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "Tab to Delete everything",
+      "key_until": {
+        "role": "Button",
+        "text": "Delete everything",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "Confirm: graph_stats report 0",
+      "graph": true,
+      "resource_count": 0,
+      "link_count": 0,
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the a11y count reads 0",
+      "see": {
+        "role": "Label",
+        "text": "0 links · 0 connections"
+      },
+      "exact": true,
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

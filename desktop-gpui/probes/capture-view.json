@@ -1,0 +1,144 @@
+{
+  "description": "R1: the capture view opens in `capturing` before the core answers, then shows the captured name and URI (a11y and OCR), and on a failed capture shows what failed and what to do",
+  "requirement": "R1 (GPUI Phase 1)",
+  "notes": [
+    "capture-delayed.json resolves 300 ms after the capture request. The trigger_hotkey reply is the shell's state the moment the panel is asked to show, so view.phase == 'capturing' there is the render-first proof (TN1); the a11y 'Capturing' node must then be seen while the fixture is still pending (timeout 250 ms, inside the 300 ms window).",
+    "Text proofs use the in-process a11y tree; the OCR step reads the pixels of the same window and needs Screen Recording (ENV-BLOCKED without it, never a FAIL).",
+    "The failure message is the fixture's own sentence (it says what failed and what to do, U3), asserted exactly so a generic 'Something went wrong' cannot pass.",
+    "View-state fields used: view.phase (README 'Phase 1 view-state contract')."
+  ],
+  "setup": {
+    "fixtures": {
+      "capture": "capture-delayed.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "nothing captured before the hotkey",
+      "call": "state",
+      "expect": {
+        "route": null
+      }
+    },
+    {
+      "name": "hotkey opens the view already in capturing (before the 300 ms capture resolves)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "capturing"
+      }
+    },
+    {
+      "name": "a11y Capturing node while the capture is pending",
+      "see": {
+        "role": "Label",
+        "text": "Capturing"
+      },
+      "route": "capture",
+      "timeout_ms": 250
+    },
+    {
+      "name": "captured: name and URI in the a11y tree",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Delayed Capture Target"
+        },
+        {
+          "role": "Label",
+          "text": "https://example.com/delayed"
+        }
+      ],
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "capturing indicator gone once captured",
+      "see": {
+        "text": "Capturing"
+      },
+      "absent": true,
+      "route": "capture"
+    },
+    {
+      "call": "state",
+      "expect": {
+        "view.phase": "captured"
+      }
+    },
+    {
+      "name": "captured: name and URI on screen (OCR)",
+      "ocr": [
+        "Delayed Capture Target",
+        "https://example.com/delayed"
+      ]
+    },
+    {
+      "name": "load the failing capture",
+      "call": "load_fixture",
+      "args": {
+        "kind": "capture",
+        "path": "{fixtures}/capture-failed.json"
+      }
+    },
+    {
+      "name": "hotkey hides the panel",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "hotkey captures again (fails)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "a11y error node states the failure and the next step (verbatim fixture text)",
+      "see": {
+        "role": "Label",
+        "text": "Safari returned no active resource — open something there and try again."
+      },
+      "exact": true,
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no stale capture shown with the error",
+      "see": {
+        "text": "Delayed Capture Target"
+      },
+      "absent": true,
+      "route": "capture"
+    },
+    {
+      "call": "state",
+      "expect": {
+        "view.phase": "failed"
+      }
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}
