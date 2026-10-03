@@ -25,6 +25,11 @@ field).
 
 ## Drive it
 
+Three commands: a `call` that toggles off, a real `restart` (SKILL.md's "Proving
+persistence" section), then a `call` that confirms the switch is still off and
+toggles it back on, then a second `restart` and a third `call` confirming it is on
+again.
+
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/captures/settings-adapters"
 python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
@@ -35,21 +40,40 @@ python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
   'step:{"key_until":{"role":"Switch","text":"Arc","state":{"focused":true}},"key":"tab"}' \
   'key:{"keys":"space"}' \
   'see:{"role":"Switch","text":"Arc","state":{"toggled":false}}' \
-  'step:{"file":"{data_dir}/plugins-state.json","expect":{"disabled":{"contains":"arc"}}}' \
+  'step:{"file":"{data_dir}/plugins-state.json","expect":{"disabled":{"contains":"arc"}}}'
+echo "off exit $?"
+
+python3 "$H" restart --instance "$INSTANCE" --verifier "$VERIFIER"
+echo "restart exit $?"
+
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
+  'open_view:{"route":"settings"}' \
+  'wait_state:{"shell.visible":true,"route":"settings"}' \
+  'see:{"role":"Switch","text":"Arc","state":{"toggled":false}}' \
   'step:{"key_until":{"role":"Switch","text":"Arc","state":{"focused":true}},"key":"tab"}' \
   'key:{"keys":"space"}' \
   'see:{"role":"Switch","text":"Arc","state":{"toggled":true}}' \
   'step:{"file":"{data_dir}/plugins-state.json","expect":{"disabled":{"not_contains":"arc"}}}'
-echo "exit $?"
+echo "on exit $?"
+
+python3 "$H" restart --instance "$INSTANCE" --verifier "$VERIFIER"
+echo "restart exit $?"
+
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
+  'open_view:{"route":"settings"}' \
+  'see:{"role":"Switch","text":"Arc","state":{"toggled":true}}'
+echo "survives-on exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0. `plugins-state.json` is
-`ubilink-app`'s own format (`{"disabled": [lowercased app names]}`) in the instance's
-own `{data_dir}`; it does not exist until the first toggle writes it. The full Phase
-1 scenario (`probes/settings-adapters.json`) repeats this for all 8 non-built-in
-adapters and restarts the instance twice (off survives, then on survives) — this
-map's single round proves the write; see Gotchas for why restart stays out of this
-skill's `call`.
+Expected: every `call` prints `"ok": true` lines and exits 0; each `restart` prints
+`{"RESTARTED": {..., "data_dir_kept": true, ...}}` and exits 0 (it keeps the temp
+root, so `plugins-state.json` and the fixture copy survive; it replays no fixture
+here since none was loaded). `plugins-state.json` is `ubilink-app`'s own format
+(`{"disabled": [lowercased app names]}`) in the instance's `{data_dir}`; it does not
+exist until the first toggle writes it. Run the doctor again after each `restart`
+(SKILL.md: `process` must now match the new pid) before recording. The full Phase 1
+scenario (`probes/settings-adapters.json`) repeats this shape for all 8 non-built-in
+adapters.
 
 ## Proof
 
@@ -57,21 +81,21 @@ skill's `call`.
   the app's own name; built-ins carry no switch to turn off.
 - **Keyboard-operable.** Reached by `key_until` (no hard-coded focus sequence),
   toggled with Space.
-- **Persisted.** Turning an adapter off adds its lowercased name to
-  `plugins-state.json`'s `disabled` list in the instance's data dir; turning it back
-  on removes it. That file is exactly what `ubilink-app`'s `list_plugins` reads on
-  every launch, so writing it correctly is the persistence proof this skill can make
-  without restarting the process (see Gotchas).
+- **Survives a real restart, off then on.** After the off-toggle and a real
+  `restart` (same binary, same data dir, fixtures replayed), the switch still reads
+  off and `plugins-state.json` still lists the adapter as disabled; after toggling
+  it on and a second `restart`, the switch reads on and the adapter is gone from
+  `disabled`. This is the app's own startup read of `plugins-state.json`, not an
+  assertion about the file alone.
 
 ## Gotchas
 
-- This skill's `call` refuses the `restart` step (SKILL.md's Drive section), so
-  "survives a restart" is proven here by asserting the on-disk write directly rather
-  than by actually stopping and relaunching the instance — stopping an instance
-  removes its temp root entirely (SKILL.md's Cleanup section), so there is no way to
-  restart the *same* process with the *same* data dir through this skill's public
-  commands. `scripts/probe.py run settings-adapters` is the tool that drives the full
-  restart-then-reread proof.
+- `restart` is a harness command between two `call`s (SKILL.md's "Proving
+  persistence" section), not a step inside `call` — `call` itself still refuses a
+  `restart` step. It quits the app by its recorded pid, keeps the temp root (data
+  dir, fixture copy, log), relaunches the same binary and replays every fixture
+  loaded so far; it refuses (exit 2) if the binary changed since launch or the root
+  is gone.
 - `adapters.json` is cross-checked against `src-tauri/src/adapters.default.json` by
   `scripts/probe.py fixtures --check` (outside this skill); this map takes the
   fixture's adapter list as given rather than re-deriving it.
