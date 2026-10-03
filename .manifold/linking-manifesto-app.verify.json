@@ -5,6 +5,7 @@
     "scope": "foundation slice (binding-first); remainder deferred by m4 STEP 0-B",
     "phase_after": "GENERATED",
     "convergence": "IN_PROGRESS",
+    "note": "This snapshot (2026-06-25, rounds R16-R18) predates the D22 GPUI shell swap (2026-10-04) and describes the Tauri webview panel (D8/D11), now superseded. In particular the U1/U2/U4 SATISFIED calls below (\"VERIFIED ... on a real Mac\") are about that Tauri panel only and do not establish anything about the GPUI shell. Current, GPUI-shell-scoped status lives in linking-manifesto-app.json's required_truths: RT-9 (U1/U2, PARTIAL) and RT-11 (U4, PARTIAL). See also U3/RT-7 and U5/RT-12.",
     "matrix": [
       {
         "constraint": "B1",
@@ -109,7 +110,8 @@
         "docs": "◐",
         "ops": "-",
         "status": "SATISFIED",
-        "gap": "VERIFIED (R17, measured on a real Mac, n=100): hotkey->first-paint p50=27ms, p99=90ms — well under the p50<80/p99<200 bar; capture still targets the app you were in (bear:// from Bear), correctness preserved. Fix: render-first via Accessory activation policy + async capture — the spinner paints before the (osascript, ~500ms) capture runs behind it; show() no longer steals app-frontmost. Was p50=598/p99=640 when capture blocked the paint. Render-first CONFIRMED live (R16): panel/spinner painted before capture resolved, felt instant, no blank-then-pop. Residual narrowed to RECORDED p99<200ms/p50<80ms — UBILINK_PERF perf harness added R16 (Rust perf-mark + in-panel p50/p99 readout); awaiting one ≥100-press measured run on a display. Panel + render-first reducer (9 node tests) + REAL global hotkey wired, INVERTED capture (Rust captures the previously-frontmost app, emits to the webview, then shows the panel — links the app you were in, re-captures each press); persistent graph. Compiles. Residual: p99<200ms + on-screen behaviour need a display (docs/RUNBOOK-gui-panel.md)."
+        "gap": "VERIFIED (R17, measured on a real Mac, n=100): hotkey->first-paint p50=27ms, p99=90ms — well under the p50<80/p99<200 bar; capture still targets the app you were in (bear:// from Bear), correctness preserved. Fix: render-first via Accessory activation policy + async capture — the spinner paints before the (osascript, ~500ms) capture runs behind it; show() no longer steals app-frontmost. Was p50=598/p99=640 when capture blocked the paint. Render-first CONFIRMED live (R16): panel/spinner painted before capture resolved, felt instant, no blank-then-pop. Residual narrowed to RECORDED p99<200ms/p50<80ms — UBILINK_PERF perf harness added R16 (Rust perf-mark + in-panel p50/p99 readout); awaiting one ≥100-press measured run on a display. Panel + render-first reducer (9 node tests) + REAL global hotkey wired, INVERTED capture (Rust captures the previously-frontmost app, emits to the webview, then shows the panel — links the app you were in, re-captures each press); persistent graph. Compiles. Residual: p99<200ms + on-screen behaviour need a display (docs/RUNBOOK-gui-panel.md).",
+        "note": "Superseded 2026-10-04 by D22 — this SATISFIED call is for the Tauri webview panel (D8/D11). GPUI-shell-scoped status: RT-9 (PARTIAL) in linking-manifesto-app.json."
       },
       {
         "constraint": "U2",
@@ -119,7 +121,8 @@
         "docs": "-",
         "ops": "-",
         "status": "SATISFIED",
-        "gap": "VERIFIED (R16, human-directed live gate 2026-06-25 on the bundled ubilink.app): Cmd+Shift+K then Enter copied the link and dismissed the panel — exactly two actions, demonstrated live. <=2-action flow proven in the reducer (open->confirm; node test) + single primary Copy control with Enter shortcut (markup contract test). Residual: end-to-end 2-action demo on a real device."
+        "gap": "VERIFIED (R16, human-directed live gate 2026-06-25 on the bundled ubilink.app): Cmd+Shift+K then Enter copied the link and dismissed the panel — exactly two actions, demonstrated live. <=2-action flow proven in the reducer (open->confirm; node test) + single primary Copy control with Enter shortcut (markup contract test). Residual: end-to-end 2-action demo on a real device.",
+        "note": "Superseded 2026-10-04 by D22 — this SATISFIED call is for the Tauri webview panel (D8/D11). GPUI-shell-scoped status: RT-9 (PARTIAL) in linking-manifesto-app.json."
       },
       {
         "constraint": "U3",
@@ -140,7 +143,8 @@
         "docs": "✓",
         "ops": "-",
         "status": "SATISFIED",
-        "gap": "VERIFIED (R18, live VoiceOver + keyboard-only pass on a real Mac): VO announces the dialog, the resource name/URI live, 'Copy link, button, Enter', and backlinks as 'Open <name>, link'; errors announced immediately as an alert; keyboard-only Tab lands on Copy with the visible focus ring. Contrast already verified (12/12 pairs AA, computed). CONTRAST VERIFIED (R16, computed): all 12 text/UI pairs clear WCAG AA — fg 15.2:1, muted 9.0:1, error 7.7:1, accent 7.0:1, button-label 7.7:1, focus-ring 11.7:1 (>=3 non-text); perm pills 6.1-7.3:1. Static a11y contract TESTED (7 panel tests: role=dialog+aria-label, aria-live, role=alert, aria-keyshortcuts=Enter, :focus-visible, prefers-reduced-motion). Residual narrowed to LIVE runtime-AT observation only: keyboard-only Tab-to-Copy + VoiceOver announces dialog/status/alert/backlinks on a real display. Accessibility contract built + tested: role=dialog, aria-label, aria-live, role=alert, :focus-visible ring, prefers-reduced-motion (3 Rust markup/CSS tests). Residual ENV-blocked: keyboard-only + VoiceOver + AA-contrast pass on a real display."
+        "gap": "VERIFIED (R18, live VoiceOver + keyboard-only pass on a real Mac): VO announces the dialog, the resource name/URI live, 'Copy link, button, Enter', and backlinks as 'Open <name>, link'; errors announced immediately as an alert; keyboard-only Tab lands on Copy with the visible focus ring. Contrast already verified (12/12 pairs AA, computed). CONTRAST VERIFIED (R16, computed): all 12 text/UI pairs clear WCAG AA — fg 15.2:1, muted 9.0:1, error 7.7:1, accent 7.0:1, button-label 7.7:1, focus-ring 11.7:1 (>=3 non-text); perm pills 6.1-7.3:1. Static a11y contract TESTED (7 panel tests: role=dialog+aria-label, aria-live, role=alert, aria-keyshortcuts=Enter, :focus-visible, prefers-reduced-motion). Residual narrowed to LIVE runtime-AT observation only: keyboard-only Tab-to-Copy + VoiceOver announces dialog/status/alert/backlinks on a real display. Accessibility contract built + tested: role=dialog, aria-label, aria-live, role=alert, :focus-visible ring, prefers-reduced-motion (3 Rust markup/CSS tests). Residual ENV-blocked: keyboard-only + VoiceOver + AA-contrast pass on a real display.",
+        "note": "Superseded 2026-10-04 by D22 — this SATISFIED call (including the VoiceOver pass) is for the Tauri webview panel (D8/D11). GPUI-shell-scoped status: RT-11 (PARTIAL) in linking-manifesto-app.json; GPUI VoiceOver parity is explicitly deferred to an attended Phase 2 check."
       },
       {
         "constraint": "U5",

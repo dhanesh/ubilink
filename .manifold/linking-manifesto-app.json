@@ -936,6 +936,7 @@
         "maps_to": [
           "U4"
         ],
+        "parent": "OUTCOME",
         "relevance": 0.7,
         "confidence": 0.7,
         "evidence": [
@@ -961,6 +962,7 @@
         "maps_to": [
           "U5"
         ],
+        "parent": "OUTCOME",
         "relevance": 0.7,
         "confidence": 0.7,
         "evidence": [
