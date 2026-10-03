@@ -6,6 +6,9 @@ The linking panel is a **no-build, zero-npm-dependency** vanilla frontend in `di
 and the accessibility/structure contract are proven headlessly; what needs a real
 display + the Tauri webview is listed under "On a real Mac".
 
+For the GPUI port's unattended Phase 1 run (the `ubilink-next` probes under
+factory-conductor), see `docs/RUNBOOK-phase1-unattended.md` for the host preflight.
+
 ## What is already proven (no GUI needed)
 - **View-state logic:** 25 `node --test` cases. `dist/panel-state.test.mjs` covers
   the panel: open() renders synchronously without capture data (U1 render-first),
