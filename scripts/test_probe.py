@@ -549,26 +549,74 @@ class MinWindowSpanAndRank(unittest.TestCase):
         # "ab" embeds at (0,1) and (3,4), both span 2; the earliest start wins.
         self.assertEqual(probe.min_window_span("ab", "ab_ab"), (2, 0))
 
+    # Names below are deliberately non-matching filler ("Page") so these cases
+    # isolate ranking behaviour on the uri field alone; the next block covers
+    # the name field and the OR-across-fields/field-priority rules directly.
+
     def test_rank_orders_by_span_then_start_then_uri(self):
         # "xy" is tight (span 2) in the first uri, loose (span 4) in the second:
         # span is the primary key, so the tight one ranks first regardless of
         # uri ordering.
-        uris = ["https://b.example/w-x-y-z", "https://a.example/xy"]
-        self.assertEqual(probe.rank("xy", uris), ["https://a.example/xy", "https://b.example/w-x-y-z"])
+        items = [("Page", "https://b.example/w-x-y-z"), ("Page", "https://a.example/xy")]
+        self.assertEqual(probe.rank("xy", items), ["https://a.example/xy", "https://b.example/w-x-y-z"])
 
     def test_rank_tie_breaks_on_uri_ascending_when_span_and_start_tie(self):
-        uris = ["https://zzz.example/ab", "https://aaa.example/ab"]
+        items = [("Page", "https://zzz.example/ab"), ("Page", "https://aaa.example/ab")]
         self.assertEqual(
-            probe.rank("ab", uris), ["https://aaa.example/ab", "https://zzz.example/ab"]
+            probe.rank("ab", items), ["https://aaa.example/ab", "https://zzz.example/ab"]
         )
 
     def test_rank_drops_non_matches_and_is_case_insensitive(self):
-        uris = ["https://GitHub.com/x", "https://nomatch.example/zzz"]
-        self.assertEqual(probe.rank("gthb", uris), ["https://GitHub.com/x"])
+        items = [("Page", "https://GitHub.com/x"), ("Page", "https://nomatch.example/zzz")]
+        self.assertEqual(probe.rank("gthb", items), ["https://GitHub.com/x"])
 
     def test_rank_does_not_depend_on_corpus_order(self):
-        uris = ["https://a.example/gthb", "https://b.example/githubbbb"]
-        self.assertEqual(probe.rank("gthb", uris), probe.rank("gthb", list(reversed(uris))))
+        items = [("Page", "https://a.example/gthb"), ("Page", "https://b.example/githubbbb")]
+        self.assertEqual(probe.rank("gthb", items), probe.rank("gthb", list(reversed(items))))
+
+
+class ItemWindowTwoFieldRule(unittest.TestCase):
+    """`item_window` (Task 10 fix round 2, controller ruling R-m): an item
+    matches on `name` OR `uri`; the better (smaller) span wins, with `name`
+    breaking an exact span-and-start tie — required for parity with the Tauri
+    browser's filter, which already searches `${name} ${uri}`
+    (dist/browse-state.mjs)."""
+
+    def test_matches_on_name_when_uri_does_not_match_at_all(self):
+        # A Bear note: the title carries the match, its uri is an opaque id
+        # with no 'g' at all (so it cannot match "trgn" by any embedding).
+        got = probe.item_window("trgn", "Triage inbox notes", "bear://x-callback-url/open-note?id=7f3a9c21")
+        self.assertEqual(got, (9, 0, probe.NAME_FIELD))
+
+    def test_matches_on_uri_when_name_does_not_match_at_all(self):
+        got = probe.item_window("gthb", "Opaque title", "https://github.com/x")
+        self.assertEqual(got[2], probe.URI_FIELD)
+
+    def test_no_match_on_either_field_is_none(self):
+        self.assertIsNone(probe.item_window("zzzz", "no letters here", "https://nomatch.example/page"))
+
+    def test_the_tighter_field_wins_even_when_the_other_field_also_matches(self):
+        # Both fields match "rddt" ("Reddit discussion" / "https://rddt.example/..."),
+        # but the uri's literal "rddt" (span 4) is tighter than the name's
+        # "Reddit" (span 6) -- the uri field wins despite name's tie-break
+        # priority, because span is compared BEFORE field priority.
+        got = probe.item_window("rddt", "Reddit discussion", "https://rddt.example/thread/99231")
+        self.assertEqual(got, (4, 8, probe.URI_FIELD))
+
+    def test_name_wins_an_exact_span_and_start_tie(self):
+        # Both fields embed "ab" at the very start, span 2 -- an exact tie
+        # (span AND start), so field priority (name before uri) decides.
+        got = probe.item_window("ab", "ab-name", "ab-uri")
+        self.assertEqual(got, (2, 0, probe.NAME_FIELD))
+
+    def test_rank_result_is_unaffected_by_which_field_won_a_tie(self):
+        # Field priority only orders the two fields of ONE item; it must never
+        # leak into the cross-item comparison `rank` performs (which compares
+        # only span/start/uri, not field) -- two items tied on span+start but
+        # differing in which field won must still tie on `rank`'s own key.
+        name_wins = probe.item_window("ab", "ab-name", "ab-uri")
+        uri_wins = probe.item_window("ab", "zz-name", "ab-uri")
+        self.assertEqual(name_wins[:2], uri_wins[:2], "span/start equal regardless of which field won")
 
 
 class FixturesGenerator(unittest.TestCase):
@@ -701,7 +749,10 @@ class FixturesValidators(unittest.TestCase):
         # one loop instead of 20 hand-picked ones.
         forward = "abcdefghijklmnopqrstuvwxyz"
         backward = forward[::-1]
-        corpus = [forward, backward]
+        # name == uri for both items: this test is about disagreement/decoy
+        # detection in general, not the two-field OR rule (ItemWindowTwoFieldRule
+        # covers that), so there's nothing gained by giving them distinct fields.
+        corpus = [(forward, forward), (backward, backward)]
         good = [
             {"query": forward[:n], "expect_top3": [forward], "decoys": [backward]}
             for n in range(2, 22)  # 20 distinct, increasing-length queries

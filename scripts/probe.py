@@ -429,35 +429,72 @@ def min_window_span(query: str, text: str):
     return (best_len, best_start) if best_len is not None else None
 
 
-def rank(query: str, uris) -> list:
+def rank(query: str, items) -> list:
     """The reference ranking rule R5's filter must reproduce (normative spec in
-    fixtures/README.md, with pseudocode and worked examples). Matches against
-    each uri in `uris` (case-folded; names are not matched — see the README for
-    why), ordered by:
+    fixtures/README.md, with pseudocode and worked examples). `items` is an
+    iterable of `(name, uri)` pairs — matching both fields is required for
+    parity with the Tauri browser (`dist/browse-state.mjs`'s filter, which
+    already searches `${name} ${uri}`; controller ruling R-m, Task 10 fix
+    round 2): a Bear note's title is readable text, its `bear://` uri an
+    opaque id, and the reverse is just as real for other adapters.
 
-      1. the shortest minimum-window span containing the match (`min_window_span`,
-         NOT the greedy-leftmost embedding `is_subsequence` would find)
+    An item matches if `query` is an in-order subsequence of EITHER field
+    (case-folded). Ranked by:
+
+      1. the shortest minimum-window span containing the match
+         (`min_window_span`, NOT the greedy-leftmost embedding `is_subsequence`
+         would find), the BETTER (smaller) of the item's two fields
       2. that window's start index (earliest first)
-      3. no word-boundary/prefix bonus — deliberately: this is a single,
+      3. field priority: name before uri — reached only when span AND start
+         both tie across the two fields of the SAME item (a dedicated
+         per-item tie-break, not a ranking criterion between different items)
+      4. no word-boundary/prefix bonus — deliberately: this is a single,
          unambiguous number with no second scoring pass bolted on
-      4. the uri itself, case-folded, ascending — a total, stable tie-break
-         that does not depend on `uris`' own order (so a corpus handed in any
+      5. the uri itself, case-folded, ascending — a total, stable tie-break
+         that does not depend on `items`' own order (so a corpus handed in any
          order produces the same ranking)
 
-    Non-matches are dropped entirely (never ranked, however "close"). Returns
-    the matching uris in ranked order (every match, not just a top-N slice —
-    callers take `[:3]` for a "top 3").
+    Non-matches are dropped entirely (never ranked, however "close" on either
+    field). Returns the matching uris in ranked order (every match, not just a
+    top-N slice — callers take `[:3]` for a "top 3").
     """
     q = query.lower()
     hits = []
-    for uri in uris:
-        span = min_window_span(q, uri.lower())
-        if span is None:
+    for name, uri in items:
+        best = item_window(q, name, uri)
+        if best is None:
             continue
-        length, start = span
-        hits.append((length, start, uri.lower(), uri))
+        span, start, _field = best
+        hits.append((span, start, uri.lower(), uri))
     hits.sort(key=lambda h: (h[0], h[1], h[2]))
     return [h[3] for h in hits]
+
+
+# Field priority `item_window` breaks ties on: a title is what a user reads, so
+# it wins when its match is exactly as tight (span AND start) as the uri's —
+# never a claim that name matches outrank uri matches in general (see `rank`'s
+# own docstring and fixtures/README.md's `rddt` worked example).
+NAME_FIELD, URI_FIELD = 0, 1
+
+
+def item_window(query_lower: str, name: str, uri: str):
+    """(span, start, field) of the BETTER of `name`'s and `uri`'s own
+    `min_window_span` against `query_lower` (already case-folded), where
+    `field` is `NAME_FIELD` or `URI_FIELD`; `None` if neither field matches at
+    all. This is `rank`'s rules 1-3 (match-either-field, minimum span, earliest
+    start), scoped to one item — exposed separately so the name-before-uri tie
+    -break is directly testable independent of `rank`'s cross-item sort, which
+    never observes `field` (two different fields of the SAME item can only tie
+    with each other, never with another item's chosen field).
+    """
+    candidates = []
+    name_span = min_window_span(query_lower, name.lower())
+    if name_span is not None:
+        candidates.append((name_span[0], name_span[1], NAME_FIELD))
+    uri_span = min_window_span(query_lower, uri.lower())
+    if uri_span is not None:
+        candidates.append((uri_span[0], uri_span[1], URI_FIELD))
+    return min(candidates) if candidates else None
 
 
 def _load_fixture_json(path: Path):
@@ -709,15 +746,16 @@ def _validate_adapters(doc) -> list:
     return issues
 
 
-def _validate_ranking_golden(doc, corpus_uris: list) -> list:
+def _validate_ranking_golden(doc, corpus_items: list) -> list:
     """Validate ranking-golden.json against `rank()`, the normative scorer
     (fixtures/README.md): every `expect_top3` must equal `rank(query, corpus)`'s
     own top 3 EXACTLY (not just "each is some kind of match" — order included),
     so the table can never silently drift from the one rule it claims to follow.
     `decoys` are checked separately: each must be in the corpus and must not
-    appear in `rank()`'s result at all (not a match by any margin).
+    appear in `rank()`'s result at all (not a match on EITHER field, by any
+    margin). `corpus_items` is `[(name, uri), ...]` — `rank`'s two-field input.
     """
-    corpus_set = set(corpus_uris)
+    corpus_set = {uri for _, uri in corpus_items}
     issues = []
     if len(doc) != 20:
         issues.append(f"must have exactly 20 queries (the golden table), got {len(doc)}")
@@ -746,7 +784,7 @@ def _validate_ranking_golden(doc, corpus_uris: list) -> list:
             for uri in top3:
                 if uri not in corpus_set:
                     issues.append(f"{where} ({q!r}): expected uri {uri!r} is not in graph-ranking.json")
-            computed = rank(q, corpus_uris)[:3]
+            computed = rank(q, corpus_items)[:3]
             if top3 != computed:
                 issues.append(
                     f"{where} ({q!r}): expect_top3 {top3} disagrees with the reference "
@@ -755,7 +793,7 @@ def _validate_ranking_golden(doc, corpus_uris: list) -> list:
         for uri in decoys:
             if uri not in corpus_set:
                 issues.append(f"{where} ({q!r}): decoy {uri!r} is not in graph-ranking.json")
-            elif uri in rank(q, corpus_uris):
+            elif uri in rank(q, corpus_items):
                 issues.append(f"{where} ({q!r}): decoy {uri!r} IS ranked (matches), not a valid decoy")
     return issues
 
@@ -807,10 +845,12 @@ def _validate_fixture_file(name: str, path: Path) -> list:
         except ValueError as e:
             return [f"could not read graph-ranking.json to cross-check: {e}"]
         corpus_issues = _validate_graph_shape(corpus)
-        corpus_uris = [
-            r["uri"] for r in corpus.get("resources", []) if isinstance(r, dict) and isinstance(r.get("uri"), str)
+        corpus_items = [
+            (r.get("name"), r["uri"])
+            for r in corpus.get("resources", [])
+            if isinstance(r, dict) and isinstance(r.get("uri"), str) and isinstance(r.get("name"), str)
         ]
-        return _validate_ranking_golden(doc, corpus_uris) + [f"graph-ranking.json: {i}" for i in corpus_issues]
+        return _validate_ranking_golden(doc, corpus_items) + [f"graph-ranking.json: {i}" for i in corpus_issues]
     validator = _FIXTURE_VALIDATORS.get(name)
     if validator is None:
         return [f"no validator registered for {name}"]
