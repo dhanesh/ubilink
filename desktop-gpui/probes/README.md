@@ -10,6 +10,7 @@ the contract. Change it only together with `scripts/probe.py`, and keep
 python3 scripts/probe.py run shell                  # one instance
 python3 scripts/probe.py run shell --instances 2    # two at once, plus isolation checks
 python3 scripts/probe.py run shell panel-hotkey     # several scenarios in one run
+python3 scripts/probe.py list --expect 15           # the Phase 1 scenarios, each run, with results
 python3 -m unittest scripts/test_probe.py           # the engine's self-tests (no app)
 ```
 
@@ -72,8 +73,9 @@ in the `opened` sink. File dialogs take fixture paths (`load_fixture`).
   "requirement": "R4",
   "notes": ["optional free text"],
   "setup": {
-    "files":    {"{data_dir}/ubilink-graph.sqlite": "graphs/three-backlinks.sqlite"},
-    "fixtures": {"capture": "capture/delayed-300ms.json"}
+    "files":    {"{data_dir}/plugins-state.json": "some-state.json"},
+    "graph":    "graph-backlinks.json",
+    "fixtures": {"capture": "capture-delayed.json"}
   },
   "steps": [
     {"call": "trigger_hotkey", "args": {"action": "capture"}},
@@ -86,6 +88,9 @@ in the `opened` sink. File dialogs take fixture paths (`load_fixture`).
 - `setup.files` copies files into the instance before launch. Each key is a
   destination (placeholders allowed) and each value is a source relative to the
   instance's fixture copy, or an absolute path.
+- `setup.graph` (a path or a list of them, relative to the fixture copy) seeds the
+  instance's `{data_dir}/ubilink-graph.sqlite` from `ubilink.graph.v3` fixtures
+  before launch, the same way the `seed_graph` step does (below).
 - `setup.fixtures` sends `load_fixture {kind, path}` after launch. Relative paths
   resolve against the instance's fixture copy. The kinds are `capture`,
   `permission`, `graph_dir`, `export_path` and `import_path`
@@ -97,7 +102,8 @@ in the `opened` sink. File dialogs take fixture paths (`load_fixture`).
 
 Strings in `args`, `expect`, paths and `setup` may use `{root}`, `{data_dir}`,
 `{fixtures}`, `{probes}` (this directory), `{instance}` (the `UBILINK_INSTANCE`
-value) and, after a `pasteboard: set_nonce`, `{nonce}`.
+value), `{repo}` (the repository root; the Phase 1 scenarios use it only for
+`docs/PERFORMANCE.md`, R15's output) and, after a `pasteboard: set_nonce`, `{nonce}`.
 
 ### Steps
 
@@ -108,10 +114,10 @@ which is shown in the report, and a `block` id: consecutive steps with the same
 
 | Step | Value | Options | Checks |
 |---|---|---|---|
-| `call` | verb name | `args`, `expect`, `expect_error`, `retry_ms` | Sends `{"verb", "args"}` and requires `ok`, then every `expect` entry against `result`. `expect_error` (substring, or `true`) requires `ok: false` instead. `retry_ms` re-sends until the step passes or the time runs out. It is allowed only for read-only verbs: `state`, `metrics`, `window_id`, `a11y`, `opened`. |
+| `call` | verb name | `args`, `expect`, `expect_error`, `retry_ms`, `save` | Sends `{"verb", "args"}` and requires `ok`, then every `expect` entry against `result`. `expect_error` (substring, or `true`) requires `ok: false` instead. `retry_ms` re-sends until the step passes or the time runs out. It is allowed only for read-only verbs: `state`, `metrics`, `window_id`, `a11y`, `opened`. `save: {name: "dot.path"}` records values from the result (a missing path fails the step) for a later `{"saved": name}` matcher or `perf_doc compare`. |
 | `see` | a query, or a non-empty list of them (see [`see` queries](#see-queries)) | `absent`, `exact`, `count`, `min_count`, `max_count`, `route`, `timeout_ms` (default 3000) | Polls `a11y` (GPUI's AccessKit tree, read in-process with no TCC grant, spec TN5) until every query holds. `route` first requires `state.route` to equal it. `absent` also requires the tree to have at least one node other than the Window, so an empty tree can't pass it. Roles compare case-insensitively, ignoring punctuation. Text matching is described below. |
 | `ocr` | text or list | `absent`, `exact` | Runs `screencapture -l<window_id>` on the panel, then Vision OCR (`scripts/ocr.swift`), and requires each text in some line (or in all lines joined). Needs Screen Recording. |
-| `pixel` | `{x, y, w?, h?}` in window points from the top-left | `color` (`#rrggbb`, required), `delta_e` (default 3.0) | The region's mean sRGB colour must be within CIE76 ΔE of `color`. Uses the same capture as `ocr`, so it also needs Screen Recording. |
+| `pixel` | `{x, y, w?, h?}` in window points from the top-left, or a dot path into `state` where the view reports such a region | `color` (`#rrggbb`, required), `delta_e` (default 3.0), `match` (`mean`, default, or `best`) | The region's mean sRGB colour (`best`: its closest single pixel, for a text run whose antialiased edges are not the text colour) must be within CIE76 ΔE of `color`. A state path that holds no region is a FAIL (the view did not report it). Uses the same capture as `ocr`, so it also needs Screen Recording. |
 | `pasteboard` | `"set_nonce"` or `"read"` | `expect`, `changed` | `set_nonce` puts a unique string on the pasteboard and records the change count. `read` compares `pbpaste` against `expect` (a literal, which may be `"{nonce}"`, or a matcher). `changed: true/false` requires the change count to have risen (or not) since the last pasteboard step. |
 | `graph` | `true` | `db`, `export`, `links`, `no_links`, `link_count`, `resource_count`, `timeout_ms` | Reads the instance's graph read-only. The default is `{data_dir}/ubilink-graph.sqlite` (ubilink-core's file). `db` names another file, and `export` reads a Settings > Export JSON instead. `links`/`no_links` are `[[uriA, uriB], ...]` unordered pairs. |
 | `file` | path | `exists` (default true), `expect`, `timeout_ms` | The file exists (or not). With `expect`, it parses as JSON and meets the path expectations. |
@@ -120,6 +126,12 @@ which is shown in the report, and a `block` id: consecutive steps with the same
 | `activate_other` | `true` | `settle_ms` (default 300) | A real loss of key status for the panel: launches the probe's own activator (`scripts/probe-helpers/activator.swift`, compiled like the other helpers), a minimal app that makes itself active with a 1-point key window, waits for it to report `active`, holds for `settle_ms`, then quits it. No user app is ever launched (O4), and none is left running. A real deactivation test necessarily takes focus from your app for that moment. If the activator cannot become active in 8 s the step is ENV-BLOCKED. |
 | `restart` | `true` | | Stops the instance and relaunches it with the same temp root (data survives), then replays every fixture loaded so far, since fixtures live in app memory. |
 | `sleep_ms` | milliseconds | | Waits. Prefer `retry_ms` or `timeout_ms`. |
+| `key_until` | a node query (as in `see`) | `key` (default `tab`), `max_presses` (default 40, at most 200), `route` | Checks the query, then presses `key` (the `key` verb) and checks again, until it holds; FAIL after `max_presses`. "This control is reachable from the keyboard" (Phase 1 U4) without the probe hard-coding a view's tab order: the target is usually `{"role": "Button", "text": "Export", "state": {"focused": true}}`. |
+| `seed_graph` | a `ubilink.graph.v3` fixture path | `replace` (default false) | Writes the fixture into the instance's `{data_dir}/ubilink-graph.sqlite` with ubilink-core's own schema and the same statements `LinkGraph::import_json` runs (upsert by URI, guids kept, `updated_at = created_at`, resources in file order, one row per unordered link, dangling and self links skipped); `replace` first deletes every link and resource like `LinkGraph::clear`. Merges into a live instance's graph (SQLite locking makes it one more writer). It skips only the core's URI validation, so fixtures use allowed schemes. `test_probe.py` pins the schema to `src-tauri/src/graph.rs`. |
+| `process` | `"unchanged"` | | The instance is still the process this scenario launched (or last restarted), and alive: "the same pid" (Phase 1 R14). |
+| `screenshot` | a file-name-safe label | | Captures the panel like `ocr` and keeps the PNG at `~/Library/Caches/ubilink-probe/shots/<run>/<scenario>-<label>.png` (instance temp roots are deleted; the run prints the directory). Needs Screen Recording. |
+| `release_budget` | `true` | `cpu_pct_lt`, `footprint_mb_lt`, `binary_mb_lt` (all required), `idle_s` (default 60), `settle_s` (default 5) | Builds the stripped release build (no automation channel) and launches it as a second isolated instance (see [Release-build instances](#release-build-instances)), waits `settle_s`, then measures idle CPU as the `ps -o time=` CPU-time delta over `idle_s` seconds of wall time, physical footprint with `vmmap --summary`'s `Physical footprint:` line (Activity Monitor's Memory number) at the end, and the binary's size after `strip` (a copy). Each must be under its budget. Saves `idle_cpu_percent`, `physical_footprint_mb`, `stripped_binary_mb`. A `vmmap` refusal is ENV-BLOCKED. |
+| `perf_doc` | path of `docs/PERFORMANCE.md` (use `{repo}`) | `compare` (default false), `make_target` | Parses the doc's budget table ([PERFORMANCE.md format](#performancemd-format)): every row present once, each budget cell exactly as specified, each measured value under its budget. `compare` also requires each value to agree with this run's saved measurement within the row's tolerance. `make_target` requires `make -n <target>` to exit 0 at the repo root (a dry run: make prints the recipe but runs only `$(shell ...)` and `+` lines). |
 
 ### `see` queries
 
@@ -141,7 +153,7 @@ A state the node doesn't report counts as `null`: `{"selected": false}` does not
 match a node that isn't selectable, while `{"selected": {"ne": true}}` does. State
 values are literals or matchers, as in `expect`.
 
-Three query shapes:
+Query shapes:
 
 - **Node query** `{"role"?, "text"?, "state"?}` (role or text required): some node
   matches all of them. With `absent`, no node does. `count`, `min_count` and
@@ -155,6 +167,19 @@ Three query shapes:
   in order ("top 3 rows equal the expected top 3"). `exact`: there are exactly that
   many nodes, matching in order ("exactly the 3 backlinks, newest first"). `ordered`:
   the texts appear in that relative order, with other nodes allowed between them.
+
+- **Alternative** `{"any": [[query, ...], [query, ...]]}`: holds when every query of at
+  least one alternative holds (at least two alternatives, not nested). Phase 1 R13's
+  "shows enabled, OR requires-approval with an explanation" (D6).
+
+Node, index and sequence queries may add `"deep": true` (in a sequence, inside
+`sequence`): the text then matches any ONE text in the node's subtree, not only the
+node's own. gpui-component's `List` puts a row's visible text in `Label` children of
+the `ListItem` node (A11Y-NOTES.md), so "row 2 shows this URI" is
+`{"role": "ListItem", "nth": 1, "text": "<uri>", "deep": true}`. Texts are never
+concatenated, so two labels cannot combine into a match neither holds, and a truncated
+label still matches on its own. A query may also carry its own `"exact"`, which
+overrides the step's `exact` for that query.
 
 `absent` and the count options apply only to node queries.
 
@@ -241,7 +266,9 @@ dirs and fixture dirs are all distinct (R8, O1).
 shipped, for probes that measure the real app (Phase 1 R15). It gets the same
 isolation: its own temp root, `UBILINK_DATA_DIR`, single-instance socket and
 `UBILINK_SKIP_HOTKEYS=1`. It has no automation channel, so it counts as up once its
-single-instance socket exists, and `call()` refuses. No scenario step uses it yet.
+single-instance socket exists, and `call()` refuses. The `release_budget` step uses it
+(Phase 1 R15, `performance.json`); `run` builds the release binary before taking the
+desktop lock when a scenario has that step.
 
 ## Limits
 
@@ -252,3 +279,141 @@ single-instance socket exists, and `call()` refuses. No scenario step uses it ye
 - `warp_cursor` and `activate_other` act on the real desktop. That is why every run
   holds the desktop lock. `activate_other` briefly takes focus from whatever you are
   using.
+
+## Phase 1 acceptance scenarios (`list`)
+
+The 15 scenarios that judge GPUI Phase 1's unattended work are written here, at
+Phase 0, because Phase 1 may change neither this directory nor `scripts/probe.py`
+(spec T4). `phase1.json` names them and their requirement:
+
+| Scenario | Req | Scenario | Req | Scenario | Req |
+|---|---|---|---|---|---|
+| `capture-view` | R1 | `link-browser-filter` | R5 | `settings-adapters` | R10 |
+| `copy-link` | R2 | `browser-select` | R6 | `graph-roundtrip` | R11 |
+| `backlinks` | R3 | `browser-drill` | R7 | `graph-reset` | R12 |
+| `link-browser` | R4 | `link-marking` | R8 | `launch-at-login` | R13 |
+| | | `onboarding` | R9 | `theming` | R14 |
+| | | | | `performance` | R15 |
+
+```
+python3 scripts/probe.py list                                   # run all 15, print name / req / result
+python3 scripts/probe.py list --expect 15 --expect-failing 15   # Phase 0: all 15 must be product FAILs
+python3 scripts/probe.py list --no-run --expect 15              # validate only
+```
+
+`list` validates each scenario (its `requirement` must start with the manifest's id),
+runs each in its own `probe.py run <name>` (so each exit code is exactly what that
+command reports; full output goes to `~/Library/Caches/ubilink-probe/list-logs/<run>/`),
+and prints a table with the first failing step. `--expect N` requires N scenarios.
+`--expect-failing N` requires exactly N to exit 1 (product FAIL) and the rest 0: an
+exit 2 (scenario error) or 3 (ENV-BLOCKED) says nothing about the product, so it
+counts against the expectation. Against the Phase 0 stub views every one fails at a
+view-specific step (its first a11y, view-state or PERFORMANCE.md check).
+
+Phase 1's guard is `git diff --exit-code <phase0-sha> -- desktop-gpui/probes
+scripts/probe.py ...`. Every input of these scenarios lives under
+`desktop-gpui/probes/` or `scripts/` (fixtures, Swift helpers), except
+`docs/PERFORMANCE.md`, which is R15's product output under judgment, not an input.
+Expected colours, URIs, row orders and the golden table are written into the
+scenario files, never read from `design/`, `src-tauri/` or `app/` at run time.
+
+## Phase 1 view-state contract
+
+What the Phase 1 views must expose for these scenarios to pass. It is derived from
+the proofs and kept minimal: most proofs read the rendered accessibility tree, so
+most of the contract is visible text. Where Phase 1 can choose, the Tauri panel's
+behaviour (spec B1, `dist/panel.js`) is the default.
+
+### `state.view` fields (the route's `ViewState`, `state` verb)
+
+`state.view` is the current route's own serialisable state (`views::state_for`). The
+existing `view` and `phase` keys stay. Phase 1 adds exactly these:
+
+| Route | Field | Type | Meaning | Used by |
+|---|---|---|---|---|
+| capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
+| browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
+| browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
+| every view | `theme_samples` | object | `{surface, text, accent}`, each `{x, y, w, h}` in window points from the panel's top-left: a region of an opaque surface the view paints with `color.uiBg`'s RGB at full opacity, a region around a run of primary text (`color.text1`) drawn on that surface, and a region inside a control filled with `color.accent` | theming |
+
+The browser's first-frame time is not a view-state field: the browser records a
+`view_first_frame` sample (route `"browser"`, timed at present) in the metrics ring
+(`automation::store::record_metric`), read through `metrics.summary.view_first_frame`.
+
+### Accessibility text and behaviour
+
+All asserted text must reach the tree as `text!` (A11Y-NOTES.md). "Label" below means
+a `text!` element (role `Label`).
+
+- **Capture (R1-R3).** A Label containing `Capturing` while capturing; Labels with the
+  captured resource's name and its URI; on failure a Label whose text is the capture
+  error's message verbatim (the fixture's sentence says what failed and what to do).
+  Enter or Cmd-C in the captured state copies the URI to the pasteboard and shows a
+  Label containing `Copied`, kept visible at least 1 s if the panel then dismisses
+  itself. Backlinks are the only `ListItem` rows in the capture view, newest link
+  first, each row's subtree holding the resource's name and URI as Labels.
+- **Browser (R4-R8).** Rows are gpui-component `List` rows (`ListItem`, with List's own
+  `selected` and `size_of_set`), each row's subtree holding the name and the URI as
+  Labels; no other `ListItem`s in the view. Top-level order is ubilink-app's
+  `list_links` (`updated_at` DESC, then rowid DESC), the Tauri browser's. Selection
+  starts on row 1. A `TextInput` filter is focused when the browser opens; printable
+  keys type into it, Backspace deletes, the filter ranks by `probe.py rank()`
+  (fixtures/README.md) and drops non-matches. Down/Up move the selection, Enter opens
+  the selected URI through the core opener, End shows the last row. Right drills into
+  the selected link's connections (`links_of`, by name); Left returns with the
+  previous selection. A Label reads `Your links` at the top level and
+  `Linked to <names joined by " › ">` when drilled. Cmd-L marks the selected link and,
+  on a second link, links the two (plain L types into the filter, as in Tauri); a
+  Label then reads `Linked “<A name>” ↔ “<B name>”`.
+- **Onboarding (R9).** One `ListItem` per missing permission (`Accessibility`,
+  `Automation`), each subtree naming the permission and a status Label `Not granted`
+  or exactly `Granted`; rows stay listed when granted. Each row has a Button whose
+  text contains the permission's name and opens `settings_pane_url(<permission>)`
+  through the opener; Tab reaches it and Enter activates it. `R` re-reads the
+  permission state in the same window.
+- **Settings (R10-R13).** One `Switch` per adapter whose accessible name is exactly
+  the app name (`Arc`, `Bear`, ...; built-ins Finder and Safari locked on), reachable
+  with Tab and toggled with Space, persisted to `plugins-state.json` in ubilink-app's
+  format. A stats Label exactly `<resources> link(s) · <links> connection(s)` (Tauri
+  wording, e.g. `5 links · 3 connections`, `0 links · 0 connections`), re-read each
+  time settings is shown. Buttons whose text contains `Export`, `Import` and `Reset`,
+  reachable with Tab and activated with Enter; export writes to and import reads from
+  the `export_path`/`import_path` fixture paths when set. Reset first shows a Label
+  `Delete all captured links and connections?` with Buttons `Delete everything` and
+  `Cancel` (no Dialog role is asserted: A11Y-NOTES.md). A `Switch` named
+  `Launch at login` plus a status Label whose text is exactly one of `Enabled`,
+  `Requires approval`, `Not registered`, `Not found` (`SMAppService.mainApp.status`);
+  with `Requires approval`, a Label explaining it that contains `Login Items`.
+- **Every view (R14).** Colours follow `set_appearance` live, without a new window or
+  process. Expected samples (ΔE ≤ 3): light surface `#fafafc`, text `#1e1e1e`
+  (text1 over that surface), accent `#007aff`; dark surface `#1c1c1e`, text `#f6f6f6`,
+  accent `#0a84ff`.
+
+## PERFORMANCE.md format
+
+`docs/PERFORMANCE.md` (Phase 1 R15, written by `make budget`'s run) must contain one
+Markdown table row per key below, in any order, anywhere in the file; other lines and
+rows are ignored. Cells: the key, the budget exactly as shown, and the measured value
+as a plain number in the key's unit (no unit text).
+
+```
+| Metric | Budget | Measured |
+|---|---|---|
+| idle_cpu_percent | < 0.5 | 0.08 |
+| physical_footprint_mb | < 80 | 42.1 |
+| stripped_binary_mb | < 20 | 12.3 |
+| hotkey_p50_ms | < 80 | 28 |
+| hotkey_p99_ms | < 200 | 61 |
+```
+
+| Key | Measured how (by `performance.json`) | Agrees when within |
+|---|---|---|
+| `idle_cpu_percent` | release app, CPU-time delta / 60 s wall, % of one core | ± 0.25 points |
+| `physical_footprint_mb` | release app, `vmmap --summary` Physical footprint, MiB | ± max(10 MB, 15 %) |
+| `stripped_binary_mb` | release binary after `strip`, MiB | ± 1 MB |
+| `hotkey_p50_ms` | automation app, 50 triggers, `metrics.summary.hotkey_to_first_frame.p50` | ± max(20 ms, 50 %) |
+| `hotkey_p99_ms` | same, `.p99` | ± max(40 ms, 50 %) |
+
+Every measured value in the doc must itself be under its budget, and `make -n budget`
+must succeed. The tolerances are wide for latency on purpose: the doc records a
+typical run, the probe re-measures on whatever machine runs it.

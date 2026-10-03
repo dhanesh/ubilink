@@ -1,0 +1,248 @@
+{
+  "description": "R13: the launch-at-login switch shows SMAppService.mainApp's real status: on shows Enabled, or Requires approval with an explanation, the same after a restart; off shows Not registered after a restart",
+  "requirement": "R13 (GPUI Phase 1), D6",
+  "notes": [
+    "D6: requires-approval is a valid state to show with an explanation, not a failure, so 'on' accepts either alternative (an `any` query). The explanation must point to System Settings' Login Items.",
+    "The status label's text is one of exactly: Enabled, Requires approval, Not registered, Not found (SMAppService.Status), README contract.",
+    "The starting state is not part of R13, so it accepts Not registered or Not found; after toggling off and restarting, R13 requires Not registered.",
+    "This drives the real SMAppService for the instance's app (it is system state, which is why it survives a restart). The scenario ends with the switch off and checks Not registered after a restart, so a passing run leaves nothing registered.",
+    "Reached with Tab (key_until) and toggled with Space."
+  ],
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "starts off, showing a real status (Not registered, or Not found for an app SMAppService cannot see)",
+      "see": {
+        "any": [
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": false
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Not registered",
+              "exact": true
+            }
+          ],
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": false
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Not found",
+              "exact": true
+            }
+          ]
+        ]
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "toggle on",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "Enabled, or Requires approval with an explanation",
+      "see": {
+        "any": [
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": true
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Enabled",
+              "exact": true
+            }
+          ],
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": true
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Requires approval",
+              "exact": true
+            },
+            {
+              "role": "Label",
+              "text": "Login Items"
+            }
+          ]
+        ]
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "restart",
+      "restart": true
+    },
+    {
+      "name": "open settings after restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "the same status after the restart",
+      "see": {
+        "any": [
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": true
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Enabled",
+              "exact": true
+            }
+          ],
+          [
+            {
+              "role": "Switch",
+              "text": "Launch at login",
+              "state": {
+                "toggled": true
+              }
+            },
+            {
+              "role": "Label",
+              "text": "Requires approval",
+              "exact": true
+            },
+            {
+              "role": "Label",
+              "text": "Login Items"
+            }
+          ]
+        ]
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Tab to Launch at login again",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "toggle off",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "see": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "toggled": false
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "restart again",
+      "restart": true
+    },
+    {
+      "name": "open settings after the second restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "off: Not registered after the restart",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not registered",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

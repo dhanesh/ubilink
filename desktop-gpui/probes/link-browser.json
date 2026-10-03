@@ -1,0 +1,155 @@
+{
+  "description": "R4: at 5,000 links the browser builds at most 60 row nodes whose text matches the fixture rows in order, End brings row 5000 into the tree, and its first frame takes < 100 ms",
+  "requirement": "R4 (GPUI Phase 1)",
+  "notes": [
+    "setup.graph seeds graph-5000.json. Rows are in ubilink-app's list_links order (updated_at DESC, rowid DESC; a seeded resource's updated_at is its created_at), the Tauri browser's order (B1), so the first rows and row 5000 are known.",
+    "The first-frame time is the view_first_frame sample the browser records in the metrics ring (automation/store.rs MetricKind::ViewFirstFrame, timed at present). Only the browser view is ever shown in this instance, so every view_first_frame sample is the browser's. It is read before any a11y call, since activating the a11y tree makes every later frame slower.",
+    "size_of_set on a row is what gpui-component's List reports for the whole list: 5000 proves all links are in the list while at most 60 rows are built.",
+    "Rows are matched by URI and by name in their subtree (deep), see README contract."
+  ],
+  "setup": {
+    "graph": "graph-5000.json"
+  },
+  "steps": [
+    {
+      "graph": true,
+      "resource_count": 5000,
+      "link_count": 0
+    },
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "first frame < 100 ms (timed at present, before any a11y call)",
+      "call": "metrics",
+      "retry_ms": 3000,
+      "expect": {
+        "summary.view_first_frame.count": {
+          "ge": 1
+        },
+        "summary.view_first_frame.max": {
+          "lt": 100
+        }
+      }
+    },
+    {
+      "name": "virtualised: between 1 and 60 row nodes",
+      "see": {
+        "role": "ListItem"
+      },
+      "min_count": 1,
+      "max_count": 60,
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the list holds all 5000 links",
+      "see": {
+        "role": "ListItem",
+        "nth": 0,
+        "state": {
+          "size_of_set": 5000
+        }
+      },
+      "route": "browser"
+    },
+    {
+      "name": "rows match the fixture's first rows in order (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://fixture-00231.example.test/resource",
+              "https://fixture-04996.example.test/resource",
+              "https://fixture-00041.example.test/resource",
+              "https://fixture-02776.example.test/resource",
+              "https://fixture-01175.example.test/resource"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Resource 00231",
+              "Resource 04996",
+              "Resource 00041",
+              "Resource 02776",
+              "Resource 01175"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser"
+    },
+    {
+      "name": "row 5000 not built yet",
+      "see": {
+        "role": "ListItem",
+        "text": "https://fixture-04747.example.test/resource",
+        "deep": true
+      },
+      "absent": true,
+      "route": "browser",
+      "timeout_ms": 0
+    },
+    {
+      "name": "End",
+      "call": "key",
+      "args": {
+        "keys": "end"
+      }
+    },
+    {
+      "name": "row 5000 is in the tree",
+      "see": {
+        "role": "ListItem",
+        "text": "https://fixture-04747.example.test/resource",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "still at most 60 row nodes",
+      "see": {
+        "role": "ListItem"
+      },
+      "min_count": 1,
+      "max_count": 60,
+      "route": "browser"
+    },
+    {
+      "name": "the first row is no longer built",
+      "see": {
+        "role": "ListItem",
+        "text": "https://fixture-00231.example.test/resource",
+        "deep": true
+      },
+      "absent": true,
+      "route": "browser"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

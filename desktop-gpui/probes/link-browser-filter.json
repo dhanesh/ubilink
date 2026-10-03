@@ -1,0 +1,1678 @@
+{
+  "description": "R5: typing each of the 20 golden queries makes the a11y rows' top matches equal the golden table (probe.py rank(), name+uri), lists only subsequence matches with every decoy absent, and a 50-key script re-filters 5,000+ links with p99 < 16 ms",
+  "requirement": "R5 (GPUI Phase 1)",
+  "notes": [
+    "Corpus: graph-ranking.json seeded into the graph. Expected tops: ranking-golden.json, whose order is probe.py's normative rank() (fixtures/README.md). The row count per query is len(rank(query)): non-matches on both name and uri are dropped, never ranked.",
+    "Queries are typed into the filter as keystrokes through GPUI's own key dispatch (the filter input is focused when the browser opens, README contract) and cleared with Backspace, one per character.",
+    "Each query is a block; rows are matched by URI and by name in their subtree (deep).",
+    "The timing half seeds graph-5000.json on top (5,022 links) and reopens the browser. view.filter_samples / view.filter_p99_ms are the view's own per-keystroke re-filter timings since it was opened (README 'Phase 1 view-state contract'); 0 samples before typing proves they are per-open, not left over.",
+    "Typing script: ('resource' then 8 Backspaces) x 3, then 'r', Backspace = 50 keystrokes, each one changing the filter text."
+  ],
+  "setup": {
+    "graph": "graph-ranking.json"
+  },
+  "steps": [
+    {
+      "graph": true,
+      "resource_count": 22,
+      "link_count": 0
+    },
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "the filter input is in the tree",
+      "see": {
+        "role": "TextInput"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "all corpus rows listed before filtering",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser"
+    },
+    {
+      "name": "golden 1/20: type 'gthb'",
+      "call": "key",
+      "args": {
+        "keys": "g t h b"
+      },
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 1/20: 'gthb' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://github.com/ubilink/ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "GitHub - ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 1/20: 'gthb' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 1/20: 'gthb' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://gitlab.com/ubilink/ubilink-mirror",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 1/20: clear 'gthb'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 1/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-1"
+    },
+    {
+      "name": "golden 2/20: type 'gtlb'",
+      "call": "key",
+      "args": {
+        "keys": "g t l b"
+      },
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 2/20: 'gtlb' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://gitlab.com/ubilink/ubilink-mirror",
+              "https://github.com/ubilink/ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "GitLab - ubilink mirror",
+              "GitHub - ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 2/20: 'gtlb' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 2/20: 'gtlb' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://bitbucket.org/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 2/20: clear 'gtlb'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 2/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-2"
+    },
+    {
+      "name": "golden 3/20: type 'bkt'",
+      "call": "key",
+      "args": {
+        "keys": "b k t"
+      },
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 3/20: 'bkt' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://bitbucket.org/ubilink/ubilink",
+              "https://x.com/ubilink/status/42",
+              "bear://x-callback-url/open-note?id=7f3a9c21"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Bitbucket repo",
+              "X post",
+              "Triage inbox notes"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 3/20: 'bkt' lists only its 4 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 4,
+      "route": "browser",
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 3/20: 'bkt' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 3/20: clear 'bkt'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace"
+      },
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 3/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-3"
+    },
+    {
+      "name": "golden 4/20: type 'sovfl'",
+      "call": "key",
+      "args": {
+        "keys": "s o v f l"
+      },
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 4/20: 'sovfl' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://stackoverflow.com/questions/12345/rust-borrow-checker",
+              "obsidian://open?vault=Notes&file=Linking"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Stack Overflow question",
+              "Obsidian note"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 4/20: 'sovfl' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 4/20: 'sovfl' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 4/20: clear 'sovfl'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 4/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-4"
+    },
+    {
+      "name": "golden 5/20: type 'rddt'",
+      "call": "key",
+      "args": {
+        "keys": "r d d t"
+      },
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 5/20: 'rddt' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://rddt.example/thread/99231",
+              "https://reddit.com/r/rust/comments/abc123"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Reddit discussion",
+              "Reddit r/rust"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 5/20: 'rddt' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 5/20: 'rddt' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 5/20: clear 'rddt'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 5/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-5"
+    },
+    {
+      "name": "golden 6/20: type 'xcom'",
+      "call": "key",
+      "args": {
+        "keys": "x c o m"
+      },
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 6/20: 'xcom' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://x.com/ubilink/status/42"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "X post"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 6/20: 'xcom' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 6/20: 'xcom' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 6/20: clear 'xcom'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 6/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-6"
+    },
+    {
+      "name": "golden 7/20: type 'ytb'",
+      "call": "key",
+      "args": {
+        "keys": "y t b"
+      },
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 7/20: 'ytb' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://youtube.com/watch?v=dQw4w9WgXcQ"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "YouTube talk"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 7/20: 'ytb' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 7/20: 'ytb' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 7/20: clear 'ytb'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace"
+      },
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 7/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-7"
+    },
+    {
+      "name": "golden 8/20: type 'wiki'",
+      "call": "key",
+      "args": {
+        "keys": "w i k i"
+      },
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 8/20: 'wiki' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://en.wikipedia.org/wiki/Hyperlink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Wikipedia: Linking"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 8/20: 'wiki' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 8/20: 'wiki' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 8/20: clear 'wiki'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 8/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-8"
+    },
+    {
+      "name": "golden 9/20: type 'ntn'",
+      "call": "key",
+      "args": {
+        "keys": "n t n"
+      },
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 9/20: 'ntn' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://notion.so/ubilink/Design-Doc-abc123",
+              "obsidian://open?vault=Notes&file=Linking",
+              "https://discord.com/invite/ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Notion doc",
+              "Obsidian note",
+              "Discord invite"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 9/20: 'ntn' lists only its 4 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 4,
+      "route": "browser",
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 9/20: 'ntn' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 9/20: clear 'ntn'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace"
+      },
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 9/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-9"
+    },
+    {
+      "name": "golden 10/20: type 'lnr'",
+      "call": "key",
+      "args": {
+        "keys": "l n r"
+      },
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 10/20: 'lnr' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://linear.app/ubilink/issue/UB-42",
+              "https://gitlab.com/ubilink/ubilink-mirror",
+              "https://learn.microsoft.com/dotnet/csharp"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Linear issue",
+              "GitLab - ubilink mirror",
+              "Microsoft docs"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 10/20: 'lnr' lists only its 5 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 5,
+      "route": "browser",
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 10/20: 'lnr' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 10/20: clear 'lnr'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace"
+      },
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 10/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-10"
+    },
+    {
+      "name": "golden 11/20: type 'fgma'",
+      "call": "key",
+      "args": {
+        "keys": "f g m a"
+      },
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 11/20: 'fgma' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://figma.com/file/abc123/ubilink-ui"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Figma file"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 11/20: 'fgma' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 11/20: 'fgma' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 11/20: clear 'fgma'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 11/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-11"
+    },
+    {
+      "name": "golden 12/20: type 'slck'",
+      "call": "key",
+      "args": {
+        "keys": "s l c k"
+      },
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 12/20: 'slck' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://ubilink.slack.com/archives/C123/p456",
+              "https://gitlab.com/ubilink/ubilink-mirror",
+              "https://figma.com/file/abc123/ubilink-ui"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Slack message",
+              "GitLab - ubilink mirror",
+              "Figma file"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 12/20: 'slck' lists only its 5 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 5,
+      "route": "browser",
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 12/20: 'slck' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 12/20: clear 'slck'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 12/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-12"
+    },
+    {
+      "name": "golden 13/20: type 'dscrd'",
+      "call": "key",
+      "args": {
+        "keys": "d s c r d"
+      },
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 13/20: 'dscrd' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://discord.com/invite/ubilink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Discord invite"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 13/20: 'dscrd' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 13/20: 'dscrd' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 13/20: clear 'dscrd'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 13/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-13"
+    },
+    {
+      "name": "golden 14/20: type 'amzn'",
+      "call": "key",
+      "args": {
+        "keys": "a m z n"
+      },
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 14/20: 'amzn' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://amazon.com/gp/css/order-history"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Amazon order"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 14/20: 'amzn' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 14/20: 'amzn' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 14/20: clear 'amzn'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 14/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-14"
+    },
+    {
+      "name": "golden 15/20: type 'gsrch'",
+      "call": "key",
+      "args": {
+        "keys": "g s r c h"
+      },
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 15/20: 'gsrch' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://google.com/search?q=ubiquitous+linking"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Google search"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 15/20: 'gsrch' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 15/20: 'gsrch' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 15/20: clear 'gsrch'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 15/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-15"
+    },
+    {
+      "name": "golden 16/20: type 'sprt'",
+      "call": "key",
+      "args": {
+        "keys": "s p r t"
+      },
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 16/20: 'sprt' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://support.apple.com/guide/mac-help",
+              "https://amazon.com/gp/css/order-history"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Apple support",
+              "Amazon order"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 16/20: 'sprt' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 16/20: 'sprt' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 16/20: clear 'sprt'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 16/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-16"
+    },
+    {
+      "name": "golden 17/20: type 'msdoc'",
+      "call": "key",
+      "args": {
+        "keys": "m s d o c"
+      },
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 17/20: 'msdoc' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://learn.microsoft.com/dotnet/csharp"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Microsoft docs"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 17/20: 'msdoc' lists only its 1 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 1,
+      "route": "browser",
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 17/20: 'msdoc' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 17/20: clear 'msdoc'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 17/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-17"
+    },
+    {
+      "name": "golden 18/20: type 'obsnk'",
+      "call": "key",
+      "args": {
+        "keys": "o b s n k"
+      },
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 18/20: 'obsnk' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://google.com/search?q=ubiquitous+linking",
+              "obsidian://open?vault=Notes&file=Linking"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Google search",
+              "Obsidian note"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 18/20: 'obsnk' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 18/20: 'obsnk' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 18/20: clear 'obsnk'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 18/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-18"
+    },
+    {
+      "name": "golden 19/20: type 'bearno'",
+      "call": "key",
+      "args": {
+        "keys": "b e a r n o"
+      },
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 19/20: 'bearno' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "bear://x-callback-url/open-note?id=abc-123",
+              "bear://x-callback-url/open-note?id=7f3a9c21"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Bear note",
+              "Triage inbox notes"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 19/20: 'bearno' lists only its 2 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser",
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 19/20: 'bearno' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 19/20: clear 'bearno'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace backspace backspace"
+      },
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 19/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-19"
+    },
+    {
+      "name": "golden 20/20: type 'trgn'",
+      "call": "key",
+      "args": {
+        "keys": "t r g n"
+      },
+      "block": "golden-20"
+    },
+    {
+      "name": "golden 20/20: 'trgn' top rows = the table's (URIs and names)",
+      "see": [
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "bear://x-callback-url/open-note?id=7f3a9c21",
+              "https://bitbucket.org/ubilink/ubilink",
+              "https://en.wikipedia.org/wiki/Hyperlink"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Triage inbox notes",
+              "Bitbucket repo",
+              "Wikipedia: Linking"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-20"
+    },
+    {
+      "name": "golden 20/20: 'trgn' lists only its 3 subsequence match(es)",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 3,
+      "route": "browser",
+      "block": "golden-20"
+    },
+    {
+      "name": "golden 20/20: 'trgn' decoys absent",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://github.com/ubilink/ubilink",
+          "deep": true
+        }
+      ],
+      "absent": true,
+      "route": "browser",
+      "block": "golden-20"
+    },
+    {
+      "name": "golden 20/20: clear 'trgn'",
+      "call": "key",
+      "args": {
+        "keys": "backspace backspace backspace backspace"
+      },
+      "block": "golden-20"
+    },
+    {
+      "name": "golden 20/20: all rows back",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 22,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "golden-20"
+    },
+    {
+      "name": "add the 5,000-link graph to the corpus",
+      "seed_graph": "graph-5000.json"
+    },
+    {
+      "graph": true,
+      "resource_count": 5022
+    },
+    {
+      "name": "close the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "reopen it on 5,022 links",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "the list holds all 5,022 links",
+      "see": {
+        "role": "ListItem",
+        "nth": 0,
+        "state": {
+          "size_of_set": 5022
+        }
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no keystroke timed yet in this view",
+      "call": "state",
+      "expect": {
+        "view.filter_samples": 0
+      }
+    },
+    {
+      "name": "50-key typing script (every key re-filters 5,022 links)",
+      "call": "key",
+      "args": {
+        "keys": "r e s o u r c e backspace backspace backspace backspace backspace backspace backspace backspace r e s o u r c e backspace backspace backspace backspace backspace backspace backspace backspace r e s o u r c e backspace backspace backspace backspace backspace backspace backspace backspace r backspace"
+      }
+    },
+    {
+      "name": "filter p99 < 16 ms over the 50 keystrokes",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.filter_samples": {
+          "ge": 50
+        },
+        "view.filter_p99_ms": {
+          "lt": 16
+        }
+      }
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

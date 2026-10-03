@@ -1,0 +1,186 @@
+{
+  "description": "R9: with two permissions missing, onboarding shows two steps; activating the Automation step opens its exact System Settings pane (opened sink); after the fixture flips and R (Re-check), the same window shows it granted",
+  "requirement": "R9 (GPUI Phase 1)",
+  "notes": [
+    "Steps are ListItem rows whose subtree names the permission and its status ('Not granted' / 'Granted'); each row has a Button naming the permission that opens its pane (README contract).",
+    "The pane URL is ubilink-app's permissions::settings_pane_url(\"automation\"), recorded by the opener sink instead of opening System Settings (S2/O4).",
+    "The Automation button is reached with Tab (key_until: U4 keyboard reach, without fixing the view's tab order) and activated with Enter.",
+    "Flipping = loading permissions-all-granted.json as the permission fixture; R re-reads it. 'Granted' is matched exactly so 'Not granted' cannot satisfy it.",
+    "Same window: window_id is saved before and compared after (saved), and the process is unchanged."
+  ],
+  "setup": {
+    "fixtures": {
+      "permission": "permissions-two-missing.json"
+    }
+  },
+  "steps": [
+    {
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding",
+        "shell.visible": true
+      }
+    },
+    {
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid": "window_id"
+      }
+    },
+    {
+      "name": "two steps",
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "one per missing permission",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "Accessibility",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Automation",
+          "deep": true
+        }
+      ],
+      "route": "onboarding"
+    },
+    {
+      "name": "both not granted",
+      "see": {
+        "role": "ListItem",
+        "text": "Not granted",
+        "deep": true
+      },
+      "count": 2,
+      "route": "onboarding"
+    },
+    {
+      "name": "nothing opened yet",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "Tab to the Automation step's button",
+      "key_until": {
+        "role": "Button",
+        "text": "Automation",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "onboarding"
+    },
+    {
+      "name": "activate it",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "the opened sink reports the Automation pane URL exactly",
+      "call": "opened",
+      "retry_ms": 3000,
+      "expect": {
+        "": {
+          "len": 1
+        },
+        "0.target": "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+      }
+    },
+    {
+      "name": "flip the fixture: both granted",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-all-granted.json"
+      }
+    },
+    {
+      "name": "R (Re-check)",
+      "call": "key",
+      "args": {
+        "keys": "r"
+      }
+    },
+    {
+      "name": "Automation now shows granted",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "Automation",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Granted",
+          "deep": true,
+          "exact": true
+        }
+      ],
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "both steps granted, none left 'Not granted'",
+      "see": {
+        "role": "ListItem",
+        "text": "Granted",
+        "deep": true,
+        "exact": true
+      },
+      "count": 2,
+      "route": "onboarding"
+    },
+    {
+      "see": {
+        "text": "Not granted"
+      },
+      "absent": true,
+      "route": "onboarding"
+    },
+    {
+      "name": "same window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "name": "same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "Re-check opened nothing more",
+      "call": "opened",
+      "expect": {
+        "": {
+          "len": 1
+        }
+      }
+    }
+  ]
+}

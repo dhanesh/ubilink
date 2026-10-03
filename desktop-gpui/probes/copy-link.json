@@ -1,0 +1,138 @@
+{
+  "description": "R2/U2: Enter and Cmd-C in the captured state each put the URI on the macOS pasteboard (change count up) and show a Copied confirmation, two actions from the hotkey",
+  "requirement": "R2 (GPUI Phase 1), U2",
+  "notes": [
+    "Each round is exactly two user actions: trigger_hotkey, then one key. The steps between them only observe (a11y, pasteboard); no other key or click is sent, which is the 'at most two actions' proof.",
+    "The pasteboard starts with a unique nonce (its text is restored at the end of the run); the read must print the fixture URI exactly AND the change count must have risen, so a stale pasteboard cannot pass.",
+    "The Copied node is awaited before reading the pasteboard so an asynchronous copy is not raced; the view must keep it visible for at least 1 s (README contract) if it later dismisses itself.",
+    "The Cmd-C round runs after a restart (a fresh process, fixtures replayed) so it does not depend on whether the Enter round left the panel open."
+  ],
+  "setup": {
+    "fixtures": {
+      "capture": "capture-ok.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "Enter: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce"
+    },
+    {
+      "name": "Enter: action 1 = the hotkey",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "Enter: captured URI shown",
+      "see": {
+        "role": "Label",
+        "text": "https://example.com/"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Enter: no confirmation before copying",
+      "see": {
+        "text": "Copied"
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "Enter: action 2 = enter",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "Enter: a11y Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Enter: pbpaste prints the fixture URI, change count higher",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "changed": true
+    },
+    {
+      "name": "fresh instance for the Cmd-C round",
+      "restart": true
+    },
+    {
+      "name": "Cmd-C: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce"
+    },
+    {
+      "name": "Cmd-C: action 1 = the hotkey",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "Cmd-C: captured URI shown",
+      "see": {
+        "role": "Label",
+        "text": "https://example.com/"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Cmd-C: no confirmation before copying",
+      "see": {
+        "text": "Copied"
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "Cmd-C: action 2 = cmd-c",
+      "call": "key",
+      "args": {
+        "keys": "cmd-c"
+      }
+    },
+    {
+      "name": "Cmd-C: a11y Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Cmd-C: pbpaste prints the fixture URI, change count higher",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "changed": true
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

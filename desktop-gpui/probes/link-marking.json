@@ -1,0 +1,162 @@
+{
+  "description": "R8: marking A then B links them both ways in the graph, an a11y node confirms it, and after a restart drilling into B lists A",
+  "requirement": "R8 (GPUI Phase 1)",
+  "notes": [
+    "graph-backlinks.json seeded; rows in list_links order (updated_at DESC, rowid DESC): row 1 Decoy Unrelated, row 2 Gamma Doc, row 3 Beta Post. A = row 1 (Decoy Unrelated), B = row 2 (Gamma Doc); they are not linked in the fixture.",
+    "The mark key is Cmd-L, as in the Tauri browser (B1): plain L must type into the always-focused filter (R5). This is the spec's 'pressing L' (README contract).",
+    "ubilink-core stores one row per unordered pair and links_of reads either end, so the graph step's unordered pair is links_of(A) ∋ B and links_of(B) ∋ A; the restart + drill proves the B side through the app.",
+    "Confirmation text follows the Tauri browser: Linked “A” ↔ “B” (README contract)."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json"
+  },
+  "steps": [
+    {
+      "name": "A and B not linked yet",
+      "graph": true,
+      "no_links": [
+        [
+          "https://decoy.example/unrelated",
+          "https://gamma.example/three"
+        ]
+      ],
+      "link_count": 3
+    },
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "A is row 1, selected",
+      "see": {
+        "role": "ListItem",
+        "nth": 0,
+        "state": {
+          "selected": true
+        },
+        "text": "https://decoy.example/unrelated",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "mark A, move to B, mark B",
+      "call": "key",
+      "args": {
+        "keys": "cmd-l down cmd-l"
+      }
+    },
+    {
+      "name": "an a11y node confirms the link",
+      "see": {
+        "role": "Label",
+        "text": "Linked “Decoy Unrelated” ↔ “Gamma Doc”"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the graph links A and B (one unordered row: both directions)",
+      "graph": true,
+      "links": [
+        [
+          "https://decoy.example/unrelated",
+          "https://gamma.example/three"
+        ]
+      ],
+      "link_count": 4,
+      "timeout_ms": 3000
+    },
+    {
+      "name": "restart (the link must be in the graph, not the view)",
+      "restart": true
+    },
+    {
+      "graph": true,
+      "links": [
+        [
+          "https://decoy.example/unrelated",
+          "https://gamma.example/three"
+        ]
+      ],
+      "link_count": 4
+    },
+    {
+      "name": "open the browser again",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "B is row 2",
+      "see": {
+        "role": "ListItem",
+        "nth": 1,
+        "text": "https://gamma.example/three",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "down right"
+      }
+    },
+    {
+      "name": "drilled into B",
+      "see": {
+        "role": "Label",
+        "text": "Linked to Gamma Doc"
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "B's connections list A (and its existing link)",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "https://decoy.example/unrelated",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "https://subject.example/note",
+          "deep": true
+        }
+      ],
+      "route": "browser"
+    },
+    {
+      "see": {
+        "role": "ListItem"
+      },
+      "count": 2,
+      "route": "browser"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}
