@@ -234,6 +234,53 @@ Exit codes:
 | 2 | harness error: no such instance, socket gone, bad step |
 | 3 | environment-blocked: screen locked, display still asleep after the wake, no Screen Recording, the lease is not yours or was reclaimed after idle, or focus stolen twice |
 
+**Proving persistence ("survives a restart").** `call` refuses probe.py's `restart`
+step. Prove persistence across three commands instead:
+
+1. a `call` that changes state
+2. `restart`
+3. a `call` that reads the state back
+
+```sh
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" 'trigger_hotkey:{"action":"settings"}' 'key:{"keys":"space"}' 'step:{"file":"{data_dir}/plugins-state.json","expect":{"bear":true}}'
+python3 "$H" restart --instance "$INSTANCE" --verifier "$VERIFIER"
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" 'trigger_hotkey:{"action":"settings"}' 'step:{"file":"{data_dir}/plugins-state.json","expect":{"bear":true}}'
+```
+
+(The file path and `expect` above show the shape only. Take the real ones from the
+feature's map entry.)
+
+What `restart` does, mirroring probe.py's `Instance.restart`:
+
+- It checks the instance is yours and holds the desktop lock. It marks the session lease
+  active while it runs.
+- It refuses (exit 2) when the binary changed since launch, or when the temp root or
+  data dir is gone.
+- It quits the app by its recorded pid: SIGTERM, then SIGKILL after 5 seconds, signalled
+  only if that pid still runs our binary. It unlinks the stale socket files.
+- It keeps the temp root, so the data dir, fixture copy and log survive.
+- It relaunches the same binary with the same env: `UBILINK_INSTANCE` (the same socket
+  path), `UBILINK_DATA_DIR`, `UBILINK_INSTANCE_SOCKET` and `UBILINK_SKIP_HOTKEYS=1`.
+- It waits up to 60 seconds for the socket (`--timeout`).
+- It replays every fixture loaded so far. Fixtures live in the app's memory, so the
+  claim remembers each `load_fixture` (by kind; a later load of the same kind replaces
+  the earlier one).
+- It records the new pid in the claim.
+
+It prints `{"RESTARTED": {"old_pid", "new_pid", "restarts", "data_dir_kept",
+"fixtures_replayed", ...}}`. Exit codes:
+
+| exit | meaning |
+|---|---|
+| 0 | relaunched with the same data dir |
+| 1 | the product failed: the app refused a fixture replay, or came back reporting another `data_dir` |
+| 2 | harness error: the instance did not come back, the binary changed, or the root is gone |
+| 3 | not your instance, or the lease is not yours |
+
+Record the before, the restart's output and the after in the same evidence, by passing
+all of `$OUT` plus the `restart` output saved to a file. Run the doctor again after a
+restart: `process` must now match the new pid.
+
 **Focus theft.** A capture or browser panel hides whenever it loses key status. When a
 visibility step fails and another app became frontmost during it (probe.py's
 `focus_thief`), the whole call is re-run once from a closed panel (`"attempt": 2`). A

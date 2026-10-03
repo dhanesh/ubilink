@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-tests for ubilink_instance.py's session-lease rules (no app, no GUI).
+"""Self-tests for ubilink_instance.py's session-lease and restart rules (no app, no GUI).
 
     python3 desktop-gpui/.claude/skills/verify-ubilink/scripts/test_ubilink_instance.py
 
@@ -8,7 +8,13 @@ exercised end to end against stand-in "instances": a copy of /bin/sleep runs und
 temp path recorded as the claim's binary, so `is_ours` really matches it and the
 reclaim really signals it. The lease, its lock and the run dir live in temp
 directories (UBILINK_PROBE_CACHE, VERIFY_EVIDENCE_DIR), never the real ones.
+
+Restart is exercised end to end against a stand-in app (FAKE_APP below): a script that
+serves the automation socket at the path the real app uses, answers `state` with its
+UBILINK_DATA_DIR and logs every `load_fixture` into that data dir, so the test sees the
+data dir survive, the fixtures replayed and the new pid recorded.
 """
+import contextlib
 import importlib.util
 import json
 import os
@@ -227,6 +233,171 @@ class ResetPanelExits(unittest.TestCase):
                 self.assertEqual(ui.main(["list"]), code, repr(exc))
         finally:
             ui.cmd_list = real
+
+
+FAKE_APP = r"""#!/usr/bin/env python3
+import json, os, socket, sys
+tmp = os.environ["TMPDIR"]
+path = os.path.join(tmp, "ubilink-%d" % os.getuid(), os.environ["UBILINK_INSTANCE"], "auto.sock")
+os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+data = os.environ["UBILINK_DATA_DIR"]
+assert os.environ.get("UBILINK_SKIP_HOTKEYS") == "1"
+with open(os.path.join(data, "launches.log"), "a") as f:
+    f.write("%d\n" % os.getpid())
+if os.path.exists(path):
+    os.unlink(path)
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(path)
+srv.listen(4)
+while True:
+    conn, _ = srv.accept()
+    r = conn.makefile("rb")
+    for line in r:
+        req = json.loads(line)
+        if req["verb"] == "load_fixture":
+            with open(os.path.join(data, "fixtures.log"), "a") as f:
+                f.write(json.dumps(req["args"], sort_keys=True) + "\n")
+            res = {"ok": True, "result": {req["args"]["kind"]: req["args"]["path"]}}
+        elif req["verb"] == "state":
+            res = {"ok": True, "result": {"data_dir": data, "shell": {"hotkeys_skipped": True}}}
+        else:
+            res = {"ok": False, "error": "unknown verb"}
+        conn.sendall((json.dumps(res) + "\n").encode())
+    conn.close()
+"""
+
+
+def alive_not_zombie(doc):
+    pid = (doc or {}).get("pid")
+    if not pid:
+        return False
+    r = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True)
+    return bool(r.stdout.strip()) and "Z" not in r.stdout
+
+
+class RestartRules(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ubrst-", dir=TMP))
+        self.root = self.tmp / "ubprobe-vf-x-abc"
+        (self.root / "data").mkdir(parents=True)
+        self.doc = {"instance": "x", "root": str(self.root),
+                    "data_dir": str(self.root / "data"), "binary": "/b", "binary_sha256": "s"}
+
+    def test_restartable(self):
+        self.assertIsNone(ui.restart_problem(self.doc, "s"))
+
+    def test_changed_binary_refused(self):
+        self.assertIn("changed since launch", ui.restart_problem(self.doc, "other"))
+        self.assertIn("changed since launch", ui.restart_problem(self.doc, None))
+
+    def test_missing_data_dir_refused(self):
+        shutil.rmtree(self.root / "data")
+        self.assertIn("data dir", ui.restart_problem(self.doc, "s"))
+
+    def test_non_probe_root_refused(self):
+        self.doc["root"] = "/Users/someone"
+        self.assertIn("no probe temp root", ui.restart_problem(self.doc, "s"))
+
+
+class RestartEndToEnd(unittest.TestCase):
+    """cmd_restart against the stand-in app: same temp root, env and binary."""
+
+    def setUp(self):
+        shutil.rmtree(TMP / "cache", ignore_errors=True)
+        shutil.rmtree(TMP / "root", ignore_errors=True)
+        (TMP / "cache").mkdir(parents=True)
+        self.run_root = ui.run_root()
+        self.run_root.mkdir(parents=True)
+        self.real_is_ours = ui.is_ours
+        ui.is_ours = alive_not_zombie  # the stand-in is a script: ps shows its interpreter
+        self.binary = TMP / "fake-ubilink-next"
+        self.binary.write_text(FAKE_APP)
+        self.binary.chmod(0o755)
+        self.inst = ui.probe.Instance("vr", str(self.binary))
+        self.inst.name = "vf-vr-test"
+        self.inst.start(timeout=20)  # probe.py's own launch: env, temp root, socket wait
+        self.inst._reader.close()  # detach as `launch` does (the stand-in serves one
+        self.inst._sock.close()    # connection at a time)
+        self.addCleanup(self.cleanup)
+        self.doc = {"status": "running", "instance": "vr", "verifier": "v1",
+                    "app_instance": self.inst.name, "pid": self.inst.proc.pid,
+                    "binary": str(self.binary),
+                    "binary_sha256": ui.probe._sha256_file(self.binary),
+                    "root": str(self.inst.root), "data_dir": str(self.inst.data_dir),
+                    "fixtures": str(self.inst.fixtures_dir),
+                    "socket": str(self.inst.socket_path),
+                    "si_socket": str(self.inst.si_socket_path), "log": str(self.inst.log_path)}
+        (self.run_root / "vr").mkdir()
+        ui.write_claim(self.doc)
+        ui.LEASE.write_text(json.dumps({"run_root": str(self.run_root), "verifier": "v1",
+                                        "instances": ["vr"], "launcher_pid": None,
+                                        "active_pid": None, "last_activity": time.time()}))
+
+    def cleanup(self):
+        ui.is_ours = self.real_is_ours
+        claim = ui.read_json(self.run_root / "vr" / "instance.json") or self.doc
+        for pid in {self.doc["pid"], claim.get("pid")}:
+            if pid:
+                with contextlib.suppress(OSError):
+                    os.kill(pid, 9)
+        self.inst.stop()
+
+    def args(self, verifier="v1"):
+        return type("A", (), {"instance": "vr", "verifier": verifier, "timeout": 20})()
+
+    def test_restart_keeps_data_replays_fixtures_records_new_pid(self):
+        (self.inst.data_dir / "user-state.json").write_text('{"kept": true}')
+        r = ui.Remote(self.doc)  # a fixture loaded through `call`'s path is remembered
+        try:
+            r.call("load_fixture", kind="capture", path="/fx/capture-ok.json")
+            r.call("load_fixture", kind="login_item", path="/fx/login-1.json")
+            r.call("load_fixture", kind="capture", path="/fx/capture-failed.json")
+        finally:
+            r.close()
+        claim = ui.read_json(self.run_root / "vr" / "instance.json")
+        self.assertEqual(claim["fixtures_loaded"], {"capture": "/fx/capture-failed.json",
+                                                    "login_item": "/fx/login-1.json"})
+        old_pid = self.doc["pid"]
+        self.assertEqual(ui.cmd_restart(self.args()), 0)
+        claim = ui.read_json(self.run_root / "vr" / "instance.json")
+        self.assertNotEqual(claim["pid"], old_pid)
+        self.assertEqual(claim["restarts"], 1)
+        self.assertFalse(alive_not_zombie({"pid": old_pid}), "the old process is gone")
+        self.assertTrue(alive_not_zombie(claim), "the new process runs")
+        self.assertTrue(Path(claim["root"]).is_dir(), "the temp root is kept")
+        self.assertEqual((self.inst.data_dir / "user-state.json").read_text(), '{"kept": true}')
+        launches = (self.inst.data_dir / "launches.log").read_text().split()
+        self.assertEqual(launches, [str(old_pid), str(claim["pid"])])
+        replayed = [json.loads(x) for x in
+                    (self.inst.data_dir / "fixtures.log").read_text().splitlines()][3:]
+        self.assertEqual(sorted(x["kind"] for x in replayed), ["capture", "login_item"])
+        self.assertIn({"kind": "capture", "path": "/fx/capture-failed.json"}, replayed)
+        r = ui.Remote(claim)  # and it answers on the same socket path
+        try:
+            self.assertEqual(r.call("state")["data_dir"], self.doc["data_dir"])
+        finally:
+            r.close()
+        lease = json.loads(ui.LEASE.read_text())
+        self.assertIsNone(lease["active_pid"], "restart cleared its heartbeat mark")
+
+    def test_other_verifier_cannot_restart(self):
+        with self.assertRaises(ui.Blocked):
+            ui.cmd_restart(self.args("v2"))
+        self.assertEqual(ui.read_json(self.run_root / "vr" / "instance.json")["pid"],
+                         self.doc["pid"])
+
+    def test_changed_binary_exits_2_and_keeps_the_instance(self):
+        self.binary.write_text(FAKE_APP + "\n# rebuilt\n")
+        self.assertEqual(ui.main(["restart", "--instance", "vr", "--verifier", "v1"]), 2)
+        self.assertTrue(alive_not_zombie(self.doc), "nothing was stopped")
+
+    def test_terminate_keeps_root_stop_removes_it(self):
+        ui.terminate_process(self.doc)
+        self.assertFalse(alive_not_zombie(self.doc))
+        self.assertTrue(Path(self.doc["data_dir"]).is_dir())
+        self.assertFalse(Path(self.doc["socket"]).exists())
+        ui.stop_instance(self.doc)
+        self.assertFalse(Path(self.doc["root"]).exists())
 
 
 if __name__ == "__main__":
