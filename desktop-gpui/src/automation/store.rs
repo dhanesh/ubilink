@@ -68,6 +68,10 @@ pub fn fixtures() -> BTreeMap<Fixture, PathBuf> {
 }
 
 // ── metrics ring buffer (R5's latency numbers) ──────────────────────────────
+//
+// Task 5 hand-off: once `a11y` activates a window's AccessKit tree it stays active
+// for that window's lifetime (GPUI then builds the tree on every frame), so measure
+// latency on fresh windows or before any `a11y` call on the window being timed.
 
 /// What a sample measures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
