@@ -52,7 +52,7 @@ reads, writes or deletes the evidence directory.
 
 Lease heartbeat and reclaim: every launch, call (after each step) and doctor of the
 lease holder refreshes the lease's `last_activity` and marks its own pid active while it
-runs. A lease with no holder command running and no activity for LEASE_IDLE_S (600 s)
+runs. A lease with no holder command running and no activity for LEASE_IDLE_S (240 s)
 may be reclaimed by a waiting `launch`: it stops the holder's instances by their
 recorded pids (each only if it still runs our binary), removes their claims, writes
 <holder run dir>/reclaims/<time>-<verifier>.json, says so on stderr, and takes the
@@ -96,7 +96,12 @@ VERBS = ("open_view", "key", "state", "metrics", "trigger_hotkey", "resign_key",
 # probe.py steps that need the scenario runner's own process or build: not here.
 REFUSED_STEPS = ("restart", "process", "release_budget", "perf_doc")
 DEFAULT_TIMEOUT_MS = 5000
-LEASE_TIMEOUT_S = 900.0
+# How long a `launch` waits for another verifier's session lease (final review I8).
+# Inside the factory conductor's 600 s per command with room for the build and the
+# first frame, so a second verifier gets a clear exit 3 ("lease still held") instead
+# of being killed mid-wait. GUI proofs serialise on one desktop: parallel verifiers
+# overlap only their builds.
+LEASE_TIMEOUT_S = 300.0
 
 
 def _load(name, path):
@@ -244,14 +249,16 @@ def screen_locked():
 # running, may be reclaimed by a waiting verifier. 10 minutes because:
 #  - every launch, call and doctor of the holder marks the lease active (its pid) while
 #    it runs and refreshes `last_activity` (a call refreshes it after every step), so a
-#    slow command (a cold build, a 15-minute desktop-lock wait, a proof with long
+#    slow command (a cold build, a desktop-lock wait of up to 480 s, a proof with long
 #    polls) never counts as idle however long it takes;
 #  - what is left is the gap between two commands of a live verifier: reading output
 #    and deciding the next step, normally well under 2 minutes, so 10 minutes is a
 #    wide margin before treating the holder as gone;
-#  - it is shorter than the 900 s a waiting `launch` waits (--lease-timeout), so a
-#    re-dispatched verifier reclaims a crashed one's lease inside its own wait.
-LEASE_IDLE_S = 600.0
+#  - it is shorter than the 300 s a waiting `launch` waits (--lease-timeout, I8), so
+#    a re-dispatched verifier reclaims a crashed one's lease inside its own wait.
+# 4 minutes (final review I8; was 10): the lease wait must end well inside the
+# conductor's 600 s per command, and the idle limit must stay below that wait.
+LEASE_IDLE_S = 240.0
 
 
 def _epoch():
@@ -562,6 +569,9 @@ def cmd_launch(a):
     inst = None
     leased = False
     try:
+        # I7: an instance a SIGKILLed probe (or a killed launch) left running would
+        # steal focus from this verifier's proofs; probe.py's reaper ends it first.
+        probe.reap_orphans(out=err)
         lease_acquire(a.verifier, a.instance, a.lease_timeout)
         leased = True
         build = probe.build_binary(d, out=err)  # outside the desktop lock, as `run` does
@@ -569,6 +579,8 @@ def cmd_launch(a):
         # Deterministic name (probe's default embeds the launcher's pid, which is gone
         # after this command returns): the same isolation, an addressable socket.
         candidate.name = app_instance_name(a.instance)
+        # Outlives this command by design: the reaper judges it by its claim (I7).
+        candidate.owner = {"kind": "harness", "claim": str(claim)}
         if socket_answers(candidate.socket_path):
             # Checked before `inst` is set, so the cleanup below never touches the
             # other owner's socket.
@@ -951,6 +963,8 @@ def cmd_restart(a):
             inst.name = doc["app_instance"]  # same UBILINK_INSTANCE: same socket path
             inst.root = Path(doc["root"])    # same data dir, fixture copy, si socket, log
             inst._fixtures = dict(doc.get("fixtures_loaded") or {})
+            inst.owner = {"kind": "harness",
+                          "claim": str(inst_dir(doc["instance"]) / "instance.json")}
             try:
                 inst._launch(a.timeout)  # waits for the socket, replays the fixtures
                 st = inst.call("state")
@@ -1063,6 +1077,9 @@ def make_claimed_instance_class(doc, verifier, out_dir, extra_names):
                 inst_dir(name).mkdir(parents=True, exist_ok=True)
                 write_claim(self.claim)
                 lease_add(verifier, name)
+            # Claimed instances are judged by their claim, not by this command's pid (I7).
+            self.owner = {"kind": "harness",
+                          "claim": str(inst_dir(self.claim["instance"]) / "instance.json")}
             made.append(self)
 
         def _launch(self, timeout):
@@ -1242,7 +1259,8 @@ def run_one_scenario(a, doc, sc, out_root):
         "extra_instances": extra, "exit": code,
         "verdict": {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code],
         "counts": {"passed": tally.passed, "failed": tally.failed,
-                   "env_blocked": tally.blocked, "errors": tally.errors},
+                   "env_blocked": tally.blocked, "errors": tally.errors,
+                   "skipped_after_blocked": tally.skipped},
         "steps": parse_transcript(transcript),
         "step_records": [r["file"] for r in records],
         "saved": [dict(getattr(c, "saved", {}) or {}) for c in sc.get("_contexts", [])],
@@ -1421,7 +1439,7 @@ def main(argv=None):
     s.add_argument("--timeout", type=float, default=probe._LAUNCH_TIMEOUT_S,
                    help="seconds to wait for the automation socket (default 60)")
     s.add_argument("--lease-timeout", type=float, default=LEASE_TIMEOUT_S,
-                   help="seconds to wait for another verifier's session lease (default 900)")
+                   help="seconds to wait for another verifier's session lease (default 300)")
     s = sub.add_parser("doctor")
     s.add_argument("--instance", required=True)
     s.add_argument("--as-args", action="store_true",
