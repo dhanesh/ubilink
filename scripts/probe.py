@@ -395,35 +395,132 @@ def _seed_target_cache(cache_target: Path, source_target: Path) -> str:
     return f"seeded by APFS clone of {source_target}"
 
 
-_built_binary = None
+class Build:
+    """A binary this run owns, and what it was built from (evidence names what ran)."""
+
+    def __init__(self, path: Path, profile: str, sha256: str, commit: str, dirty: bool):
+        self.path = path
+        self.profile = profile
+        self.sha256 = sha256
+        self.commit = commit
+        self.dirty = dirty
+
+    def describe(self) -> str:
+        return (
+            f"{self.profile} binary sha256={self.sha256} "
+            f"commit={self.commit}{'+dirty' if self.dirty else ''} ({self.path})"
+        )
 
 
-def build_automation_binary() -> Path:
-    """Build (once per process) the `--features automation` debug binary; return its path."""
-    global _built_binary
-    if _built_binary is not None:
-        return _built_binary
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# The build inputs whose uncommitted edits make a binary differ from its commit.
+_BUILD_INPUTS = ("desktop-gpui", "app", "src-tauri", "design")
+
+
+def source_revision(repo: Path = None) -> tuple:
+    """(HEAD sha, dirty) of the repo this probe runs in.
+
+    Dirty means a tracked or untracked change under the build inputs: the binary is
+    then not exactly the commit, and the evidence says so. Untracked files elsewhere
+    (scratch dirs, .skill-contract/) cannot reach the binary and do not count.
+    """
+    repo = repo or REPO_ROOT
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    )
+    if head.returncode != 0:
+        return "unknown", True
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--", *_BUILD_INPUTS],
+        cwd=repo, capture_output=True, text=True,
+    )
+    return head.stdout.strip(), status.returncode != 0 or bool(status.stdout.strip())
+
+
+def executable_from_cargo_json(stdout: str, bin_name: str = "ubilink-next"):
+    """The `executable` of the compiler-artifact message for `bin_name`, or None.
+
+    Taken from cargo's own report instead of assumed (`target/debug/<name>`): the
+    profile, target dir or a future target triple can all move it.
+    """
+    exe = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        tgt = msg.get("target") or {}
+        if (
+            msg.get("reason") == "compiler-artifact"
+            and tgt.get("name") == bin_name
+            and "bin" in (tgt.get("kind") or [])
+            and msg.get("executable")
+        ):
+            exe = msg["executable"]
+    return exe
+
+
+_builds = {}
+
+
+def build_binary(run_dir: Path, release: bool = False, out=print) -> Build:
+    """Build ubilink-next and take this run's own copy of it, under the target lock.
+
+    The warm target dir is shared by every clone and commit (that is its point), so
+    its `ubilink-next` is whatever the last probe built. Building and cloning the
+    produced executable into `run_dir` both happen while holding
+    CACHE_ROOT/target.lock: no other probe can replace the binary between our build
+    finishing and our copy, so the instances run exactly this commit's code even when
+    parallel Phase 1 tasks probe different commits. The build runs before (and
+    outside) the desktop lock, so a long build never blocks another probe's GUI work.
+
+    `release=False` is the `--features automation` debug build every scenario drives;
+    `release=True` is the stripped release build as shipped (no automation channel),
+    for probes that measure the real app (Phase 1 R15).
+    """
+    key = "release" if release else "automation"
+    if key in _builds:
+        return _builds[key]
     target = CACHE_ROOT / "target"
-    note = _seed_target_cache(target, _GPUI_SOURCE_TARGET)
-    print(f"probe: target dir {target}: {note}", flush=True)
-    cmd = [
-        "cargo", "build", "--locked", "--features", "automation",
-        "--manifest-path", str(_GPUI_MANIFEST),
-    ]
+    cmd = ["cargo", "build", "--locked", "--message-format=json-render-diagnostics"]
+    cmd += ["--release"] if release else ["--features", "automation"]
+    cmd += ["--manifest-path", str(_GPUI_MANIFEST)]
     env = dict(os.environ, CARGO_TARGET_DIR=str(target))
-    print(f"probe: CARGO_TARGET_DIR={target} {' '.join(cmd)}", flush=True)
-    try:
-        # cargo's progress goes to our stderr; stdout stays the step report.
-        proc = subprocess.run(cmd, cwd=REPO_ROOT, env=env, stdout=sys.stderr, check=False)
-    except FileNotFoundError:
-        raise ProbeError("cargo not found on PATH")
-    if proc.returncode != 0:
-        raise ProbeError(f"automation build exited {proc.returncode}")
-    binary = target / "debug" / "ubilink-next"
-    if not binary.is_file():
-        raise ProbeError(f"build succeeded but {binary} is missing")
-    _built_binary = binary
-    return binary
+    commit, dirty = source_revision()
+    with file_lock(CACHE_ROOT / "target.lock", "target lock", out=out):
+        note = _seed_target_cache(target, _GPUI_SOURCE_TARGET)
+        out(f"probe: target dir {target}: {note}")
+        out(f"probe: CARGO_TARGET_DIR={target} {' '.join(cmd)}")
+        try:
+            # JSON messages on stdout (parsed below); cargo's progress and rendered
+            # diagnostics on our stderr, so stdout stays the step report.
+            proc = subprocess.run(
+                cmd, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE, text=True, check=False
+            )
+        except FileNotFoundError:
+            raise ProbeError("cargo not found on PATH")
+        if proc.returncode != 0:
+            raise ProbeError(f"{key} build exited {proc.returncode}")
+        exe = executable_from_cargo_json(proc.stdout)
+        if not exe or not Path(exe).is_file():
+            raise ProbeError(f"cargo reported no ubilink-next executable for the {key} build")
+        own = Path(run_dir) / f"ubilink-next-{key}"
+        if subprocess.run(["cp", "-c", exe, str(own)], capture_output=True).returncode != 0:
+            shutil.copy2(exe, own)
+    build = Build(own, key, _sha256_file(own), commit, dirty)
+    out(f"probe: {build.describe()}")
+    _builds[key] = build
+    return build
 
 
 # ── Swift helpers (OCR, Quartz window list, cursor, pasteboard) ─────────────
@@ -539,22 +636,29 @@ def instance_name(label: str, pid: int = None) -> str:
 
 
 class Instance:
-    """One isolated ubilink-next automation process.
+    """One isolated ubilink-next process.
 
     Isolation (O1): its own UBILINK_INSTANCE (so its own automation socket), its own
     single-instance socket (UBILINK_INSTANCE_SOCKET, so it neither signals nor is
     signalled by the user's app or another instance), its own data dir
-    (UBILINK_DATA_DIR, which the app pre-loads as the graph_dir fixture) and its own
-    copy of desktop-gpui/probes/fixtures, all under one temp root. No real hotkeys
-    (O4): UBILINK_SKIP_HOTKEYS=1. `restart()` keeps the temp root (the data must
-    survive a restart) and replays every fixture loaded so far, since fixtures live
-    in the app's memory.
+    (UBILINK_DATA_DIR, which desktop-gpui's `paths::data_dir()` honours in every
+    build) and its own copy of desktop-gpui/probes/fixtures, all under one temp root.
+    No real hotkeys (O4): UBILINK_SKIP_HOTKEYS=1. `restart()` keeps the temp root
+    (the data must survive a restart) and replays every fixture loaded so far, since
+    fixtures live in the app's memory.
+
+    `release=True` runs the stripped release build (`build_binary(release=True)`)
+    with the same isolation. It has no automation channel, so it is "up" once its
+    single-instance socket exists, and `call()` refuses; it exists for probes that
+    measure the shipped app (Phase 1 R15) rather than drive it.
     """
 
-    def __init__(self, label: str, binary: Path):
+    def __init__(self, label: str, binary, release: bool = False):
         self.label = label
         self.name = instance_name(label)
-        self.binary_src = Path(binary)
+        # A Build (normal use) or a plain path (tests, ad-hoc use).
+        self.binary = Path(binary.path if isinstance(binary, Build) else binary)
+        self.release = release
         self.root = None
         self.proc = None
         self._sock = None
@@ -578,9 +682,13 @@ class Instance:
     def log_path(self) -> Path:
         return self.root / "app.log"
 
+    @property
+    def si_socket_path(self) -> Path:
+        return self.root / "si.sock"
+
     # Lifecycle ----------------------------------------------------------
     def prepare(self):
-        """Create the temp root (data dir, fixture copy, binary clone) without launching."""
+        """Create the temp root (data dir, fixture copy) without launching."""
         if self.root is not None:
             return
         self.root = Path(tempfile.mkdtemp(prefix=f"ubprobe-{self.name}-", dir=_tmpdir()))
@@ -592,12 +700,6 @@ class Instance:
             shutil.copytree(src_fixtures, self.fixtures_dir)
         else:
             self.fixtures_dir.mkdir()
-        # A clone of the binary, so a probe in another clone rebuilding the shared
-        # target dir cannot swap the executable under a running instance.
-        binary = self.root / "ubilink-next"
-        if subprocess.run(["cp", "-c", str(self.binary_src), str(binary)]).returncode != 0:
-            shutil.copy2(self.binary_src, binary)
-        self.binary = binary
 
     def env(self) -> dict:
         # Drop any UBILINK_* the caller's shell exported: an instance must be
@@ -607,7 +709,7 @@ class Instance:
             UBILINK_INSTANCE=self.name,
             UBILINK_SKIP_HOTKEYS="1",
             UBILINK_DATA_DIR=str(self.data_dir),
-            UBILINK_INSTANCE_SOCKET=str(self.root / "si.sock"),
+            UBILINK_INSTANCE_SOCKET=str(self.si_socket_path),
             TMPDIR=_tmpdir(),
         )
         return env
@@ -632,23 +734,31 @@ class Instance:
             )
         finally:
             log.close()
+        # Ready = the automation socket answers; a release build has none, so its
+        # single-instance socket (created before GPUI starts) is the signal instead.
+        ready_on = self.si_socket_path if self.release else self.socket_path
         deadline = time.monotonic() + timeout
         while True:
             rc = self.proc.poll()
             if rc is not None:
                 raise ProbeError(
-                    f"instance {self.name} exited {rc} before serving {self.socket_path}\n"
+                    f"instance {self.name} exited {rc} before serving {ready_on}\n"
                     + self.log_tail()
                 )
-            try:
-                self._connect()
-                break
-            except OSError:
-                pass
+            if self.release:
+                if ready_on.exists():
+                    return
+            else:
+                try:
+                    self._connect()
+                    break
+                except OSError:
+                    pass
             if time.monotonic() > deadline:
                 raise ProbeError(
-                    f"instance {self.name} did not serve {self.socket_path} within {timeout:.0f}s "
-                    "(is this an --features automation build?)\n" + self.log_tail()
+                    f"instance {self.name} did not serve {ready_on} within {timeout:.0f}s "
+                    + ("" if self.release else "(is this an --features automation build?)")
+                    + "\n" + self.log_tail()
                 )
             time.sleep(0.05)
         for kind, path in list(self._fixtures.items()):
@@ -674,6 +784,8 @@ class Instance:
 
     def request(self, verb: str, args: dict = None) -> dict:
         """Send one request and return the raw response object."""
+        if self.release:
+            raise ProbeError(f"instance {self.name} is a release build: it has no automation channel")
         if self._sock is None:
             raise ProbeError(f"instance {self.name} is not running")
         line = json.dumps({"verb": verb, "args": args or {}}) + "\n"
@@ -716,6 +828,9 @@ class Instance:
         # never mistakes the stale file for the new process.
         with contextlib.suppress(OSError):
             self.socket_path.unlink()
+        if self.root is not None:
+            with contextlib.suppress(OSError):
+                self.si_socket_path.unlink()
 
     def stop(self):
         self._terminate()
@@ -738,16 +853,13 @@ class Instance:
 
 
 @contextlib.contextmanager
-def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print):
-    """Hold an exclusive flock on the desktop lock for the duration.
+def file_lock(path: Path, what: str, timeout: float = _LOCK_TIMEOUT_S, out=print):
+    """Hold an exclusive flock on `path` for the duration; print who holds it if we wait.
 
-    The pasteboard, the key window and the cursor are one per desktop. Two probes
-    (parallel Phase 1 tasks, TN4 of the Phase 1 spec) opening panels at once would
-    steal key status from each other and race on the pasteboard, so every `run`
-    holds this lock. flock is released by the kernel if the probe dies, so a crash
-    never wedges the next run.
+    flock is released by the kernel if the holder dies, so a crashed probe never
+    wedges the next one. The holder writes its pid into the file for that message.
     """
-    path = Path(path) if path else CACHE_ROOT / "desktop.lock"
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
@@ -755,7 +867,7 @@ def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print)
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             holder = os.pread(fd, 64, 0).decode(errors="replace").strip() or "?"
-            out(f"probe: waiting for the desktop lock {path} (held by pid {holder})")
+            out(f"probe: waiting for the {what} {path} (held by pid {holder})")
             deadline = time.monotonic() + timeout
             while True:
                 try:
@@ -763,7 +875,7 @@ def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print)
                     break
                 except BlockingIOError:
                     if time.monotonic() > deadline:
-                        raise ProbeError(f"desktop lock {path} still held after {timeout:.0f}s")
+                        raise ProbeError(f"{what} {path} still held after {timeout:.0f}s")
                     time.sleep(0.25)
         os.ftruncate(fd, 0)
         os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
@@ -772,6 +884,17 @@ def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print)
         with contextlib.suppress(OSError):
             fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def desktop_lock(path: Path = None, timeout: float = _LOCK_TIMEOUT_S, out=print):
+    """The desktop lock (O4: "GUI probes hold a desktop lock").
+
+    The pasteboard, the key window and the cursor are one per desktop. Two probes
+    (parallel Phase 1 tasks, TN4 of the Phase 1 spec) opening panels at once would
+    steal key status from each other and race on the pasteboard, so every `run`
+    holds this lock around its scenarios.
+    """
+    return file_lock(path or CACHE_ROOT / "desktop.lock", "desktop lock", timeout, out)
 
 
 # ── matching helpers (pure; covered by scripts/test_probe.py) ───────────────
@@ -841,6 +964,10 @@ def is_matcher(spec) -> bool:
 
 def validate_matcher(spec, where: str):
     if is_matcher(spec):
+        for op in ("text", "contains", "not_contains"):
+            # "" is a substring of everything: the check would pass vacuously.
+            if op in spec and spec[op] == "":
+                raise ScenarioError(f"{where}: {op} needs a non-empty operand")
         if "type" in spec and spec["type"] not in (*_TYPE_NAMES, "number"):
             raise ScenarioError(f"{where}: unknown type {spec['type']!r}")
         if "matches" in spec:
@@ -888,7 +1015,9 @@ def text_matches(want: str, have: str, exact: bool = False) -> bool:
     """
     w, h = norm_text(want), norm_text(have)
     if not w:
-        return not h if exact else True
+        # Empty text would be a substring of everything: never a match (scenario
+        # validation refuses it too, so this only guards direct callers).
+        return False
     if (h == w) if exact else (w in h):
         return True
     need = min(len(w), 6)
@@ -919,43 +1048,153 @@ def _norm_role(role) -> str:
     return re.sub(r"[^a-z0-9]", "", str(role or "").lower())
 
 
-def a11y_nodes(tree) -> list:
-    """Flatten a debug_a11y_tree_json dump into [(role, [texts])].
+# What gpui-pre 0.3.7's debug_a11y_tree_json puts in a node's `aria` object
+# (src/window/a11y/debug.rs, node_to_json), split by what a probe does with it.
+# Text a user can read: these are what `text` matches.
+A11Y_TEXT_FIELDS = ("label", "value", "description", "placeholder", "tooltip")
+# State a probe can assert with `state`. `toggled` is emitted as "True"/"False"/
+# "Mixed" and normalised to true/false/"mixed"; `on_action` is exposed as
+# `actions`; `focused` is derived from the dump's gpui_focus/active_descendant_focus
+# ids. There is no disabled flag in 0.3.7's dump, so `disabled` cannot be asserted.
+A11Y_STATE_FIELDS = (
+    "selected", "expanded", "toggled", "orientation", "focused", "actions",
+    "numeric_value", "min_numeric_value", "max_numeric_value", "numeric_value_step",
+    "level", "position_in_set", "size_of_set",
+    "row_index", "column_index", "row_count", "column_count",
+)
 
-    The dump is {"frame": ..., "nodes": {id: {"aria": {"role": ..., "value": ...}}}};
-    every string in `aria` other than the role counts as the node's text (value,
-    label, description, placeholder), so a probe need not know which field a given
-    gpui-component widget fills.
+
+def a11y_nodes(tree) -> list:
+    """Flatten a debug_a11y_tree_json dump into nodes in document order.
+
+    Each node is {"id", "role", "texts", "state"}. Order is a depth-first walk from
+    the dump's `root` through `children` (the order the view laid them out), not the
+    dump's key order: the ephemeral ids follow AccessKit's update order (a parent
+    can come after its children) and a JSON object's key order is not guaranteed.
+    Nodes the walk does not reach are appended in key order.
     """
-    nodes = tree.get("nodes", {}) if isinstance(tree, dict) else {}
+    if not isinstance(tree, dict):
+        return []
+    nodes = tree.get("nodes") or {}
     if isinstance(nodes, list):
-        nodes = dict(enumerate(nodes))
+        nodes = {str(i): n for i, n in enumerate(nodes)}
+    focus = {tree.get("gpui_focus"), tree.get("active_descendant_focus")} - {None}
+
+    order, seen = [], set()
+    stack = [tree.get("root")] if tree.get("root") in nodes else []
+    while stack:
+        nid = stack.pop()
+        if nid in seen or nid not in nodes:
+            continue
+        seen.add(nid)
+        order.append(nid)
+        kids = nodes[nid].get("children") or [] if isinstance(nodes[nid], dict) else []
+        stack.extend(reversed(kids))
+    order += [k for k in nodes if k not in seen]
+
     out = []
-    for node in nodes.values():
+    for nid in order:
+        node = nodes[nid]
         if not isinstance(node, dict):
             continue
         aria = node.get("aria") or {}
-        texts = []
-        for k, v in aria.items():
-            if k == "role":
-                continue
-            if isinstance(v, str):
-                texts.append(v)
-            elif isinstance(v, list):
-                texts.extend(x for x in v if isinstance(x, str))
-        out.append((aria.get("role"), texts))
+        texts = [aria[k] for k in A11Y_TEXT_FIELDS if isinstance(aria.get(k), str)]
+        state = {k: aria[k] for k in A11Y_STATE_FIELDS if k in aria}
+        if "toggled" in state:
+            t = str(state["toggled"]).lower()
+            state["toggled"] = {"true": True, "false": False}.get(t, t)
+        if "on_action" in aria:
+            state["actions"] = aria["on_action"]
+        state["focused"] = nid in focus
+        out.append({"id": nid, "role": aria.get("role"), "texts": texts, "state": state})
     return out
 
 
-def find_nodes(tree, role=None, text=None, exact=False) -> list:
-    hits = []
-    for r, texts in a11y_nodes(tree):
-        if role is not None and _norm_role(r) != _norm_role(role):
-            continue
-        if text is not None and not any(text_matches(text, t, exact) for t in texts):
-            continue
-        hits.append((r, texts))
-    return hits
+def _node_matches(node, role=None, text=None, state=None, exact=False) -> bool:
+    if role is not None and _norm_role(node["role"]) != _norm_role(role):
+        return False
+    if text is not None and not any(text_matches(text, t, exact) for t in node["texts"]):
+        return False
+    # A state the node does not report counts as null: `false` does not match an
+    # unselectable node, `{"ne": true}` does.
+    for k, spec in (state or {}).items():
+        if not match_value(node["state"].get(k), spec):
+            return False
+    return True
+
+
+def find_nodes(tree, role=None, text=None, exact=False, state=None) -> list:
+    return [n for n in a11y_nodes(tree) if _node_matches(n, role, text, state, exact)]
+
+
+def _describe_node(n) -> str:
+    flags = {k: v for k, v in n["state"].items() if k not in ("actions",) and v not in (None, False)}
+    return f"{n['role']}: {' | '.join(n['texts'])}" + (f" {flags}" if flags else "")
+
+
+def check_a11y_query(tree, q: dict, absent=False, exact=False, counts=None):
+    """Check one `see` query against a tree; raise StepFailed with what was seen.
+
+    Three shapes (validated by validate_step): a node query {role?, text?, state?}
+    (present, absent, or counted), an index query {role, nth, text?, state?} (the
+    nth node of that role, 0-based, negative from the end, must match), and a
+    sequence query {sequence: {role, texts, mode}} over that role's nodes in
+    document order.
+    """
+    nodes = a11y_nodes(tree)
+    seen = [_describe_node(n) for n in nodes][:60]
+    if "sequence" in q:
+        seq = q["sequence"]
+        got = [n for n in nodes if _node_matches(n, role=seq["role"])]
+        texts, mode = seq["texts"], seq.get("mode", "prefix")
+
+        def m(want, node):
+            return any(text_matches(want, t, exact) for t in node["texts"])
+
+        if mode == "ordered":
+            i = 0
+            for node in got:
+                if i < len(texts) and m(texts[i], node):
+                    i += 1
+            ok = i == len(texts)
+        else:
+            ok = len(got) >= len(texts) and all(m(w, n) for w, n in zip(texts, got))
+            if mode == "exact":
+                ok = ok and len(got) == len(texts)
+        if not ok:
+            raise StepFailed(
+                f"{seq['role']} sequence ({mode}) mismatch",
+                texts,
+                [" | ".join(n["texts"]) for n in got][:60],
+            )
+        return
+    if "nth" in q:
+        of_role = [n for n in nodes if _node_matches(n, role=q["role"])]
+        k = q["nth"]
+        if not -len(of_role) <= k < len(of_role):
+            raise StepFailed(
+                f"no {q['role']} node #{k}", f"at least {k + 1 if k >= 0 else -k} {q['role']} node(s)",
+                [_describe_node(n) for n in of_role],
+            )
+        node = of_role[k]
+        if not _node_matches(node, None, q.get("text"), q.get("state"), exact):
+            raise StepFailed(f"{q['role']} node #{k} mismatch", _short(q), _describe_node(node))
+        return
+    hits = [n for n in nodes if _node_matches(n, q.get("role"), q.get("text"), q.get("state"), exact)]
+    n = len(hits)
+    counts = counts or {}
+    bad = (
+        (absent and n > 0)
+        or (not absent and n == 0)
+        or ("count" in counts and n != counts["count"])
+        or ("min_count" in counts and n < counts["min_count"])
+        or ("max_count" in counts and n > counts["max_count"])
+    )
+    if bad:
+        want = ("no node like " if absent else "node like ") + _short(q)
+        for k, v in counts.items():
+            want += f" ({k} {v}, found {n})"
+        raise StepFailed("a11y tree mismatch", want, seen)
 
 
 def _srgb_to_lab(rgb):
@@ -1013,7 +1252,7 @@ _READ_ONLY_VERBS = {"state", "metrics", "window_id", "a11y", "opened"}
 # step vacuously pass.
 STEP_TYPES = {
     "call": {"args", "expect", "expect_error", "retry_ms"},
-    "see": {"absent", "count", "min_count", "max_count", "exact", "timeout_ms"},
+    "see": {"absent", "count", "min_count", "max_count", "exact", "timeout_ms", "route"},
     "ocr": {"absent", "exact"},
     "pixel": {"color", "delta_e"},
     "pasteboard": {"expect", "changed"},
@@ -1046,6 +1285,69 @@ def step_type(step, where: str) -> str:
     return kind
 
 
+def _nonblank(v) -> bool:
+    return isinstance(v, str) and bool(v.strip())
+
+
+_SEQUENCE_MODES = ("prefix", "exact", "ordered")
+
+
+def _validate_state(state, where: str):
+    if not isinstance(state, dict) or not state:
+        raise ScenarioError(f"{where}: state must be a non-empty object of flag expectations")
+    for k, spec in state.items():
+        if k == "disabled":
+            raise ScenarioError(
+                f"{where}: gpui-pre 0.3.7's a11y dump has no disabled flag, so it cannot be asserted"
+            )
+        if k not in A11Y_STATE_FIELDS:
+            raise ScenarioError(f"{where}: unknown a11y state {k!r} (one of {', '.join(A11Y_STATE_FIELDS)})")
+        validate_matcher(spec, f"{where}: state[{k!r}]")
+
+
+def _validate_see(step, where: str):
+    v = step["see"]
+    queries = v if isinstance(v, list) else [v]
+    if not queries:
+        raise ScenarioError(f"{where}: see needs at least one query")
+    counted = any(k in step for k in ("count", "min_count", "max_count"))
+    if "route" in step and not _nonblank(step["route"]):
+        raise ScenarioError(f"{where}: route must be a route name")
+    for q in queries:
+        if not isinstance(q, dict) or not q:
+            raise ScenarioError(f"{where}: each see query is an object")
+        if "sequence" in q:
+            seq = q["sequence"]
+            if set(q) != {"sequence"} or not isinstance(seq, dict) or not set(seq) <= {"role", "texts", "mode"}:
+                raise ScenarioError(f"{where}: a sequence query is {{sequence: {{role, texts, mode}}}} alone")
+            if not _nonblank(seq.get("role")):
+                raise ScenarioError(f"{where}: sequence needs a role")
+            texts = seq.get("texts")
+            if not isinstance(texts, list) or not texts or not all(_nonblank(t) for t in texts):
+                raise ScenarioError(f"{where}: sequence texts must be a non-empty list of non-empty strings")
+            if seq.get("mode", "prefix") not in _SEQUENCE_MODES:
+                raise ScenarioError(f"{where}: sequence mode is one of {', '.join(_SEQUENCE_MODES)}")
+            if step.get("absent") or counted:
+                raise ScenarioError(f"{where}: absent/count do not apply to a sequence query")
+            continue
+        extra = set(q) - {"role", "text", "state", "nth"}
+        if extra:
+            raise ScenarioError(f"{where}: unknown see query key(s) {sorted(extra)}")
+        if "role" in q and not _nonblank(q["role"]):
+            raise ScenarioError(f"{where}: role must be a non-empty string")
+        if "text" in q and not _nonblank(q["text"]):
+            raise ScenarioError(f"{where}: text must be non-empty (empty text matches every node)")
+        if "role" not in q and "text" not in q:
+            raise ScenarioError(f"{where}: a see query needs a role or a text")
+        if "state" in q:
+            _validate_state(q["state"], where)
+        if "nth" in q:
+            if not (isinstance(q["nth"], int) and not isinstance(q["nth"], bool)) or "role" not in q:
+                raise ScenarioError(f"{where}: nth is an integer index into the nodes of `role`")
+            if step.get("absent") or counted:
+                raise ScenarioError(f"{where}: absent/count do not apply to an nth query")
+
+
 def validate_step(step, where: str) -> str:
     kind = step_type(step, where)
     v = step[kind]
@@ -1059,12 +1361,11 @@ def validate_step(step, where: str) -> str:
         for path, spec in (step.get("expect") or {}).items():
             validate_matcher(spec, f"{where}: expect[{path!r}]")
     elif kind == "see":
-        for q in v if isinstance(v, list) else [v]:
-            if not isinstance(q, dict) or not set(q) <= {"role", "text"} or not q:
-                raise ScenarioError(f"{where}: see takes {{role, text}} (or a list of them)")
+        _validate_see(step, where)
     elif kind == "ocr":
-        if not isinstance(v, (str, list)):
-            raise ScenarioError(f"{where}: ocr takes a string or list of strings")
+        texts = v if isinstance(v, list) else [v]
+        if not texts or not all(_nonblank(t) for t in texts):
+            raise ScenarioError(f"{where}: ocr takes a non-empty string or non-empty list of them")
     elif kind == "pixel":
         if not isinstance(v, dict) or not {"x", "y"} <= set(v) or not set(v) <= {"x", "y", "w", "h"}:
             raise ScenarioError(f"{where}: pixel takes {{x, y[, w, h]}} in window points")
@@ -1074,14 +1375,32 @@ def validate_step(step, where: str) -> str:
     elif kind == "pasteboard":
         if v not in ("set_nonce", "read"):
             raise ScenarioError(f"{where}: pasteboard is set_nonce or read")
+        if v == "read" and "expect" not in step and "changed" not in step:
+            raise ScenarioError(f"{where}: pasteboard read needs expect or changed")
+        if "expect" in step:
+            validate_matcher(step["expect"], f"{where}: expect")
     elif kind == "graph":
         if v is not True:
             raise ScenarioError(f"{where}: graph takes true (options say what to check)")
         if not any(k in step for k in ("links", "no_links", "link_count", "resource_count")):
             raise ScenarioError(f"{where}: graph needs links, no_links, link_count or resource_count")
+        for k in ("links", "no_links"):
+            if k in step:
+                pairs = step[k]
+                ok = isinstance(pairs, list) and pairs and all(
+                    isinstance(pr, list) and len(pr) == 2 and all(_nonblank(u) for u in pr)
+                    for pr in pairs
+                )
+                if not ok:
+                    raise ScenarioError(f"{where}: graph {k} must be a non-empty list of [uriA, uriB]")
+        for k in ("link_count", "resource_count"):
+            if k in step and not (isinstance(step[k], int) and not isinstance(step[k], bool) and step[k] >= 0):
+                raise ScenarioError(f"{where}: graph {k} must be a non-negative integer")
     elif kind == "file":
-        if not isinstance(v, str):
+        if not _nonblank(v):
             raise ScenarioError(f"{where}: file takes a path")
+        for path, spec in (step.get("expect") or {}).items():
+            validate_matcher(spec, f"{where}: expect[{path!r}]")
     elif kind == "winframe":
         if not (v in ("any", "cursor", "state") or (isinstance(v, int) and not isinstance(v, bool))):
             raise ScenarioError(f"{where}: winframe is any, cursor, state or a display index")
@@ -1219,30 +1538,28 @@ def run_see(ctx: RunContext, step: dict) -> str:
     queries = expand(queries, ctx.tokens())
     absent = step.get("absent", False)
     exact = step.get("exact", False)
+    counts = {k: step[k] for k in ("count", "min_count", "max_count") if k in step}
 
     def attempt():
+        if "route" in step:
+            route = ctx.inst.call("state").get("route")
+            if route != step["route"]:
+                raise StepFailed("wrong view", f"route {step['route']}", route)
         try:
             tree = ctx.inst.call("a11y")
         except CallError as e:
             raise StepFailed("a11y failed", "an accessibility tree", str(e))
-        for q in queries:
-            hits = find_nodes(tree, q.get("role"), q.get("text"), exact)
-            n = len(hits)
-            bad = (
-                (absent and n > 0)
-                or (not absent and n == 0)
-                or ("count" in step and n != step["count"])
-                or ("min_count" in step and n < step["min_count"])
-                or ("max_count" in step and n > step["max_count"])
+        if absent and not any(_norm_role(n["role"]) != "window" for n in a11y_nodes(tree)):
+            # An empty (or window-only) tree proves nothing is absent; it proves
+            # nothing rendered. Make `absent` fail rather than pass vacuously.
+            raise StepFailed(
+                "absent needs a rendered view", "a tree with at least one non-Window node",
+                [_describe_node(n) for n in a11y_nodes(tree)],
             )
-            if bad:
-                seen = [f"{r}: {' | '.join(t)}" for r, t in a11y_nodes(tree)][:40]
-                want = ("no node like " if absent else "node like ") + _short(q)
-                for k in ("count", "min_count", "max_count"):
-                    if k in step:
-                        want += f" ({k} {step[k]}, found {n})"
-                raise StepFailed("a11y tree mismatch", want, seen)
-        return f"{len(queries)} a11y quer{'y' if len(queries) == 1 else 'ies'} matched"
+        for q in queries:
+            check_a11y_query(tree, q, absent, exact, counts)
+        verdict = "absent" if absent else "matched"
+        return f"{len(queries)} a11y quer{'y' if len(queries) == 1 else 'ies'} {verdict}"
 
     return _poll(step.get("timeout_ms", 3000), attempt)
 
@@ -1628,9 +1945,10 @@ def side_by_side_checks(name: str, instances: list, tally: Tally):
             st = inst.call("state")
             if not isinstance(st, dict) or "shell" not in st:
                 raise StepFailed("state shape", "an object with shell", st)
-            # Isolation, observed from inside the app: its graph data dir is the one
-            # this probe gave it, not a sibling's and not the user's.
-            gd = (st.get("fixtures") or {}).get("graph_dir")
+            # Isolation, observed from inside the app: the data dir its one resolver
+            # (paths::data_dir) returns is the one this probe gave it, not a
+            # sibling's and not the user's.
+            gd = st.get("data_dir")
             if gd != str(inst.data_dir):
                 raise StepFailed("instance data dir", str(inst.data_dir), gd)
             return f"pid {inst.proc.pid}, socket {inst.socket_path}, data dir {gd}"
@@ -1721,8 +2039,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     # A SIGTERM from a verifier's timeout must still stop the instances and remove
     # their temp roots: turn it into SystemExit so the finally blocks run.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    # This run's own copy of the binary lives here until the run ends (build_binary).
+    run_dir = Path(tempfile.mkdtemp(prefix="ubprobe-run-", dir=_tmpdir()))
+    build = None
     try:
-        binary = build_automation_binary()
+        build = build_binary(run_dir)
+        binary = build
         # Compile (and, for OCR, warm) helpers up front, so neither the swiftc log nor
         # Vision's one-off model compile lands inside a step.
         _helper(_QUARTZ_SWIFT)
@@ -1739,6 +2061,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 3
     finally:
         restore_pasteboard()
+        shutil.rmtree(run_dir, ignore_errors=True)
 
     code = tally.exit_code()
     verdict = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code]
@@ -1747,6 +2070,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         f"{tally.passed} passed, {tally.failed} failed, {tally.blocked} env-blocked, "
         f"{tally.errors} scenario error(s)"
     )
+    # Evidence names what ran: the exact binary and the source it came from.
+    print(f"ran: {build.describe() if build else 'no binary'}")
     return code
 
 

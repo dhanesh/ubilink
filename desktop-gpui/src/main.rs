@@ -16,6 +16,7 @@
 mod automation;
 mod fixtures;
 mod opener;
+mod paths;
 mod shell;
 mod theme;
 mod views;
@@ -26,6 +27,19 @@ use shell::single_instance::{self, Claim};
 use shell::{Command, Route, ShellEvent};
 
 fn main() {
+    // O1: a probe-named automation instance without its own data dir would use the
+    // user's real one; refuse before anything is created or claimed.
+    #[cfg(feature = "automation")]
+    if let Err(e) = paths::instance_guard(
+        std::env::var_os(automation::socket::INSTANCE_ENV).as_ref(),
+        std::env::var_os(paths::DATA_DIR_ENV).as_ref(),
+    ) {
+        eprintln!("[ubilink-next] {e}");
+        std::process::exit(2);
+    }
+    // Resolved once at startup and logged, so a run's data location is visible in its
+    // log (and a relative override is reported) before any store opens it.
+    eprintln!("[ubilink-next] data dir: {}", paths::data_dir().display());
     // Single instance (R4's "one process"): settle it before GPUI starts, so a second
     // launch exits without ever creating windows, a tray item or hotkeys.
     // The listener thread posts to the shell's inbox, created here so it exists first.

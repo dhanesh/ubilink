@@ -16,11 +16,22 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
 ## What a run does
 
 1. Builds the automation binary once with
-   `cargo build --locked --features automation --manifest-path desktop-gpui/Cargo.toml`
+   `cargo build --locked --message-format=json-render-diagnostics --features automation --manifest-path desktop-gpui/Cargo.toml`
    using `CARGO_TARGET_DIR=~/Library/Caches/ubilink-probe/target`. The first time
    that directory is empty, it is seeded from `desktop-gpui/target` with `cp -c -R`,
    an APFS clone that costs seconds and no disk space. Later builds, including ones
    from fresh git clones, only rebuild the path crates.
+
+   That target dir is shared by every clone and commit, so the probe holds an
+   exclusive flock on `~/Library/Caches/ubilink-probe/target.lock` while it builds
+   **and** while it clones the produced executable (the path cargo reports in its
+   `compiler-artifact` message, not an assumed one) into a per-run directory. The
+   instances run that copy. Another probe rebuilding the shared target for a
+   different commit cannot swap the binary under this run. The run prints the
+   copy's sha256 and the source commit (`git rev-parse HEAD`, plus `+dirty` if
+   `desktop-gpui/`, `app/`, `src-tauri/` or `design/` have uncommitted changes) at
+   the start (`probe: automation binary sha256=... commit=...`) and again on the
+   last line (`ran: ...`), so the evidence names exactly what ran.
 2. Compiles the Swift helpers (`scripts/probe-helpers/quartz.swift`, plus
    `scripts/ocr.swift` if a scenario has an `ocr` step) with `swiftc -O` into
    `~/Library/Caches/ubilink-probe/bin/`. Each binary is named by its source hash.
@@ -37,8 +48,11 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
      `$TMPDIR/ubilink-<uid>/<instance>/auto.sock`
    - `UBILINK_INSTANCE_SOCKET=<root>/si.sock`, so it has its own single-instance
      socket and never signals your running app or a sibling
-   - `UBILINK_DATA_DIR=<root>/data`, which the app pre-loads as the `graph_dir`
-     fixture (state shows it under `fixtures.graph_dir`)
+   - `UBILINK_DATA_DIR=<root>/data`, which desktop-gpui's one data-dir resolver
+     (`src/paths.rs`, `data_dir()`) honours in every build. `state` reports the
+     resolved path as `data_dir`. An automation build started with
+     `UBILINK_INSTANCE` but without `UBILINK_DATA_DIR` refuses to start (exit 2), so
+     a misconfigured harness can never touch your real data.
    - `UBILINK_SKIP_HOTKEYS=1`, so no real global hotkeys are registered (O4)
    - a private copy of `probes/fixtures/` at `<root>/fixtures`
 
@@ -93,7 +107,7 @@ which is shown in the report.
 | Step | Value | Options | Checks |
 |---|---|---|---|
 | `call` | verb name | `args`, `expect`, `expect_error`, `retry_ms` | Sends `{"verb", "args"}` and requires `ok`, then every `expect` entry against `result`. `expect_error` (substring, or `true`) requires `ok: false` instead. `retry_ms` re-sends until the step passes or the time runs out. It is allowed only for read-only verbs: `state`, `metrics`, `window_id`, `a11y`, `opened`. |
-| `see` | `{role?, text?}` or a list of them | `absent`, `exact`, `count`, `min_count`, `max_count`, `timeout_ms` (default 3000) | Polls `a11y` (GPUI's AccessKit tree, read in-process with no TCC grant, spec TN5) until each query matches a node, or matches none with `absent`. Roles compare case-insensitively, ignoring punctuation. Text matching is described below. |
+| `see` | a query, or a non-empty list of them (see [`see` queries](#see-queries)) | `absent`, `exact`, `count`, `min_count`, `max_count`, `route`, `timeout_ms` (default 3000) | Polls `a11y` (GPUI's AccessKit tree, read in-process with no TCC grant, spec TN5) until every query holds. `route` first requires `state.route` to equal it. `absent` also requires the tree to have at least one node other than the Window, so an empty tree can't pass it. Roles compare case-insensitively, ignoring punctuation. Text matching is described below. |
 | `ocr` | text or list | `absent`, `exact` | Runs `screencapture -l<window_id>` on the panel, then Vision OCR (`scripts/ocr.swift`), and requires each text in some line (or in all lines joined). Needs Screen Recording. |
 | `pixel` | `{x, y, w?, h?}` in window points from the top-left | `color` (`#rrggbb`, required), `delta_e` (default 3.0) | The region's mean sRGB colour must be within CIE76 ΔE of `color`. Uses the same capture as `ocr`, so it also needs Screen Recording. |
 | `pasteboard` | `"set_nonce"` or `"read"` | `expect`, `changed` | `set_nonce` puts a unique string on the pasteboard and records the change count. `read` compares `pbpaste` against `expect` (a literal, which may be `"{nonce}"`, or a matcher). `changed: true/false` requires the change count to have risen (or not) since the last pasteboard step. |
@@ -104,6 +118,55 @@ which is shown in the report.
 | `activate_other` | app name, or `true` for Finder | `settle_ms` (default 300) | Runs `open -a <app>`, a real loss of key status for the panel. |
 | `restart` | `true` | | Stops the instance and relaunches it with the same temp root (data survives), then replays every fixture loaded so far, since fixtures live in app memory. |
 | `sleep_ms` | milliseconds | | Waits. Prefer `retry_ms` or `timeout_ms`. |
+
+### `see` queries
+
+The tree is flattened in **document order**: a depth-first walk from the dump's
+`root` through `children`, the order the view laid its nodes out. Each node has a
+role, its texts (`label`, `value`, `description`, `placeholder`, `tooltip`), and its
+state, taken from what gpui-pre 0.3.7's `debug_a11y_tree_json` emits:
+
+| State key | From the dump |
+|---|---|
+| `selected`, `expanded` | booleans |
+| `toggled` | `"True"`/`"False"`/`"Mixed"`, normalised to `true`/`false`/`"mixed"` |
+| `focused` | derived: the node is the dump's `gpui_focus` or `active_descendant_focus` |
+| `actions` | the `on_action` list (`"Click"`, `"Focus"`, ...). Not text. |
+| `orientation`, `numeric_value`, `min_numeric_value`, `max_numeric_value`, `numeric_value_step`, `level`, `position_in_set`, `size_of_set`, `row_index`, `column_index`, `row_count`, `column_count` | as emitted |
+
+There is no `disabled` flag in 0.3.7's dump, so a `disabled` expectation is refused.
+A state the node doesn't report counts as `null`: `{"selected": false}` does not
+match a node that isn't selectable, while `{"selected": {"ne": true}}` does. State
+values are literals or matchers, as in `expect`.
+
+Three query shapes:
+
+- **Node query** `{"role"?, "text"?, "state"?}` (role or text required): some node
+  matches all of them. With `absent`, no node does. `count`, `min_count` and
+  `max_count` bound how many match.
+  `{"role": "ListItem", "state": {"selected": true}, "text": "beta.md"}`
+- **Index query** `{"role", "nth", "text"?, "state"?}`: the nth node of that role (0-based,
+  negative counts from the end) exists and matches. "Row 3 carries the selected
+  flag" is `{"role": "ListItem", "nth": 2, "state": {"selected": true}}`.
+- **Sequence query** `{"sequence": {"role", "texts": [...], "mode"}}`: the texts of that
+  role's nodes, in document order. `prefix` (default): the first nodes match `texts`
+  in order ("top 3 rows equal the expected top 3"). `exact`: there are exactly that
+  many nodes, matching in order ("exactly the 3 backlinks, newest first"). `ordered`:
+  the texts appear in that relative order, with other nodes allowed between them.
+
+`absent` and the count options apply only to node queries.
+
+### No vacuous checks
+
+A check that inspects nothing must not pass, so validation refuses:
+
+- empty or whitespace `text` (`see`, `ocr`, the `text` operator) and empty
+  `contains`/`not_contains` operands
+- empty query lists (`see: []`, `ocr: []`, `ocr: ""`)
+- an empty `state` object, and empty or malformed `links`/`no_links` pairs
+- a `pasteboard: read` with neither `expect` nor `changed`
+
+`text_matches` itself also never matches empty text.
 
 Displays are numbered with the main display as 0 and the rest from left to right.
 If a step names a display the host lacks, the result is ENV-BLOCKED, not FAIL.
@@ -147,8 +210,17 @@ instance's steps. ENV-BLOCKED steps are skipped and the run continues.
 
 With `--instances N` (N ≥ 2), every instance runs all the steps. While all of them
 are still running, the probe then checks that each one answers `state` with its own
-`fixtures.graph_dir`, that each `opened` sink answers, and that pids, sockets, data
+`data_dir`, that each `opened` sink answers, and that pids, sockets, data
 dirs and fixture dirs are all distinct (R8, O1).
+
+## Release-build instances
+
+`Instance(label, build, release=True)` (Python API, used with
+`build_binary(run_dir, release=True)`) launches the stripped release build as
+shipped, for probes that measure the real app (Phase 1 R15). It gets the same
+isolation: its own temp root, `UBILINK_DATA_DIR`, single-instance socket and
+`UBILINK_SKIP_HOTKEYS=1`. It has no automation channel, so it counts as up once its
+single-instance socket exists, and `call()` refuses. No scenario step uses it yet.
 
 ## Limits
 
