@@ -47,6 +47,19 @@ owners apart: the instance claim (O_EXCL, names its verifier), and the session l
 so only one verifier at a time drives instances on this desktop. This harness never
 reads, writes or deletes the evidence directory.
 
+Lease heartbeat and reclaim: every launch, call (after each step) and doctor of the
+lease holder refreshes the lease's `last_activity` and marks its own pid active while it
+runs. A lease with no holder command running and no activity for LEASE_IDLE_S (600 s)
+may be reclaimed by a waiting `launch`: it stops the holder's instances by their
+recorded pids (each only if it still runs our binary), removes their claims, writes
+<holder run dir>/reclaims/<time>-<verifier>.json, says so on stderr, and takes the
+lease. The holder's next command on a reclaimed instance exits 3 ("lease reclaimed
+after idle") and drives nothing. Decisions: `lease_decision`, unit-tested in
+scripts/test_ubilink_instance.py.
+
+Every exit path of every command maps to these codes (main); a traceback is a harness
+bug and exits 2.
+
 Exit codes: 0 ok; 1 the product did not do what a step expects, or doctor found a failed
 check; 2 harness error (bad input, no such instance, build failure, socket gone); 3
 environment-blocked (instance or lease held by another owner, Screen Recording missing,
@@ -159,6 +172,7 @@ def load_state(name, verifier=None):
     path = inst_dir(name) / "instance.json"
     doc = read_json(path)
     if doc is None:
+        blocked_if_reclaimed(name, verifier)
         raise HarnessError("no instance %r (no %s): launch it first" % (name, path))
     if doc.get("status") != "running":
         raise HarnessError("instance %r is %s, not running" % (name, doc.get("status")))
@@ -222,20 +236,62 @@ def screen_locked():
 
 
 # ── session lease ────────────────────────────────────────────────────────────
+# A lease whose holder has done nothing for this long, with no harness command of its
+# running, may be reclaimed by a waiting verifier. 10 minutes because:
+#  - every launch, call and doctor of the holder marks the lease active (its pid) while
+#    it runs and refreshes `last_activity` (a call refreshes it after every step), so a
+#    slow command (a cold build, a 15-minute desktop-lock wait, a proof with long
+#    polls) never counts as idle however long it takes;
+#  - what is left is the gap between two commands of a live verifier: reading output
+#    and deciding the next step, normally well under 2 minutes, so 10 minutes is a
+#    wide margin before treating the holder as gone;
+#  - it is shorter than the 900 s a waiting `launch` waits (--lease-timeout), so a
+#    re-dispatched verifier reclaims a crashed one's lease inside its own wait.
+LEASE_IDLE_S = 600.0
+
+
+def _epoch():
+    return time.time()
+
+
 def lease_owner():
     return LEASE, read_json(LEASE)
 
 
-def lease_stale(doc):
-    """No launcher alive and none of the lease's instances alive."""
-    if not doc:
-        return True
-    lp = doc.get("launcher_pid")
-    if lp and pid_command(lp):
-        return False
+def lease_instances_alive(doc):
     root = Path(doc.get("run_root") or "/nonexistent")
-    return not any(is_ours(read_json(root / n / "instance.json"))
-                   for n in doc.get("instances") or [])
+    return [n for n in doc.get("instances") or []
+            if is_ours(read_json(root / n / "instance.json"))]
+
+
+def pid_alive(pid):
+    return bool(pid) and pid_command(pid) is not None
+
+
+def lease_decision(lease, me, now, alive_instances, pid_alive, idle_s=LEASE_IDLE_S):
+    """What a launch by `me` ({run_root, verifier}) does about `lease`. Pure, so the
+    rules are unit-tested (scripts/test_ubilink_instance.py):
+      take      no lease
+      join      the lease is ours (same run dir and verifier)
+      stale     not ours; no harness command of the holder running and none of its
+                instances alive: replace it, nothing to stop
+      reclaim   not ours; no harness command running, instances alive, but idle for
+                longer than idle_s: stop its instances, then take it
+      wait      not ours and in use (a command running, or active within idle_s)
+    `alive_instances` is the list of the lease's instances still running our binary;
+    `pid_alive(pid)` says whether a holder pid is a running process."""
+    if not lease:
+        return "take"
+    if lease.get("run_root") == me["run_root"] and lease.get("verifier") == me["verifier"]:
+        return "join"
+    if any(pid_alive(lease.get(k)) for k in ("launcher_pid", "active_pid")):
+        return "wait"
+    if not alive_instances:
+        return "stale"
+    last = lease.get("last_activity")
+    if not isinstance(last, (int, float)):
+        last = 0  # a lease written before heartbeats existed: idle since forever
+    return "reclaim" if now - last > idle_s else "wait"
 
 
 def _write_lease(doc, exclusive):
@@ -250,33 +306,98 @@ def _write_lease(doc, exclusive):
     os.replace(tmp, LEASE)
 
 
+def reclaim_dir(root):
+    return Path(root) / "reclaims"
+
+
+def reclaim_lease(doc, by):
+    """Stop the idle holder's instances (each only if its pid still runs our binary),
+    remove their claims, and leave a record under the holder's run dir that its
+    returning commands report. Caller holds LEASE_LOCK."""
+    root = Path(doc["run_root"])
+    stopped = []
+    for n in doc.get("instances") or []:
+        d = root / n
+        claim = read_json(d / "instance.json")
+        if claim:
+            stopped.append({"instance": n, "pid": claim.get("pid"),
+                            "signal": stop_instance(claim)})
+        if d.parent == root and d.name == n:
+            shutil.rmtree(d, ignore_errors=True)
+    idle = _epoch() - (doc.get("last_activity") or 0)
+    rec = {"kind": "lease-reclaimed", "at": recorder._now(), "by_verifier": by,
+           "by_run_root": str(run_root()), "from_verifier": doc.get("verifier"),
+           "run_root": doc.get("run_root"), "idle_s": round(idle), "idle_limit_s": LEASE_IDLE_S,
+           "instances": doc.get("instances") or [], "stopped": stopped}
+    reclaim_dir(root).mkdir(parents=True, exist_ok=True)
+    path = reclaim_dir(root) / ("%s-%s.json" % (time.strftime("%Y%m%dT%H%M%S"),
+                                                re.sub(r"[^A-Za-z0-9_.-]", "_",
+                                                       str(doc.get("verifier")))))
+    path.write_text(json.dumps(rec, indent=2, sort_keys=True) + "\n")
+    err("RECLAIMED the session lease of verifier %r (idle %ds > %ds, no command of it "
+        "running): stopped %s; record %s"
+        % (doc.get("verifier"), idle, LEASE_IDLE_S,
+           ", ".join("%s pid %s (%s)" % (x["instance"], x["pid"], x["signal"])
+                     for x in stopped) or "nothing", path))
+    with contextlib.suppress(OSError):
+        LEASE.unlink()
+
+
+def reclaimed_note(instance, verifier=None):
+    """The reclaim record naming this instance (of this verifier), or None."""
+    for path in sorted(reclaim_dir(run_root()).glob("*.json"), reverse=True):
+        rec = read_json(path) or {}
+        if instance in (rec.get("instances") or []) and \
+                (verifier is None or rec.get("from_verifier") == verifier):
+            return rec, path
+    return None
+
+
+def blocked_if_reclaimed(instance, verifier=None):
+    hit = reclaimed_note(instance, verifier)
+    if hit:
+        rec, path = hit
+        raise Blocked("lease reclaimed after idle: verifier %r took the session lease at %s "
+                      "after %ss without activity and stopped instance %r (record %s). "
+                      "Nothing was driven; launch again to continue"
+                      % (rec.get("by_verifier"), rec.get("at"), rec.get("idle_s"), instance,
+                         path))
+
+
 def lease_acquire(verifier, instance, timeout):
-    """Join our own lease or take a free/stale one; wait while another verifier holds it."""
+    """Join our own lease, take a free or stale one, reclaim an idle one; wait while
+    another verifier is using it."""
     me = {"run_root": str(run_root()), "verifier": verifier}
     deadline = time.monotonic() + timeout
     said = False
     while True:
         with probe.file_lock(LEASE_LOCK, "verify lease lock", out=quiet):
             doc = read_json(LEASE)
-            if doc is not None and doc.get("run_root") == me["run_root"] \
-                    and doc.get("verifier") == verifier:
+            alive = lease_instances_alive(doc) if doc else []
+            what = lease_decision(doc, me, _epoch(), alive, pid_alive)
+            if what == "join":
                 doc["instances"] = sorted(set(doc.get("instances") or []) | {instance})
-                doc["launcher_pid"] = os.getpid()
+                doc.update(launcher_pid=os.getpid(), last_activity=_epoch())
                 _write_lease(doc, exclusive=False)
                 return
-            if doc is not None and lease_stale(doc):
-                err("replacing a stale session lease held by %r (%s)"
-                    % (doc.get("verifier"), doc.get("run_root")))
+            if what == "stale":
+                err("replacing a stale session lease held by %r (%s): none of its "
+                    "instances is running" % (doc.get("verifier"), doc.get("run_root")))
                 with contextlib.suppress(OSError):
                     LEASE.unlink()
-                doc = None
-            if doc is None:
+            if what == "reclaim":
+                reclaim_lease(doc, verifier)
+            if what in ("take", "stale", "reclaim"):
                 _write_lease(dict(me, instances=[instance], launcher_pid=os.getpid(),
+                                  active_pid=None, last_activity=_epoch(),
                                   since=recorder._now()), exclusive=True)
                 return
         if not said:
-            err("waiting for the session lease %s, held by verifier %r for %s (instances %s)"
-                % (LEASE, doc.get("verifier"), doc.get("run_root"), doc.get("instances")))
+            idle = _epoch() - (doc.get("last_activity") or 0)
+            err("waiting for the session lease %s, held by verifier %r for %s (instances "
+                "%s, idle %ds; reclaimable after %ds idle with no command running)"
+                % (LEASE, doc.get("verifier"), doc.get("run_root"), doc.get("instances"),
+                   idle, LEASE_IDLE_S))
             said = True
         if time.monotonic() > deadline:
             raise Blocked("session lease %s still held by verifier %r after %.0fs"
@@ -296,18 +417,37 @@ def lease_update(verifier, drop=None, launcher_done=False):
         if not doc.get("instances") and not doc.get("launcher_pid"):
             LEASE.unlink()
             return "released"
+        doc["last_activity"] = _epoch()
         _write_lease(doc, exclusive=False)
         return "kept for %s" % ", ".join(doc["instances"])
 
 
+def lease_touch(doc, active):
+    """Heartbeat from the holder's call/doctor: check the lease is still this
+    instance's verifier's, refresh last_activity and mark (active=True) or clear
+    (False) this process as running. Raises Blocked when the lease is gone or someone
+    else's; with a reclaim record, says so. Atomic with reclaim (both under
+    LEASE_LOCK), so a reclaim never stops an instance mid-command."""
+    with probe.file_lock(LEASE_LOCK, "verify lease lock", out=quiet):
+        lease = read_json(LEASE)
+        mine = lease and lease.get("run_root") == str(run_root()) \
+            and lease.get("verifier") == doc.get("verifier") \
+            and doc["instance"] in (lease.get("instances") or [])
+        if not mine:
+            if not active:
+                return
+            blocked_if_reclaimed(doc["instance"], doc.get("verifier"))
+            raise Blocked("the session lease %s is not held for instance %r of verifier %r "
+                          "(holder: %s): relaunch" % (LEASE, doc["instance"],
+                                                      doc.get("verifier"),
+                                                      lease and lease.get("verifier")))
+        lease["last_activity"] = _epoch()
+        lease["active_pid"] = os.getpid() if active else None
+        _write_lease(lease, exclusive=False)
+
+
 def lease_check(doc):
-    lease = read_json(LEASE)
-    if not lease or lease.get("run_root") != str(run_root()) \
-            or lease.get("verifier") != doc.get("verifier") \
-            or doc["instance"] not in (lease.get("instances") or []):
-        raise Blocked("the session lease %s is not held for instance %r of verifier %r "
-                      "(holder: %s): relaunch" % (LEASE, doc["instance"], doc.get("verifier"),
-                                                  lease and lease.get("verifier")))
+    lease_touch(doc, active=True)
 
 
 # ── socket ───────────────────────────────────────────────────────────────────
@@ -470,6 +610,14 @@ def cmd_launch(a):
 # ── doctor (read-only) ───────────────────────────────────────────────────────
 def cmd_doctor(a):
     doc = load_state(a.instance)
+    lease_touch(doc, active=True)  # heartbeat; exit 3 if the lease was reclaimed
+    try:
+        return _doctor(a, doc)
+    finally:
+        lease_touch(doc, active=False)
+
+
+def _doctor(a, doc):
     checks, detail = {}, {}
     checks["process"] = "pass" if is_ours(doc) else "fail"
     detail["process"] = "pid %s runs %s" % (doc["pid"], pid_command(doc["pid"]))
@@ -619,12 +767,23 @@ def attempt_call(remote, steps, out, start_no, attempt):
     ctx.own_pids.add(remote.doc["pid"])
     n = start_no
     remote.log.clear()
-    probe.reset_panel(ctx)
-    reset = {"step": n, "kind": "reset_panel", "attempt": attempt, "ok": True,
-             "detail": "no panel open before the proof (probe.py reset_panel)"}
+    reset = {"step": n, "kind": "reset_panel", "attempt": attempt}
+    try:
+        probe.reset_panel(ctx)
+    except probe.CallError as e:
+        # probe.py's rule (run_steps): the app answered but refused to close its panel,
+        # so the proof cannot start from a closed panel: a product FAIL (exit 1).
+        # Socket/harness trouble raises ProbeError instead and exits 2 (main).
+        reset.update(ok=False, outcome="product-fail",
+                     error="could not reset the panel: %s" % e)
+        save(out, n, "reset_panel", reset, list(remote.log))
+        emit(reset)
+        return "fail", n
+    reset.update(ok=True, detail="no panel open before the proof (probe.py reset_panel)")
     save(out, n, "reset_panel", reset, list(remote.log))
     emit(reset)
     for kind, step in steps:
+        lease_touch(remote.doc, active=True)  # heartbeat per step; Blocked if lost
         n += 1
         ctx.step_no = n
         remote.log.clear()
@@ -676,19 +835,24 @@ def cmd_call(a):
     # wakes a sleeping display) for the whole proof, and refuse to drive a desktop
     # with no active display (ENV-BLOCKED, exit 3), since an asleep display makes the
     # app inactive and every a11y read fail for a reason that is not the product's.
+    lease_check(doc)  # before waiting on the desktop lock: waiting counts as activity
     awake = probe.keep_awake()
+    try:
+        return _call_locked(a, doc, steps, awake)
+    finally:
+        if awake is not None:
+            awake.terminate()
+        lease_touch(doc, active=False)
+
+
+def _call_locked(a, doc, steps, awake):
     with probe.desktop_lock(out=err):
         lease_check(doc)
         probe.wait_for_display()
-        try:
-            probe.displays_or_blocked(probe.active_displays())
-            if screen_locked():
-                raise probe.EnvBlocked("the screen is locked: no panel can become active, "
-                                       "so nothing can be proven until it is unlocked")
-        except probe.EnvBlocked:
-            if awake is not None:
-                awake.terminate()
-            raise
+        probe.displays_or_blocked(probe.active_displays())  # EnvBlocked: exit 3
+        if screen_locked():
+            raise probe.EnvBlocked("the screen is locked: no panel can become active, "
+                                   "so nothing can be proven until it is unlocked")
         remote = Remote(doc)
         try:
             n = next_index(a.out)
@@ -706,27 +870,20 @@ def cmd_call(a):
             probe.stop_activators()
             probe.restore_pasteboard()
             remote.close()
-            if awake is not None:
-                awake.terminate()
     return {"ok": 0, "fail": 1, "blocked": 3}[outcome]
 
 
 # ── stop / list ──────────────────────────────────────────────────────────────
-def cmd_stop(a):
-    check_name(a.instance)
-    check_verifier(a.verifier)
-    d = inst_dir(a.instance)
-    claim = d / "instance.json"
-    doc = read_json(claim)
-    if doc is None:
-        raise HarnessError("no instance %r under %s" % (a.instance, run_root()))
-    if doc.get("verifier") not in (None, a.verifier):
-        raise Blocked("instance %r was launched by verifier %r, not %r: stop only your own"
-                      % (a.instance, doc.get("verifier"), a.verifier))
+def stop_instance(doc):
+    """Instance.stop semantics for a claim: SIGTERM by the recorded pid, only after
+    checking that pid still runs this instance's binary (never a reused pid, never by
+    name), SIGKILL after 5 s, then remove the socket, its 0700 dir and the temp root
+    (data copy, fixtures, app log). None of it is evidence. Returns the signal used,
+    or None when the process was already gone."""
     killed = None
     pid = doc.get("pid")
     if pid and is_ours(doc):
-        os.kill(pid, signal.SIGTERM)  # by pid, only after checking it runs our binary
+        os.kill(pid, signal.SIGTERM)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and pid_command(pid):
             time.sleep(0.1)
@@ -735,9 +892,6 @@ def cmd_stop(a):
             killed = "SIGKILL"
         else:
             killed = "SIGTERM"
-    # Instance.stop's cleanup: the socket, its 0700 dir, the temp root (data copy,
-    # fixtures, app log). None of it is evidence: verify_evidence.py record copied the
-    # evidence into the evidence directory.
     for p in (doc.get("socket"), doc.get("si_socket")):
         if p:
             with contextlib.suppress(OSError):
@@ -748,6 +902,24 @@ def cmd_stop(a):
     root = doc.get("root")
     if root and os.path.basename(root).startswith("ubprobe-"):
         shutil.rmtree(root, ignore_errors=True)
+    return killed
+
+
+def cmd_stop(a):
+    check_name(a.instance)
+    check_verifier(a.verifier)
+    d = inst_dir(a.instance)
+    claim = d / "instance.json"
+    doc = read_json(claim)
+    if doc is None:
+        blocked_if_reclaimed(a.instance, a.verifier)
+        raise HarnessError("no instance %r under %s" % (a.instance, run_root()))
+    if doc.get("verifier") not in (None, a.verifier):
+        raise Blocked("instance %r was launched by verifier %r, not %r: stop only your own"
+                      % (a.instance, doc.get("verifier"), a.verifier))
+    pid = doc.get("pid")
+    root = doc.get("root")
+    killed = stop_instance(doc)
     if d.resolve().parent == run_root() and d.name == a.instance:
         shutil.rmtree(d, ignore_errors=True)
     lease = lease_update(a.verifier, drop=a.instance)
@@ -765,7 +937,12 @@ def cmd_list(a):
               "socket": doc.get("socket")})
     lease = read_json(LEASE)
     if lease:
-        emit({"lease": lease, "stale": lease_stale(lease)})
+        alive = lease_instances_alive(lease)
+        emit({"lease": lease, "instances_alive": alive,
+              "idle_s": round(_epoch() - (lease.get("last_activity") or 0)),
+              "reclaimable_after_idle_s": LEASE_IDLE_S,
+              "decision_for_another_verifier": lease_decision(
+                  lease, {"run_root": "", "verifier": ""}, _epoch(), alive, pid_alive)})
     return 0
 
 
@@ -811,6 +988,21 @@ def main(argv=None):
     except probe.EnvBlocked as e:
         err(str(e))
         return 3
+    except probe.ScenarioError as e:
+        err("bad step: %s" % e)
+        return 2
+    except probe.CallError as e:
+        # An app refusal that escaped a step's own handling: the product answered no.
+        err("the app refused: %s" % e)
+        return 1
+    except KeyboardInterrupt:
+        err("interrupted")
+        return 2
+    except Exception:  # a harness bug is never a product verdict
+        import traceback
+        traceback.print_exc()
+        err("harness error (see traceback): exit 2")
+        return 2
 
 
 if __name__ == "__main__":
