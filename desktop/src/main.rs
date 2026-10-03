@@ -4,10 +4,14 @@
 // disclosure), S4/RT-2 (permission detection + guided granting).
 // See docs/RUNBOOK-gui-panel.md.
 //
-// The imperative GUI shell. Logic lives in ubilink-core (headlessly tested); this wires
-// it to Tauri + the macOS bits that genuinely need the OS (frontmost-app detection,
-// clipboard, opening URLs, permission checks). Building needs the Tauri toolchain;
-// running needs a desktop session.
+// The imperative GUI shell. Logic lives in ubilink-core (headlessly tested) AND, as
+// of R3/task 3 of the GPUI Phase 0 plan, in ubilink-app — the GUI-free command layer
+// shared with the future GPUI shell (desktop-gpui/). Every function below is either
+// a thin `#[tauri::command]` wrapper that hands ubilink-app's functions the explicit
+// inputs they need (an `&AppState`, a resolved save directory, …) in place of
+// `tauri::State`/`AppHandle`, or a genuinely Tauri-specific piece — window geometry,
+// `restart_app`, the global-shortcut registration path — that has no GUI-free
+// equivalent to delegate to. See task-3-report.md for the full move/stay inventory.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod placement;
@@ -19,344 +23,116 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use ubilink_app::{AppState, HotkeyReport, PermissionReport, PluginView};
 use ubilink_core::{
-    AdapterRegistry, BrowseEntry, CapabilityMatrix, CommandRunner, ConfiguredAdapter, LinkGraph,
-    OsaScriptRunner, PanelBackend, PanelView, PermissionState, Support, UbilinkService,
-    FRONTMOST_APP_SCRIPT,
+    AdapterRegistry, BrowseEntry, CapabilityMatrix, LinkGraph, OsaScriptRunner, PanelBackend,
+    PanelView, Support, UbilinkService,
 };
-
-/// App state: the link-graph-backed panel backend + the declarative adapter registry.
-struct AppState {
-    backend: Mutex<PanelBackend>,
-    adapters: AdapterRegistry,
-    /// App names (lowercased) of non-built-in adapters the user has turned OFF.
-    /// Built-in adapters can't be disabled, so they never appear here.
-    disabled: Mutex<std::collections::HashSet<String>>,
-    /// Where plugins-state.json lives (so toggles persist across launches).
-    data_dir: std::path::PathBuf,
-    /// Latest hotkey registration outcome (Defect 1/2): set at startup, and again
-    /// by `retry_hotkeys`; read by `hotkey_status`.
-    hotkeys: Mutex<HotkeyReport>,
-}
-
-/// One row in the plugin manager: a supported app, whether it's a built-in
-/// default-macOS adapter, whether it's a custom adapter from the user's
-/// `adapters.json` (trusted local config running with the user's permissions,
-/// not a sandboxed plugin — D14), and whether it's enabled.
-#[derive(serde::Serialize, Clone)]
-struct PluginView {
-    app: String,
-    builtin: bool,
-    user_defined: bool,
-    enabled: bool,
-    scheme: Option<String>,
-}
-
-/// Read the persisted set of disabled plugin app-names (lowercased). Missing/garbled
-/// file → empty (everything enabled). Tiny std-only JSON via serde_json.
-fn load_disabled(data_dir: &std::path::Path) -> std::collections::HashSet<String> {
-    let path = data_dir.join("plugins-state.json");
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Default::default();
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Default::default();
-    };
-    v.get("disabled")
-        .and_then(|d| d.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str())
-                .map(|s| s.to_ascii_lowercase())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Persist the disabled set. Best-effort (a failed write just means the toggle
-/// won't survive a restart — surfaced as the command's error).
-fn save_disabled(
-    data_dir: &std::path::Path,
-    disabled: &std::collections::HashSet<String>,
-) -> Result<(), String> {
-    let mut list: Vec<&String> = disabled.iter().collect();
-    list.sort();
-    let body = serde_json::json!({ "disabled": list });
-    std::fs::write(data_dir.join("plugins-state.json"), body.to_string()).map_err(|e| e.to_string())
-}
-
-/// Detect the frontmost application RIGHT NOW (osascript). Split out of
-/// `capture_now` (Defect 3 — the panel used to be shown before it was focused)
-/// so the ⌘⇧K handler can detect first, focus the panel immediately, and only
-/// then do the slower per-app capture work — WITHOUT moving `set_focus()` ahead
-/// of detection itself, which would risk the panel becoming key window before we
-/// know which app to capture from and breaking the product's core feature.
-fn detect_frontmost() -> Result<String, String> {
-    OsaScriptRunner
-        .run("osascript", &["-e", FRONTMOST_APP_SCRIPT])
-        .map_err(|e| format!("Couldn't tell which app is active: {e}"))
-}
-
-/// Capture the resource of `frontmost`: look up its declarative adapter
-/// (adapters_config), capture+validate+surface-backlinks. Everything `capture_now`
-/// used to do once it had a frontmost-app name in hand. U3 explains an unsupported
-/// app instead of failing silently.
-fn capture_from(state: &AppState, frontmost: &str) -> Result<PanelView, String> {
-    let spec = state.adapters.for_app(frontmost).ok_or_else(|| {
-        format!(
-            "Linking from \u{201c}{}\u{201d} isn't supported yet.",
-            frontmost.trim()
-        )
-    })?;
-    // Honor the plugin manager: a non-built-in adapter the user turned OFF behaves as
-    // unsupported (built-ins can't be disabled, so they always pass).
-    if !spec.builtin {
-        let disabled = state
-            .disabled
-            .lock()
-            .map_err(|_| "internal state was poisoned".to_string())?;
-        if disabled.contains(&spec.app.to_ascii_lowercase()) {
-            return Err(format!(
-                "Linking from \u{201c}{}\u{201d} is turned off in Settings.",
-                spec.app
-            ));
-        }
-    }
-    let adapter = ConfiguredAdapter::new(spec.clone(), OsaScriptRunner);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    // Takes the backend lock only around its fast reads/writes, never across the
-    // (possibly stalled) osascript call, so other commands stay responsive.
-    PanelBackend::capture_current(&state.backend, &adapter, now)
-}
-
-/// Capture the resource of whatever app is frontmost right now: detect it, then
-/// capture from it. Kept as the composition of `detect_frontmost` + `capture_from`
-/// so the `capture_current` command's synchronous behavior is unchanged; the ⌘⇧K
-/// handler calls the two halves separately so it can focus the panel in between
-/// (see the `with_handler` closure in `main`).
-fn capture_now(state: &AppState) -> Result<PanelView, String> {
-    let frontmost = detect_frontmost()?;
-    capture_from(state, &frontmost)
-}
 
 #[tauri::command]
 fn capture_current(state: State<'_, AppState>) -> Result<PanelView, String> {
-    capture_now(state.inner())
+    ubilink_app::capture_now(state.inner())
 }
 
 /// The link-browser top level (Cmd+Shift+L): every captured resource, title+uri.
 #[tauri::command]
 fn list_links(state: State<'_, AppState>) -> Result<Vec<BrowseEntry>, String> {
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.list_links()
+    ubilink_app::list_links(state.inner())
 }
 
 /// Drill-in (→): everything linked to `uri`.
 #[tauri::command]
 fn links_of(state: State<'_, AppState>, uri: String) -> Result<Vec<BrowseEntry>, String> {
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.links_of(&uri)
+    ubilink_app::links_of(state.inner(), &uri)
 }
 
-/// Link two captured resources (browser "L"). The core has no clock, so the
-/// desktop supplies the timestamp.
+/// Link two captured resources (browser "L").
 #[tauri::command]
 fn link_resources(state: State<'_, AppState>, a_uri: String, b_uri: String) -> Result<(), String> {
-    let created_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_millis() as i64);
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.link_resources(&a_uri, &b_uri, created_at)
+    ubilink_app::link_resources(state.inner(), &a_uri, &b_uri)
 }
 
 /// Settings: resource + link counts.
 #[tauri::command]
 fn graph_stats(state: State<'_, AppState>) -> Result<ubilink_core::GraphStats, String> {
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.graph_stats()
+    ubilink_app::graph_stats(state.inner())
 }
 
 /// Settings: wipe the graph (destructive — the webview confirms first). Returns
 /// the number of resources removed.
 #[tauri::command]
 fn reset_graph(state: State<'_, AppState>) -> Result<i64, String> {
-    let mut backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.reset_graph()
+    ubilink_app::reset_graph(state.inner())
 }
 
 /// Settings: export the graph as JSON to ~/Downloads, returning the written path.
+/// The save-directory lookup needs `AppHandle` (genuinely Tauri), so it stays here;
+/// everything else (reading the graph, stamping the filename, writing the file) is
+/// ubilink-app's `export_graph`.
 #[tauri::command]
 fn export_graph(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let json = {
-        let backend = state
-            .backend
-            .lock()
-            .map_err(|_| "internal state was poisoned".to_string())?;
-        backend.export_graph()?
-    };
     let dir = app
         .path()
         .download_dir()
         .or_else(|_| app.path().home_dir())
         .map_err(|e| format!("couldn't resolve a save directory: {e}"))?;
-    // No clock in core; stamp the filename from the OS time here.
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let path = dir.join(format!("ubilink-export-{stamp}.json"));
-    std::fs::write(&path, json).map_err(|e| format!("couldn't write export: {e}"))?;
-    let p = path.to_string_lossy().to_string();
+    let path = ubilink_app::export_graph(state.inner(), &dir)?;
     // Reveal it in Finder so the user sees where it went.
-    let _ = std::process::Command::new("open").arg("-R").arg(&p).spawn();
-    Ok(p)
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn();
+    Ok(path)
 }
 
 /// Settings: import a graph-export JSON (read by the webview's file input).
 /// Merges into the current graph; returns a human summary.
 #[tauri::command]
 fn import_graph(state: State<'_, AppState>, json: String) -> Result<String, String> {
-    let mut backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.import_graph(&json)
+    ubilink_app::import_graph(state.inner(), &json)
 }
 
 /// In-app capability disclosure (O2): what linking works where.
 #[tauri::command]
 fn capabilities(state: State<'_, AppState>) -> Result<Vec<Support>, String> {
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    Ok(backend.capabilities())
+    ubilink_app::capabilities(state.inner())
 }
 
-/// Settings › App adapters: every adapter as a toggle row (built-in / shipped /
-/// custom, enabled/disabled). Sorted case-insensitively by app name for a stable list.
+/// Settings › App adapters: every adapter as a toggle row.
 #[tauri::command]
 fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginView>, String> {
-    let disabled = state
-        .disabled
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    let mut rows: Vec<PluginView> = state
-        .adapters
-        .specs()
-        .iter()
-        .map(|s| PluginView {
-            app: s.app.clone(),
-            builtin: s.builtin,
-            user_defined: s.user_defined,
-            // Built-ins are always on; any other adapter is on unless the user disabled it.
-            enabled: s.builtin || !disabled.contains(&s.app.to_ascii_lowercase()),
-            scheme: s.schemes.first().cloned(),
-        })
-        .collect();
-    rows.sort_by_key(|p| p.app.to_ascii_lowercase());
-    Ok(rows)
+    ubilink_app::list_plugins(state.inner())
 }
 
 /// Settings › App adapters: toggle a non-built-in adapter on/off and persist it.
-/// Built-in adapters (core macOS apps ubilink ships with) can't be disabled; a
-/// user `adapters.json` entry is never built-in (D14), so it can always be disabled.
 #[tauri::command]
 fn set_plugin_enabled(
     state: State<'_, AppState>,
     app: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let is_builtin = state
-        .adapters
-        .specs()
-        .iter()
-        .any(|s| s.app.eq_ignore_ascii_case(&app) && s.builtin);
-    if is_builtin && !enabled {
-        return Err(format!(
-            "{app} is a built-in adapter and can't be disabled."
-        ));
-    }
-    let key = app.to_ascii_lowercase();
-    let mut disabled = state
-        .disabled
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    if enabled {
-        disabled.remove(&key);
-    } else {
-        disabled.insert(key);
-    }
-    save_disabled(&state.data_dir, &disabled)
+    ubilink_app::set_plugin_enabled(state.inner(), &app, enabled)
 }
 
-/// U2: put the link on the clipboard (macOS `pbcopy`, no extra plugin/dep).
+/// U2: put the link on the clipboard.
 #[tauri::command]
 fn copy_to_clipboard(text: String) -> Result<(), String> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("clipboard unavailable: {e}"))?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("clipboard pipe unavailable")?
-        .write_all(text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    ubilink_app::copy_to_clipboard(&text)
 }
 
-/// Runs a program without waiting for it (`open` hands off to LaunchServices, so
-/// there is nothing to wait for on the command thread). Used by `open_link`.
-struct SpawnRunner;
-
-impl CommandRunner for SpawnRunner {
-    fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
-        std::process::Command::new(program)
-            .args(args)
-            .spawn()
-            .map(|_| String::new())
-            .map_err(|e| format!("couldn't run {program}: {e}"))
-    }
-}
-
-/// Open a captured link's URI. The core re-validates it with the capture policy (a
-/// stored row may predate validation) and builds the command so the URI can't be
-/// read as an option or reach a shell (macOS: `open -- <uri>`).
+/// Open a captured link's URI.
 #[tauri::command]
 fn open_link(state: State<'_, AppState>, uri: String) -> Result<(), String> {
-    let backend = state
-        .backend
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.open_link(&SpawnRunner, &uri)
+    ubilink_app::open_link(state.inner(), &uri)
 }
 
 /// Resize the panel window to a content-fit height (the webview measures/computes
 /// it). Done in Rust because the JS window API proved unreliable under the
-/// transparent window; `invoke` + `set_size` are the proven path.
+/// transparent window; `invoke` + `set_size` are the proven path. Kept in the shell
+/// (not ubilink-app): it needs a live `AppHandle`/`WebviewWindow` to move/resize an
+/// actual OS window — there is no GUI-free equivalent to delegate to. The one pure
+/// piece it leans on, the vertical-fit math, already lives in `placement` (unit-
+/// tested there), which is as far as this command's logic can be factored out.
 #[tauri::command]
 fn resize_panel(app: AppHandle, height: f64) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
@@ -427,7 +203,8 @@ fn display_of(m: &tauri::Monitor) -> placement::Display {
     }
 }
 
-/// Hide the panel — the flow is done (U2: 2 actions, then get out of the way).
+/// Hide the panel — the flow is done (U2: 2 actions, then get out of the way). Stays
+/// in the shell: hiding an OS window needs a live `AppHandle`, nothing to extract.
 #[tauri::command]
 fn dismiss_panel(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
@@ -436,48 +213,10 @@ fn dismiss_panel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Defect 1: a failed hotkey registration used to be invisible (only `eprintln!`'d,
-/// which a packaged .app has no terminal to show). This is the report the frontend
-/// can actually query — per shortcut, whether it registered, plus a human-readable
-/// error for the FIRST failure (the important one — an app with 3 dead shortcuts and
-/// one already-explained cause doesn't need three redundant error strings).
-#[derive(serde::Serialize, Clone, Default, Debug, PartialEq)]
-struct HotkeyReport {
-    toggle: bool,
-    browse: bool,
-    settings: bool,
-    error: Option<String>,
-}
-
-/// Pure: fold three registration attempts into one `HotkeyReport`. Kept free of any
-/// Tauri/global-shortcut types so it's unit-testable without spinning up the plugin.
-fn build_hotkey_report(
-    toggle: Result<(), String>,
-    browse: Result<(), String>,
-    settings: Result<(), String>,
-) -> HotkeyReport {
-    let mut error = None;
-    for (label, result) in [
-        ("Cmd+Shift+K", &toggle),
-        ("Cmd+Shift+L", &browse),
-        ("Cmd+Shift+,", &settings),
-    ] {
-        if error.is_none() {
-            if let Err(e) = result {
-                error = Some(format!("{label}: {e}"));
-            }
-        }
-    }
-    HotkeyReport {
-        toggle: toggle.is_ok(),
-        browse: browse.is_ok(),
-        settings: settings.is_ok(),
-        error,
-    }
-}
-
 /// The three global shortcuts ubilink registers. A single source of truth so both
 /// startup registration (`.setup()`) and `retry_hotkeys` build identical values.
+/// Stays in the shell: `Shortcut` is a `tauri_plugin_global_shortcut` type, which
+/// ubilink-app must never depend on (see its `deps-clean` guard).
 fn hotkey_shortcuts() -> (Shortcut, Shortcut, Shortcut) {
     (
         Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK),
@@ -489,7 +228,9 @@ fn hotkey_shortcuts() -> (Shortcut, Shortcut, Shortcut) {
 /// Register the three global shortcuts. IDEMPOTENT: unregisters each first, so
 /// calling this again on an already-registered shortcut (Defect 2 — retrying after
 /// the user grants Accessibility mid-session) neither errors nor double-fires the
-/// handler. Used at startup AND from `retry_hotkeys`.
+/// handler. Used at startup AND from `retry_hotkeys`. Stays in the shell: it drives
+/// `GlobalShortcutExt`, the Tauri plugin API; only the report-folding it feeds into
+/// (`build_hotkey_report`) is pure enough to live in ubilink-app.
 fn register_hotkeys(
     app: &AppHandle,
     toggle: Shortcut,
@@ -502,7 +243,7 @@ fn register_hotkeys(
     let _ = gs.unregister(toggle);
     let _ = gs.unregister(browse);
     let _ = gs.unregister(settings);
-    let report = build_hotkey_report(
+    let report = ubilink_app::build_hotkey_report(
         gs.register(toggle).map_err(|e| e.to_string()),
         gs.register(browse).map_err(|e| e.to_string()),
         gs.register(settings).map_err(|e| e.to_string()),
@@ -513,17 +254,17 @@ fn register_hotkeys(
     report
 }
 
-/// Current hotkey registration state, for the onboarding screen (Defect 1: made
-/// queryable instead of only ever `eprintln!`'d where a packaged .app can't show it).
+/// Current hotkey registration state, for the onboarding screen.
 #[tauri::command]
 fn hotkey_status(state: State<'_, AppState>) -> HotkeyReport {
-    state.hotkeys.lock().map(|g| g.clone()).unwrap_or_default()
+    ubilink_app::hotkey_status(state.inner())
 }
 
 /// Re-attempt hotkey registration (Defect 2): registration otherwise only ever runs
 /// once, in `.setup()`, so granting Accessibility mid-session never revives a dead
 /// hotkey without a full relaunch. Called from the frontend right after the user
 /// grants Accessibility (and from Re-check), before it re-reads permission status.
+/// Stays in the shell: it drives `register_hotkeys`, which needs `AppHandle`.
 #[tauri::command]
 fn retry_hotkeys(app: AppHandle) -> HotkeyReport {
     let (toggle, browse, settings) = hotkey_shortcuts();
@@ -536,133 +277,29 @@ fn retry_hotkeys(app: AppHandle) -> HotkeyReport {
     report
 }
 
-/// The two macOS permissions ubilink needs, and their current state — so the
-/// onboarding screen can tell the user exactly what's left to do (S4/RT-2/U3).
-#[derive(serde::Serialize, Clone)]
-struct PermissionReport {
-    /// Accessibility (AXIsProcessTrusted) — lets Ubilink script another app's
-    /// menus (AX-based adapters, e.g. Bear's "Copy Link"). Defect 5: this is
-    /// NOT required for the global hotkey, which registers via Carbon
-    /// `RegisterEventHotKey` (see `register_hotkeys`) and needs no TCC grant
-    /// at all — nor for capture from browsers/Finder, which goes through
-    /// osascript (Automation) instead.
-    accessibility: bool,
-    /// Automation (System Events, via osascript): "granted" | "denied" | "not_determined".
-    automation: &'static str,
-}
-
-/// Whether this process is trusted for the macOS Accessibility API — needed for
-/// AX-based menu-scripting adapters (e.g. Bear), NOT the global hotkey (Defect
-/// 5: Carbon `RegisterEventHotKey` needs no TCC grant). Direct FFI — no crate,
-/// keeping the dep tree honest.
-#[cfg(target_os = "macos")]
-fn accessibility_trusted() -> bool {
-    #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        fn AXIsProcessTrusted() -> u8;
-    }
-    unsafe { AXIsProcessTrusted() != 0 }
-}
-#[cfg(not(target_os = "macos"))]
-fn accessibility_trusted() -> bool {
-    false
-}
-
-/// Trigger the macOS "grant Accessibility" system dialog
-/// (`AXIsProcessTrustedWithOptions` with the prompt option) and return the current
-/// trust state. Needed for UI-scripting app menus (e.g. Bear's "Copy Link"). Builds
-/// the options CFDictionary by hand — dep-free CoreFoundation FFI.
-#[cfg(target_os = "macos")]
-fn prompt_accessibility() -> bool {
-    use std::ffi::c_void;
-    use std::ptr;
-    type CFRef = *const c_void;
-    #[link(name = "CoreFoundation", kind = "framework")]
-    extern "C" {
-        static kCFBooleanTrue: CFRef;
-        static kCFTypeDictionaryKeyCallBacks: [u8; 0];
-        static kCFTypeDictionaryValueCallBacks: [u8; 0];
-        fn CFDictionaryCreate(
-            allocator: CFRef,
-            keys: *const CFRef,
-            values: *const CFRef,
-            num_values: isize,
-            key_callbacks: *const c_void,
-            value_callbacks: *const c_void,
-        ) -> CFRef;
-        fn CFRelease(cf: CFRef);
-    }
-    #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        static kAXTrustedCheckOptionPrompt: CFRef;
-        fn AXIsProcessTrustedWithOptions(options: CFRef) -> u8;
-    }
-    unsafe {
-        let keys = [kAXTrustedCheckOptionPrompt];
-        let values = [kCFBooleanTrue];
-        let options = CFDictionaryCreate(
-            ptr::null(),
-            keys.as_ptr(),
-            values.as_ptr(),
-            1,
-            ptr::addr_of!(kCFTypeDictionaryKeyCallBacks) as *const c_void,
-            ptr::addr_of!(kCFTypeDictionaryValueCallBacks) as *const c_void,
-        );
-        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
-        if !options.is_null() {
-            CFRelease(options);
-        }
-        trusted
-    }
-}
-#[cfg(not(target_os = "macos"))]
-fn prompt_accessibility() -> bool {
-    false
-}
-
 /// Show the macOS Accessibility prompt and report whether trust is now granted.
 #[tauri::command]
 fn request_accessibility() -> bool {
-    prompt_accessibility()
+    ubilink_app::request_accessibility()
 }
 
 /// Report current permission state (called by the onboarding screen + its Re-check).
 #[tauri::command]
 fn permission_status() -> PermissionReport {
-    let automation = match ubilink_core::probe_automation_permission(&OsaScriptRunner) {
-        PermissionState::Granted => "granted",
-        PermissionState::Denied => "denied",
-        PermissionState::NotDetermined => "not_determined",
-    };
-    PermissionReport {
-        accessibility: accessibility_trusted(),
-        automation,
-    }
+    ubilink_app::permission_status()
 }
 
 /// Open the relevant System Settings privacy pane so the user can grant a permission.
 #[tauri::command]
 fn open_settings(pane: String) -> Result<(), String> {
-    let url = match pane.as_str() {
-        "accessibility" => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        }
-        "automation" => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
-        }
-        other => return Err(format!("unknown settings pane: {other}")),
-    };
-    std::process::Command::new("open")
-        .arg(url)
-        .spawn()
-        .map_err(|e| format!("couldn't open System Settings: {e}"))?;
-    Ok(())
+    ubilink_app::open_settings(&pane)
 }
 
 /// Defect 3: macOS evaluates Accessibility trust at PROCESS LAUNCH, so a
 /// process already running when the user grants it in System Settings keeps
 /// reading itself as untrusted until it is quit and reopened. Rather than
 /// telling the user to do that by hand, offer a button that does it for them.
+/// Stays in the shell: `AppHandle::restart` has no GUI-free equivalent.
 #[tauri::command]
 fn restart_app(app: AppHandle) {
     app.restart();
@@ -712,7 +349,7 @@ fn main() {
             // O2: disclose what THIS registry (defaults + user adapters) can link.
             let matrix = CapabilityMatrix::from_registry(&adapters);
             // Which non-built-in adapters has the user turned off? Persisted across launches.
-            let disabled = load_disabled(&data_dir);
+            let disabled = ubilink_app::load_disabled(&data_dir);
             app.manage(AppState {
                 backend: Mutex::new(PanelBackend::new(
                     UbilinkService::new(graph)
@@ -853,13 +490,14 @@ fn main() {
                                 // set_focus() — reordering it would risk the panel becoming
                                 // key window before we know which app to capture from, which
                                 // would break capture itself.
-                                let result = detect_frontmost().and_then(|frontmost| {
-                                    if let Some(w) = app.get_webview_window("panel") {
-                                        let _ = w.set_focus();
-                                    }
-                                    let state = app.state::<AppState>();
-                                    capture_from(state.inner(), &frontmost)
-                                });
+                                let result =
+                                    ubilink_app::detect_frontmost().and_then(|frontmost| {
+                                        if let Some(w) = app.get_webview_window("panel") {
+                                            let _ = w.set_focus();
+                                        }
+                                        let state = app.state::<AppState>();
+                                        ubilink_app::capture_from(state.inner(), &frontmost)
+                                    });
                                 match result {
                                     Ok(view) => {
                                         let _ = app.emit("capture-ok", view);
@@ -884,11 +522,7 @@ fn main() {
                             // SQLite (fast), so list synchronously, push it, and reveal.
                             let listed = {
                                 let state = app.state::<AppState>();
-                                let backend = state.backend.lock();
-                                match backend {
-                                    Ok(b) => b.list_links(),
-                                    Err(_) => Err("internal state was poisoned".to_string()),
-                                }
+                                ubilink_app::list_links(state.inner())
                             };
                             match listed {
                                 Ok(list) => {
@@ -909,11 +543,7 @@ fn main() {
                             // Cmd+Shift+, : open Settings. Push the current graph stats.
                             let stats = {
                                 let state = app.state::<AppState>();
-                                let backend = state.backend.lock();
-                                match backend {
-                                    Ok(b) => b.graph_stats().ok(),
-                                    Err(_) => None,
-                                }
+                                ubilink_app::graph_stats(state.inner()).ok()
                             };
                             let _ = w.emit("settings", stats);
                             place_panel(app, &w);
@@ -972,9 +602,6 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_hotkey_report, load_disabled, save_disabled};
-    use std::collections::HashSet;
-
     #[test]
     fn the_panel_is_allowed_to_start_a_window_drag() {
         // data-tauri-drag-region silently does nothing unless the window's
@@ -984,78 +611,5 @@ mod tests {
             caps.contains("\"core:window:allow-start-dragging\""),
             "capabilities/default.json must allow start-dragging"
         );
-    }
-
-    fn tmp_dir(tag: &str) -> std::path::PathBuf {
-        // Unique per test (name + pid) so parallel test threads don't clobber each other.
-        let d = std::env::temp_dir().join(format!("ubilink-plugins-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    #[test]
-    fn disabled_set_round_trips() {
-        let dir = tmp_dir("roundtrip");
-        let mut set = HashSet::new();
-        set.insert("bear".to_string());
-        set.insert("things3".to_string());
-        save_disabled(&dir, &set).unwrap();
-        let back = load_disabled(&dir);
-        assert_eq!(back, set);
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn missing_file_is_empty() {
-        // A never-written data dir → nothing disabled (everything enabled).
-        let dir = std::env::temp_dir().join("ubilink-plugins-nonexistent-xyz");
-        std::fs::remove_dir_all(&dir).ok();
-        assert!(load_disabled(&dir).is_empty());
-    }
-
-    #[test]
-    fn garbled_file_is_empty() {
-        // A corrupt plugins-state.json must not panic — degrade to "all enabled".
-        let dir = tmp_dir("garbled");
-        std::fs::write(dir.join("plugins-state.json"), b"{ not json").unwrap();
-        assert!(load_disabled(&dir).is_empty());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn hotkey_report_all_registered_has_no_error() {
-        let report = build_hotkey_report(Ok(()), Ok(()), Ok(()));
-        assert!(report.toggle);
-        assert!(report.browse);
-        assert!(report.settings);
-        assert!(report.error.is_none());
-    }
-
-    #[test]
-    fn hotkey_report_records_only_the_first_failure() {
-        // toggle (Cmd+Shift+K) is the important one users actually feel missing;
-        // it fails here, and browse also fails, but only the FIRST failure's
-        // message should surface (Defect 1: one clear cause, not three).
-        let report = build_hotkey_report(
-            Err("already registered by another application".to_string()),
-            Err("boom".to_string()),
-            Ok(()),
-        );
-        assert!(!report.toggle);
-        assert!(!report.browse);
-        assert!(report.settings);
-        assert_eq!(
-            report.error.as_deref(),
-            Some("Cmd+Shift+K: already registered by another application")
-        );
-    }
-
-    #[test]
-    fn hotkey_report_a_later_failure_is_reported_when_earlier_ones_succeed() {
-        let report = build_hotkey_report(Ok(()), Ok(()), Err("nope".to_string()));
-        assert!(report.toggle);
-        assert!(report.browse);
-        assert!(!report.settings);
-        assert_eq!(report.error.as_deref(), Some("Cmd+Shift+,: nope"));
     }
 }

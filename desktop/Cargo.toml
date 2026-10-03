@@ -4,7 +4,11 @@
 # SEPARATE crate from ubilink-core on purpose (same rule as registry/): Tauri pulls a
 # large dependency tree, and the core is deliberately Tauri-free (D1/D8) so its S2
 # `no_network_deps` guard stays physically true. This crate is the imperative GUI
-# shell; all logic lives in ubilink-core and is unit-tested without a display.
+# shell; most logic lives in ubilink-core, and (R3/task 3 of the GPUI Phase 0 plan)
+# the command-layer logic that used to live HERE now lives in ubilink-app — a
+# GUI-free crate the future GPUI shell will share — so this crate is left with only
+# thin `#[tauri::command]` wrappers plus the pieces that genuinely need a live
+# `AppHandle`/window (resize, dismiss, restart, global-shortcut registration).
 [package]
 name = "ubilink-desktop"
 version = "0.1.0"
@@ -24,6 +28,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 ubilink-core = { path = "../src-tauri" }
+ubilink-app = { path = "../app" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
