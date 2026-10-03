@@ -16,6 +16,8 @@
 //   warp <x> <y>         move the cursor to a global point
 //   pbcount              NSPasteboard.general.changeCount
 //   screen-access        {"granted": bool} from CGPreflightScreenCaptureAccess
+//   display-asleep       {"id", "asleep": bool} CGDisplayIsAsleep on the main display
+//                        (probe.py doctor, R9: an asleep main display is a FAIL)
 //   pixel <png> <x> <y> <w> <h> <points-width>
 //                        mean sRGB colour of a region given in window points; the
 //                        image's backing scale is its pixel width / <points-width>
@@ -46,7 +48,9 @@ func num(_ s: String) -> Double {
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let cmd = args.first else { fail("usage: quartz <windows|frontmost|displays|cursor|warp|pbcount|screen-access|pixel> ...") }
+guard let cmd = args.first else {
+    fail("usage: quartz <windows|frontmost|displays|cursor|warp|pbcount|screen-access|display-asleep|pixel> ...")
+}
 
 switch cmd {
 case "windows":
@@ -108,6 +112,13 @@ case "pbcount":
 
 case "screen-access":
     emit(["granted": CGPreflightScreenCaptureAccess()])
+
+case "display-asleep":
+    // CGMainDisplayID/CGDisplayIsAsleep rather than the first id from `displays`:
+    // CGGetActiveDisplayList can still list a sleeping display as "active", so
+    // doctor needs this explicit awake/asleep bit, not just a non-empty list.
+    let id = CGMainDisplayID()
+    emit(["id": Int(id), "asleep": CGDisplayIsAsleep(id) != 0])
 
 case "pixel":
     guard args.count == 7 else { fail("usage: quartz pixel <png> <x> <y> <w> <h> <points-width>") }
