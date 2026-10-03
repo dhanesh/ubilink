@@ -1,0 +1,76 @@
+{
+  "description": "R7/TN5 spike: gpui-component's List, Input, Switch and Dialog each emit an AccessKit node carrying their visible text once the tree is activated (automation `a11y` verb), proving the pattern Phase 1's real views (U4) must follow",
+  "requirement": "R7",
+  "notes": [
+    "The spike route (`Route::A11ySpike`) exists only in automation builds; `open_view` refuses it in any build without this feature because the route itself does not exist.",
+    "All four widgets reach the tree with their documented API, no workaround: see desktop-gpui/probes/A11Y-NOTES.md and the module doc on desktop-gpui/src/views/a11y_spike.rs.",
+    "List rows: the row's own text (a `text!` child, same rule Task 6 found for a bare title) is a separate Label node nested under the row container, which is the node List itself marks `role: ListItem` and `selected`. That is why the row's text and its selected flag are asserted as two separate `see` queries rather than one.",
+    "Dialog: opened through `window.open_dialog` on the spike view's first render, mounted by gpui-component's `WindowState` root plugin above the panel's own content — not a child of the div tree the other three widgets sit in.",
+    "Dialog's OWN container never carries `role: Dialog` in gpui-pre 0.3.7: gpui_base::Dialog's render calls `.focus_trap(...)`, whose FocusTrapContainer wrapper forwards `prepaint` straight to the inner div's raw Element method instead of through gpui-pre's Drawable wrapper, which is the only place an a11y node gets pushed (element.rs's `ElementDrawPhase::prepaint`). The inner div's `.role(Role::Dialog)` is consequently never seen. Its CHILDREN (the title, the Close button) are unaffected because Div::prepaint wraps each child in its own Drawable. The step below pins this as a known, asserted gap (not a silent omission) rather than requiring a node that cannot exist with this gpui-pre version — see A11Y-NOTES.md."
+  ],
+  "steps": [
+    {"call": "open_view", "args": {"route": "a11y_spike"}, "expect": {"route": "a11y_spike"}},
+    {
+      "name": "route title renders (same text! pattern as the other stub views)",
+      "see": {"role": "Label", "text": "Accessibility spike"},
+      "route": "a11y_spike",
+      "timeout_ms": 5000
+    },
+    {
+      "name": "List: the outer list container carries role List",
+      "see": {"role": "List"},
+      "route": "a11y_spike"
+    },
+    {
+      "name": "List: all three rows carry role ListItem",
+      "see": {"role": "ListItem"},
+      "count": 3,
+      "route": "a11y_spike"
+    },
+    {
+      "name": "List: each row's text! child is a Label, in row order",
+      "see": {
+        "sequence": {
+          "role": "Label",
+          "texts": ["Spike row alpha", "Spike row beta", "Spike row gamma"],
+          "mode": "ordered"
+        }
+      },
+      "route": "a11y_spike"
+    },
+    {
+      "name": "List: alpha (row 0) carries the selected flag List itself sets",
+      "see": {"role": "ListItem", "nth": 0, "state": {"selected": true}},
+      "route": "a11y_spike"
+    },
+    {
+      "name": "List: beta and gamma are not selected",
+      "see": [
+        {"role": "ListItem", "nth": 1, "state": {"selected": false}},
+        {"role": "ListItem", "nth": 2, "state": {"selected": false}}
+      ],
+      "route": "a11y_spike"
+    },
+    {
+      "name": "Input: role TextInput, value is the visible text",
+      "see": {"role": "TextInput", "text": "Spike input value"},
+      "route": "a11y_spike"
+    },
+    {
+      "name": "Switch: role Switch, label as its name, toggled true (on)",
+      "see": {"role": "Switch", "text": "Spike switch", "state": {"toggled": true}},
+      "route": "a11y_spike"
+    },
+    {
+      "name": "Dialog: its title is a Label, same text! pattern as everything else here (the dialog IS mounted and visible, confirmed by this reaching the tree at all)",
+      "see": {"role": "Label", "text": "Spike dialog"},
+      "route": "a11y_spike"
+    },
+    {
+      "name": "Dialog: known gap, pinned so a future gpui-pre fixing it is noticed rather than silently still passing — see the notes above and A11Y-NOTES.md",
+      "see": {"role": "Dialog"},
+      "absent": true,
+      "route": "a11y_spike"
+    }
+  ]
+}

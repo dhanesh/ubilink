@@ -17,7 +17,17 @@
 //! [`ViewState`] is `#[serde(untagged)]` over each view's own small state struct, so
 //! the JSON the `state` verb returns is the stub's own flat object (e.g.
 //! `{ "view": "capture", "phase": "stub" }`), not a tagged wrapper around it.
+//!
+//! Task 7 (Phase 0 R7, TN5): a fifth route, `Route::A11ySpike`, exists only in
+//! automation builds. It is not one of the four product views Phase 1 ports — it is
+//! a throwaway probe view proving gpui-kit's list/input/switch/dialog widgets reach
+//! AccessKit with their visible text, so Phase 1's own views can copy a proven
+//! pattern instead of discovering one live. Every place that variant touches (the
+//! enum, `TABLE`, `ViewState`) is gated the same way, so a release build — and
+//! `router_registers_four_views` run without `--features automation` — never see it.
 
+#[cfg(feature = "automation")]
+pub mod a11y_spike;
 pub mod browser;
 pub mod capture;
 pub mod onboarding;
@@ -35,6 +45,11 @@ pub enum Route {
     Browser,
     Onboarding,
     Settings,
+    /// Task 7's accessibility spike (R7, TN5): automation builds only. Opened by the
+    /// `a11y-spike` probe through `open_view`, never reachable from the tray or a
+    /// hotkey, and absent entirely from a release binary.
+    #[cfg(feature = "automation")]
+    A11ySpike,
 }
 
 impl Route {
@@ -44,6 +59,8 @@ impl Route {
             Route::Browser => "browser",
             Route::Onboarding => "onboarding",
             Route::Settings => "settings",
+            #[cfg(feature = "automation")]
+            Route::A11ySpike => "a11y_spike",
         }
     }
 
@@ -53,6 +70,8 @@ impl Route {
             Route::Browser => "Browse links",
             Route::Onboarding => "Welcome to ubilink",
             Route::Settings => "Settings",
+            #[cfg(feature = "automation")]
+            Route::A11ySpike => "Accessibility spike",
         }
     }
 
@@ -94,7 +113,8 @@ pub struct RouteEntry {
 }
 
 /// The router: one row per [`Route`] variant. `router_registers_four_views` proves
-/// every route is here exactly once.
+/// every product route is here exactly once, in both feature configurations.
+#[cfg(not(feature = "automation"))]
 pub const TABLE: [RouteEntry; 4] = [
     RouteEntry {
         route: Route::Capture,
@@ -119,6 +139,44 @@ pub const TABLE: [RouteEntry; 4] = [
         dismiss: Dismiss::StayOpen,
         build: settings::build,
         state: settings::state,
+    },
+];
+
+/// Automation builds carry a fifth row after the four product routes (Task 7, R7):
+/// `Route::A11ySpike`, reachable only through the automation `open_view` verb. It
+/// stays open on deactivate like onboarding/settings — a probe activating the a11y
+/// tree should not fight a click-away dismissal.
+#[cfg(feature = "automation")]
+pub const TABLE: [RouteEntry; 5] = [
+    RouteEntry {
+        route: Route::Capture,
+        dismiss: Dismiss::HideOnDeactivate,
+        build: capture::build,
+        state: capture::state,
+    },
+    RouteEntry {
+        route: Route::Browser,
+        dismiss: Dismiss::HideOnDeactivate,
+        build: browser::build,
+        state: browser::state,
+    },
+    RouteEntry {
+        route: Route::Onboarding,
+        dismiss: Dismiss::StayOpen,
+        build: onboarding::build,
+        state: onboarding::state,
+    },
+    RouteEntry {
+        route: Route::Settings,
+        dismiss: Dismiss::StayOpen,
+        build: settings::build,
+        state: settings::state,
+    },
+    RouteEntry {
+        route: Route::A11ySpike,
+        dismiss: Dismiss::StayOpen,
+        build: a11y_spike::build,
+        state: a11y_spike::state,
     },
 ];
 
@@ -153,6 +211,8 @@ pub enum ViewState {
     Browser(browser::State),
     Onboarding(onboarding::State),
     Settings(settings::State),
+    #[cfg(feature = "automation")]
+    A11ySpike(a11y_spike::State),
 }
 
 impl ViewState {
@@ -171,35 +231,49 @@ mod tests {
 
     /// RED/GREEN anchor for Task 13. Run with:
     /// `cargo test --locked --manifest-path desktop-gpui/Cargo.toml --features automation router_registers_four_views`
+    ///
+    /// Task 7 adds a fifth, automation-only row (`Route::A11ySpike`) to `TABLE`. This
+    /// test's intent — exactly the four product routes are registered for product
+    /// use — must keep holding in both feature configurations, so it filters `TABLE`
+    /// down to the product routes before counting rather than asserting the table's
+    /// raw length (which is 4 without `automation`, 5 with it).
     #[test]
     fn router_registers_four_views() {
-        // Exactly one entry per route: walk `TABLE` itself, not a separately declared
-        // list, so a future edit that drops or duplicates a route fails here.
-        let routes: Vec<Route> = TABLE.iter().map(|e| e.route).collect();
-        assert_eq!(
-            routes.len(),
-            4,
-            "router table must register exactly four views"
-        );
-        let unique: HashSet<&str> = routes.iter().map(|r| r.as_str()).collect();
-        assert_eq!(
-            unique.len(),
-            4,
-            "every route must be registered exactly once"
-        );
-        for expected in [
+        const PRODUCT_ROUTES: [Route; 4] = [
             Route::Capture,
             Route::Browser,
             Route::Onboarding,
             Route::Settings,
-        ] {
+        ];
+
+        // Exactly one entry per product route: walk `TABLE` itself, not a separately
+        // declared list, so a future edit that drops or duplicates a route fails here.
+        let routes: Vec<Route> = TABLE.iter().map(|e| e.route).collect();
+        let product_rows: Vec<Route> = routes
+            .iter()
+            .copied()
+            .filter(|r| PRODUCT_ROUTES.contains(r))
+            .collect();
+        assert_eq!(
+            product_rows.len(),
+            4,
+            "router table must register exactly four product views"
+        );
+        let unique: HashSet<&str> = product_rows.iter().map(|r| r.as_str()).collect();
+        assert_eq!(
+            unique.len(),
+            4,
+            "every product route must be registered exactly once"
+        );
+        for expected in PRODUCT_ROUTES {
             assert!(
                 routes.contains(&expected),
                 "{expected:?} missing from the router table"
             );
         }
 
-        // Each view-state serialises to JSON carrying its own route name.
+        // Each view-state serialises to JSON carrying its own route name (every row
+        // in `TABLE`, including Task 7's automation-only spike row when present).
         for entry in TABLE.iter() {
             let json = (entry.state)().to_json();
             assert_eq!(
@@ -219,5 +293,19 @@ mod tests {
         assert!(Route::Browser.hides_on_deactivate());
         assert!(!Route::Onboarding.hides_on_deactivate());
         assert!(!Route::Settings.hides_on_deactivate());
+    }
+
+    /// Task 7's fifth row exists, but only in automation builds, and does not count
+    /// as one of the four product routes `router_registers_four_views` pins.
+    #[cfg(feature = "automation")]
+    #[test]
+    fn router_also_registers_the_automation_only_a11y_spike_route() {
+        assert_eq!(TABLE.len(), 5, "automation builds carry the spike row too");
+        let entry = entry_for(Route::A11ySpike);
+        assert_eq!(entry.dismiss, Dismiss::StayOpen);
+        assert_eq!(Route::A11ySpike.as_str(), "a11y_spike");
+        let json = (entry.state)().to_json();
+        assert_eq!(json["view"], "a11y_spike");
+        assert_eq!(json["phase"], "stub");
     }
 }
