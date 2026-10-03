@@ -1402,8 +1402,8 @@ def validate_step(step, where: str) -> str:
         for path, spec in (step.get("expect") or {}).items():
             validate_matcher(spec, f"{where}: expect[{path!r}]")
     elif kind == "winframe":
-        if not (v in ("any", "cursor", "state") or (isinstance(v, int) and not isinstance(v, bool))):
-            raise ScenarioError(f"{where}: winframe is any, cursor, state or a display index")
+        if not (v in ("any", "cursor", "state", "gone") or (isinstance(v, int) and not isinstance(v, bool))):
+            raise ScenarioError(f"{where}: winframe is any, cursor, state, gone or a display index")
     elif kind == "warp_cursor":
         ok = isinstance(v, int) and not isinstance(v, bool) or (
             isinstance(v, dict) and "display" in v and set(v) <= {"display", "x", "y"}
@@ -1480,6 +1480,8 @@ class RunContext:
         self.nonce = None
         self.pb_count = None
         self.shots = 0
+        # The panel window a `winframe` step last found, for `winframe: "gone"`.
+        self.last_panel_wid = None
 
     def tokens(self) -> dict:
         t = {
@@ -1582,6 +1584,7 @@ def _panel_window(ctx: RunContext):
         raise StepFailed("no panel window", "an open panel", str(e))
     for w in quartz("windows", ctx.inst.proc.pid):
         if w["number"] == wid:
+            ctx.last_panel_wid = wid
             return wid, w["bounds"]
     raise StepFailed("panel not on screen", f"window {wid} on screen", "absent from CGWindowList")
 
@@ -1786,8 +1789,27 @@ def _display_for(target, displays: list, ctx: RunContext) -> dict:
     return ordered[target]
 
 
+def window_gone(wid, windows: list) -> bool:
+    """`winframe: "gone"`: the panel window an earlier step saw is not on screen. With
+    no earlier window there is nothing to check, so that is never a pass."""
+    if wid is None:
+        raise StepFailed("winframe gone needs an earlier winframe that found the panel", "a window number", None)
+    return all(w["number"] != wid for w in windows)
+
+
 def run_winframe(ctx: RunContext, step: dict) -> str:
     target = step["winframe"]
+
+    if target == "gone":
+        # Read from Quartz's on-screen window list, not from the app: the app saying
+        # it hid the panel is `state.shell.visible`; this checks the window server.
+        def gone():
+            wid = ctx.last_panel_wid
+            if not window_gone(wid, quartz("windows", ctx.inst.proc.pid)):
+                raise StepFailed(f"window {wid} still on screen", "absent from CGWindowList", "on screen")
+            return f"window {wid} no longer on screen"
+
+        return _poll(step.get("timeout_ms", 2000), gone)
 
     def attempt():
         wid, bounds = _panel_window(ctx)

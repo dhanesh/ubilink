@@ -394,6 +394,15 @@ class ScenarioValidation(unittest.TestCase):
         self.assertIn("see", kinds)
         self.assertIn("winframe", kinds)
 
+    def test_winframe_gone_needs_an_earlier_window(self):
+        self.load({"steps": [{"winframe": "gone", "timeout_ms": 500}]})
+        with self.assertRaises(probe.StepFailed):
+            probe.window_gone(None, [])
+        on = [{"number": 7}, {"number": 9}]
+        self.assertFalse(probe.window_gone(7, on))
+        self.assertTrue(probe.window_gone(8, on))
+        self.assertTrue(probe.window_gone(8, []))
+
     def test_every_step_type_has_a_runner(self):
         self.assertEqual(set(probe.STEP_TYPES), set(probe.STEP_RUNNERS))
 
