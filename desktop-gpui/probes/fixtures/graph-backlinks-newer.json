@@ -1,7 +1,7 @@
 {
   "schema": "ubilink.graph.v3",
   "resources": [
-    { "guid": "subj", "name": "Subject Note", "uri": "ubilink-fixture://subject", "created_at": 1700000000000 },
+    { "guid": "subj", "name": "Subject Note", "uri": "https://subject.example/note", "created_at": 1700000000000 },
     { "guid": "bl-a", "name": "Alpha Paper", "uri": "https://alpha.example/one", "created_at": 1700000000000 },
     { "guid": "bl-b", "name": "Beta Post", "uri": "https://beta.example/two", "created_at": 1700000000000 },
     { "guid": "bl-c", "name": "Gamma Doc", "uri": "https://gamma.example/three", "created_at": 1700000000000 },

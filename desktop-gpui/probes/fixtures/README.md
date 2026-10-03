@@ -40,22 +40,28 @@ so these fixtures load through the real core import path, not a probe-only parse
   accepts the legacy `v1`/`v2` schemas for back-compat, but every fixture here is v3).
 - `created_at` on a *link* is the backlink's timestamp — what recency ordering (R3)
   sorts on. `created_at` on a *resource* is its capture time.
-- A graph fixture is loaded either via `load_fixture {kind: "graph_dir", ...}` once
-  Phase 1 wires that up, or (today, and always for a scenario's own setup) copied
-  into place and imported, or read back with the `graph` step's `export:` option
-  (`desktop-gpui/probes/README.md`) — `export_path`/`import_path` name a
-  *destination/source path*, not fixture content, so the content is always one of
-  the files below.
+- A scenario puts a graph fixture into an instance with `setup.graph` or the
+  `seed_graph` step (`desktop-gpui/probes/README.md`), which write the instance's
+  `ubilink-graph.sqlite` exactly as the core's `import_json` would, so the Phase 1
+  scenarios need no `graph_dir` fixture plumbing in the app. It is read back with
+  the `graph` step (its `export:` option reads an exported JSON).
+  `export_path`/`import_path` name a *destination/source path*, not fixture content,
+  so the content is always one of the files below.
+- Seeding skips the core's URI validation (D16), so every URI here uses a scheme the
+  core admits (`https`, or an adapter's `bear`, `obsidian`, ...); a made-up scheme
+  would make the same graph unimportable through Settings and uncapturable.
 
 ### `graph-empty.json`
 
 `{"schema":"ubilink.graph.v3","resources":[],"links":[]}`. R11's export/import
-round trip: import this after a non-empty graph and `graph_stats`/the a11y counts
-must read 0.
+round trip empties the live graph with it (`seed_graph` with `replace: true`, i.e.
+clear, then import this); `graph_stats`/the a11y counts must then read 0. Importing
+it alone would change nothing: `import_json` merges.
 
 ### `graph-backlinks.json` / `graph-backlinks-newer.json` (R3)
 
-One subject (`uri: "ubilink-fixture://subject"`), three backlinks at **distinct**,
+One subject (`uri: "https://subject.example/note"`, also `capture-subject.json`'s
+capture), three backlinks at **distinct**,
 explicit link timestamps, and one decoy resource that is captured but **not**
 linked to the subject (must never appear in the backlink list). Newest-first order
 (what the a11y backlink list must show):
@@ -220,7 +226,7 @@ greedy-vs-minimum case above), `rank`'s field-OR logic and field-priority
 tie-break, that `rank`'s result doesn't depend on the input order, and that
 `--check` fails when the table disagrees with the scorer.
 
-## Capture fixtures (R1, R2)
+## Capture fixtures (R1, R2, R3)
 
 `load_fixture {kind: "capture", path}` — what the automation build hands the
 capture view instead of a live `osascript` capture. Two shapes, never mixed in one
@@ -239,6 +245,9 @@ file:
 - `capture-delayed.json`: `delay_ms: 300` exactly (R1's proof measures the
   `capturing` state rendering *before* this resolves, then the real data after).
 - `capture-failed.json`: only `error`, no `name`/`uri`/`app`/`delay_ms`.
+- `capture-subject.json` (R3): a success capture of `graph-backlinks*.json`'s subject
+  (`https://subject.example/note`, "Subject Note"), so the capture view shows that
+  resource's backlinks. Its uri must equal the subject's (`--check`).
 
 ## Permission fixtures (R9)
 

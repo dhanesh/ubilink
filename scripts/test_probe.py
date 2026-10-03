@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -1397,6 +1398,461 @@ class ProcessChain(unittest.TestCase):
         finally:
             probe._process_name, probe._parent_pid = saved_name, saved_parent
         self.assertEqual(len(chain), 3)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Phase 1 Task 11: engine additions the 15 Phase 1 scenarios need
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _load(doc):
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "s.json"
+        p.write_text(json.dumps(doc))
+        return probe.load_scenario(str(p))
+
+
+class DeepAnyAndExactQueries(unittest.TestCase):
+    """List rows keep their text in Label children (A11Y-NOTES.md), so row queries
+    match text anywhere in the row's subtree; `any` expresses D6's 'enabled OR
+    requires approval'; a query's own `exact` overrides the step's."""
+
+    tree = {
+        "root": "w",
+        "nodes": {
+            "w": {"aria": {"role": "Window"}, "children": ["l", "s1", "s2"]},
+            "l": {"aria": {"role": "List"}, "children": ["r1", "r2"]},
+            "r1": {"aria": {"role": "ListItem", "selected": True}, "children": ["n1", "u1"]},
+            "n1": {"aria": {"role": "Label", "value": "Gamma Doc"}},
+            "u1": {"aria": {"role": "Label", "value": "https://gamma.exa…"}},
+            "r2": {"aria": {"role": "ListItem"}, "children": ["n2", "u2"]},
+            "n2": {"aria": {"role": "Label", "value": "Beta Post"}},
+            "u2": {"aria": {"role": "Label", "value": "https://beta.example/two"}},
+            "s1": {"aria": {"role": "Label", "value": "Not granted"}},
+            "s2": {"aria": {"role": "Label", "value": "Requires approval"}},
+        },
+    }
+
+    def test_deep_matches_a_descendant_label_not_the_row_alone(self):
+        q = {"role": "ListItem", "text": "https://beta.example/two"}
+        with self.assertRaises(probe.StepFailed):
+            probe.check_a11y_query(self.tree, q)
+        probe.check_a11y_query(self.tree, {**q, "deep": True})
+        # truncated uri label still matches on its own
+        probe.check_a11y_query(self.tree, {"role": "ListItem", "nth": 0, "text": "https://gamma.example/three",
+                                           "deep": True, "state": {"selected": True}})
+
+    def test_deep_never_concatenates_two_labels(self):
+        with self.assertRaises(probe.StepFailed):
+            probe.check_a11y_query(self.tree, {"role": "ListItem", "text": "Beta Post https://beta", "deep": True})
+
+    def test_deep_sequence(self):
+        seq = {"sequence": {"role": "ListItem", "texts": ["Gamma Doc", "Beta Post"], "mode": "exact", "deep": True}}
+        probe.check_a11y_query(self.tree, seq)
+        with self.assertRaises(probe.StepFailed):
+            probe.check_a11y_query(self.tree, {"sequence": {**seq["sequence"], "texts": ["Beta Post", "Gamma Doc"]}})
+        with self.assertRaises(probe.StepFailed):  # not deep: ListItem nodes carry no text themselves
+            probe.check_a11y_query(self.tree, {"sequence": {**seq["sequence"], "deep": False}})
+
+    def test_query_exact_overrides_the_step(self):
+        probe.check_a11y_query(self.tree, {"role": "Label", "text": "granted"})  # substring of "Not granted"
+        with self.assertRaises(probe.StepFailed):
+            probe.check_a11y_query(self.tree, {"role": "Label", "text": "granted", "exact": True})
+        probe.check_a11y_query(self.tree, {"role": "Label", "text": "Not granted", "exact": True})
+
+    def test_any_holds_when_one_alternative_fully_holds(self):
+        enabled = [{"role": "Label", "text": "Enabled", "exact": True}]
+        approval = [{"role": "Label", "text": "Requires approval", "exact": True},
+                    {"role": "Label", "text": "Not granted"}]
+        probe.check_a11y_query(self.tree, {"any": [enabled, approval]})
+        half = [{"role": "Label", "text": "Requires approval"}, {"role": "Label", "text": "Login Items"}]
+        with self.assertRaisesRegex(probe.StepFailed, "no alternative"):
+            probe.check_a11y_query(self.tree, {"any": [enabled, half]})
+
+    def test_validation(self):
+        bad = [
+            {"see": {"any": [[{"text": "a"}]]}},                       # one alternative
+            {"see": {"any": [[{"text": "a"}], []]}},                   # empty alternative
+            {"see": {"any": [[{"text": "a"}], [{"any": [[{"text": "b"}], [{"text": "c"}]]}]]}},  # nested
+            {"see": {"any": [[{"text": "a"}], [{"text": "b"}]]}, "absent": True},
+            {"see": {"role": "ListItem", "deep": True}},               # deep needs text
+            {"see": {"role": "ListItem", "text": "x", "deep": "yes"}},
+            {"see": {"role": "Label", "exact": True}},                 # exact needs text
+            {"see": {"sequence": {"role": "ListItem", "texts": ["a"], "deep": 1}}},
+        ]
+        for step in bad:
+            with self.subTest(step=step), self.assertRaises(probe.ScenarioError):
+                _load({"steps": [step]})
+        _load({"steps": [{"see": {"any": [[{"text": "a"}], [{"text": "b", "exact": True}]]}}]})
+
+
+class FakeA11yInstance:
+    """Answers `a11y` with a tree whose focused Switch moves one node per `key`."""
+
+    def __init__(self, labels, fail_key=False):
+        self.labels, self.focus, self.keys, self.fail_key = labels, 0, [], fail_key
+        self.root = self.data_dir = self.fixtures_dir = Path("/nonexistent")
+        self.name = "t"
+
+    def tree(self):
+        nodes = {"w": {"aria": {"role": "Window"}, "children": [f"s{i}" for i in range(len(self.labels))]}}
+        for i, lab in enumerate(self.labels):
+            nodes[f"s{i}"] = {"aria": {"role": "Switch", "label": lab, "toggled": "False"}}
+        return {"root": "w", "gpui_focus": f"s{self.focus}", "nodes": nodes}
+
+    def call(self, verb, **args):
+        if verb == "a11y":
+            return self.tree()
+        if verb == "state":
+            return {"route": "settings"}
+        raise AssertionError(verb)
+
+    def request(self, verb, args):
+        assert verb == "key"
+        self.keys.append(args["keys"])
+        if self.fail_key:
+            return {"ok": False, "error": "no panel open"}
+        self.focus = (self.focus + 1) % len(self.labels)
+        return {"ok": True, "result": [{"key": args["keys"], "handled": True}]}
+
+
+class KeyUntil(unittest.TestCase):
+    def run_step(self, inst, step):
+        return probe.run_key_until(probe.RunContext(inst, {}), step)
+
+    def test_presses_until_the_target_is_focused(self):
+        inst = FakeA11yInstance(["Arc", "Bear", "Opera"])
+        out = self.run_step(inst, {"key_until": {"role": "Switch", "text": "Opera", "state": {"focused": True}}})
+        self.assertIn("after 2 press(es) of tab", out)
+        self.assertEqual(inst.keys, ["tab", "tab"])
+
+    def test_zero_presses_when_already_there(self):
+        inst = FakeA11yInstance(["Arc", "Bear"])
+        self.run_step(inst, {"key_until": {"role": "Switch", "text": "Arc", "state": {"focused": True}}})
+        self.assertEqual(inst.keys, [])
+
+    def test_fails_after_max_presses(self):
+        inst = FakeA11yInstance(["Arc", "Bear"])
+        with self.assertRaisesRegex(probe.StepFailed, "within 5 press"):
+            self.run_step(inst, {"key_until": {"role": "Switch", "text": "Vivaldi", "state": {"focused": True}},
+                                 "max_presses": 5, "key": "shift-tab"})
+        self.assertEqual(inst.keys, ["shift-tab"] * 5)
+
+    def test_a_refused_key_is_a_failure(self):
+        inst = FakeA11yInstance(["Arc", "Bear"], fail_key=True)
+        with self.assertRaisesRegex(probe.StepFailed, "returned an error"):
+            self.run_step(inst, {"key_until": {"role": "Switch", "text": "Bear", "state": {"focused": True}}})
+
+    def test_validation(self):
+        for step in ({"key_until": {"sequence": {"role": "ListItem", "texts": ["a"]}}},
+                     {"key_until": {"role": "Switch", "nth": 0}},
+                     {"key_until": {"text": "x"}, "max_presses": 0},
+                     {"key_until": {"text": "x"}, "key": ""},
+                     {"key_until": {}}):
+            with self.subTest(step=step), self.assertRaises(probe.ScenarioError):
+                _load({"steps": [step]})
+
+
+class SaveAndProcess(unittest.TestCase):
+    class Inst:
+        root = data_dir = fixtures_dir = Path("/nonexistent")
+        name = "t"
+
+        def __init__(self):
+            self.wid = 41
+            self.proc = None
+
+        def request(self, verb, args):
+            return {"ok": True, "result": {"window_id": self.wid}}
+
+    def test_saved_value_is_compared_later(self):
+        inst = self.Inst()
+        ctx = probe.RunContext(inst, {})
+        out = probe.run_call(ctx, {"call": "window_id", "save": {"wid": "window_id"}})
+        self.assertIn("saved", out)
+        probe.run_call(ctx, {"call": "window_id", "expect": {"window_id": {"saved": "wid"}}})
+        inst.wid = 42
+        with self.assertRaises(probe.StepFailed):
+            probe.run_call(ctx, {"call": "window_id", "expect": {"window_id": {"saved": "wid"}}})
+
+    def test_saving_a_missing_path_fails(self):
+        with self.assertRaisesRegex(probe.StepFailed, "nothing to save"):
+            probe.run_call(probe.RunContext(self.Inst(), {}), {"call": "window_id", "save": {"x": "nope"}})
+
+    def test_unresolved_saved_never_matches(self):
+        self.assertFalse(probe.match_value(1, {"saved": "x"}))
+
+    def test_saved_must_be_saved_earlier(self):
+        with self.assertRaisesRegex(probe.ScenarioError, "not saved by an earlier step"):
+            _load({"steps": [{"call": "window_id", "expect": {"window_id": {"saved": "wid"}}},
+                             {"call": "window_id", "save": {"wid": "window_id"}}]})
+        _load({"steps": [{"call": "window_id", "save": {"wid": "window_id"}},
+                         {"call": "window_id", "expect": {"window_id": {"saved": "wid"}}}]})
+        for bad in ({"call": "state", "save": {}}, {"call": "state", "save": {"a": 1}},
+                    {"call": "state", "expect_error": True, "save": {"a": "b"}},
+                    {"call": "state", "expect": {"a": {"saved": "x", "eq": 1}}}):
+            with self.subTest(bad=bad), self.assertRaises(probe.ScenarioError):
+                _load({"steps": [bad]})
+
+    def test_perf_doc_compare_needs_every_measurement_saved_first(self):
+        with self.assertRaisesRegex(probe.ScenarioError, "perf_doc compare needs"):
+            _load({"steps": [{"release_budget": True, "cpu_pct_lt": 0.5, "footprint_mb_lt": 80, "binary_mb_lt": 20},
+                             {"perf_doc": "x.md", "compare": True}]})
+        _load({"steps": [
+            {"release_budget": True, "cpu_pct_lt": 0.5, "footprint_mb_lt": 80, "binary_mb_lt": 20},
+            {"call": "metrics", "save": {"hotkey_p50_ms": "a", "hotkey_p99_ms": "b"}},
+            {"perf_doc": "x.md", "compare": True, "make_target": "budget"}]})
+
+    def test_process_unchanged(self):
+        class Proc:
+            def __init__(self, pid, rc=None):
+                self.pid, self.returncode = pid, rc
+
+            def poll(self):
+                return self.returncode
+
+        inst = self.Inst()
+        inst.proc = Proc(100)
+        ctx = probe.RunContext(inst, {})
+        self.assertIn("pid 100", probe.run_process(ctx, {"process": "unchanged"}))
+        inst.proc = Proc(101)
+        with self.assertRaises(probe.StepFailed):
+            probe.run_process(ctx, {"process": "unchanged"})
+        inst.proc = Proc(100, rc=0)
+        with self.assertRaisesRegex(probe.StepFailed, "exited"):
+            probe.run_process(ctx, {"process": "unchanged"})
+        with self.assertRaises(probe.ScenarioError):
+            _load({"steps": [{"process": "same"}]})
+
+
+class SeedGraph(unittest.TestCase):
+    """seed_graph writes what ubilink-core's import_json writes, in core's schema."""
+
+    def test_schema_matches_ubilink_core(self):
+        src = (probe.REPO_ROOT / "src-tauri" / "src" / "graph.rs").read_text()
+        m = re.search(r"fn create_base_tables.*?r#\"(.*?)\"#", src, re.S)
+        self.assertIsNotNone(m, "create_base_tables's SQL not found in graph.rs")
+
+        def norm(sql):
+            sql = re.sub(r"--[^\n]*", "", sql)
+            return " ".join(sql.split())
+
+        self.assertEqual(norm(m.group(1)), norm(probe.CORE_GRAPH_SCHEMA))
+        steps = re.search(r"const MIGRATIONS: &\[MigrationStep\] = &\[(.*?)\];", src, re.S)
+        self.assertEqual(len([s for s in steps.group(1).split(",") if s.strip()]), probe.CORE_GRAPH_VERSION)
+
+    def test_seed_merge_replace_and_list_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "data" / probe.GRAPH_DB_NAME
+            fx = probe.FIXTURES_DIR
+            self.assertEqual(probe.seed_graph(db, fx / "graph-backlinks.json"), (5, 3))
+            links, n = probe.read_graph(db=db)
+            self.assertEqual((len(links), n), (3, 5))
+            conn = sqlite3.connect(db)
+            try:
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], probe.CORE_GRAPH_VERSION)
+                # ubilink-app's list_links order (updated_at DESC, rowid DESC), which the
+                # browser scenarios' row numbers assume.
+                order = [r[0] for r in conn.execute(
+                    "SELECT name FROM resources ORDER BY updated_at DESC, rowid DESC")]
+                self.assertEqual(order[:3], ["Decoy Unrelated", "Gamma Doc", "Beta Post"])
+                lid = conn.execute("SELECT id FROM links LIMIT 1").fetchone()[0]
+                self.assertIn("\x1f", lid)
+            finally:
+                conn.close()
+            self.assertEqual(probe.seed_graph(db, fx / "graph-backlinks-newer.json"), (6, 4))
+            links, n = probe.read_graph(db=db)
+            self.assertEqual((len(links), n), (4, 6), "merge: upsert by uri, links idempotent")
+            probe.seed_graph(db, fx / "graph-empty.json", replace=True)
+            self.assertEqual(probe.read_graph(db=db), (set(), 0))
+
+    def test_bad_inputs(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(probe.ScenarioError):
+                probe.seed_graph(Path(d) / "g.sqlite", Path(d) / "missing.json")
+            bad = Path(d) / "v1.json"
+            bad.write_text(json.dumps({"schema": "ubilink.graph.v1", "resources": [], "links": []}))
+            with self.assertRaises(probe.ScenarioError):
+                probe.seed_graph(Path(d) / "g.sqlite", bad)
+        for doc in ({"steps": [{"seed_graph": ""}]}, {"steps": [{"seed_graph": "g.json", "replace": "y"}]},
+                    {"steps": [{"restart": True}], "setup": {"graph": [""]}}):
+            with self.subTest(doc=doc), self.assertRaises(probe.ScenarioError):
+                _load(doc)
+
+
+class PixelRegionsAndBestMatch(unittest.TestCase):
+    def test_state_region(self):
+        st = {"view": {"theme_samples": {"surface": {"x": 4, "y": 8, "w": 20, "h": 10}}}}
+        self.assertEqual(probe.state_region(st, "view.theme_samples.surface")["w"], 20)
+        for bad in ({"view": None}, {"view": {"theme_samples": {"surface": {"x": 1}}}},
+                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1, "w": 0}}}}):
+            with self.subTest(bad=bad), self.assertRaises(probe.StepFailed):
+                probe.state_region(bad, "view.theme_samples.surface")
+
+    def test_best_pixel_finds_the_glyph_core(self):
+        bg, text = (250, 250, 252), (30, 30, 30)
+        edges = [(140, 140, 141), (200, 200, 201)]
+        de, rgb = probe.best_pixel(text, [bg] * 50 + edges + [text])
+        self.assertLess(de, 0.5)
+        self.assertEqual(tuple(rgb), text)
+        de, _ = probe.best_pixel(text, [bg] * 50 + edges)
+        self.assertGreater(de, 3)
+
+    def test_validation(self):
+        _load({"steps": [{"pixel": "view.theme_samples.text", "color": "#1e1e1e", "match": "best"}]})
+        for bad in ({"pixel": "", "color": "#000000"}, {"pixel": "a.b", "color": "#000000", "match": "median"}):
+            with self.subTest(bad=bad), self.assertRaises(probe.ScenarioError):
+                _load({"steps": [bad]})
+
+
+class ReleaseBudgetParsing(unittest.TestCase):
+    def test_cputime(self):
+        self.assertAlmostEqual(probe.parse_cputime("  0:00.12\n"), 0.12)
+        self.assertAlmostEqual(probe.parse_cputime("1:02.50"), 62.5)
+        self.assertAlmostEqual(probe.parse_cputime("1:00:01.00"), 3601.0)
+        self.assertAlmostEqual(probe.parse_cputime("2-00:00:01"), 2 * 86400 + 1)
+
+    def test_footprint(self):
+        self.assertAlmostEqual(probe.parse_footprint("Foo\nPhysical footprint:         41.3M\nPhysical footprint (peak):  50M\n"), 41.3)
+        self.assertAlmostEqual(probe.parse_footprint("Physical footprint:         2080K\n"), 2080 / 1024)
+        self.assertAlmostEqual(probe.parse_footprint("Physical footprint:   1.5G\n"), 1536.0)
+        with self.assertRaises(probe.ProbeError):
+            probe.parse_footprint("no such line")
+
+    def test_validation_needs_every_budget(self):
+        _load({"steps": [{"release_budget": True, "cpu_pct_lt": 0.5, "footprint_mb_lt": 80, "binary_mb_lt": 20}]})
+        for bad in ({"release_budget": True, "cpu_pct_lt": 0.5, "footprint_mb_lt": 80},
+                    {"release_budget": "yes", "cpu_pct_lt": 0.5, "footprint_mb_lt": 80, "binary_mb_lt": 20},
+                    {"release_budget": True, "cpu_pct_lt": 0, "footprint_mb_lt": 80, "binary_mb_lt": 20}):
+            with self.subTest(bad=bad), self.assertRaises(probe.ScenarioError):
+                _load({"steps": [bad]})
+
+
+GOOD_PERF = textwrap.dedent("""\
+    # Performance
+
+    | Metric | Budget | Measured |
+    |---|---|---|
+    | idle_cpu_percent | < 0.5 | 0.12 |
+    | physical_footprint_mb | < 80 | 41.3 |
+    | stripped_binary_mb | < 20 | 12.3 |
+    | hotkey_p50_ms | < 80 | 31 |
+    | hotkey_p99_ms | < 200 | 64 |
+    """)
+
+
+class PerfDoc(unittest.TestCase):
+    def run_doc(self, text, saved=None, compare=False):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "PERFORMANCE.md"
+            if text is not None:
+                p.write_text(text)
+            ctx = probe.RunContext(SaveAndProcess.Inst(), {})
+            ctx.saved = dict(saved or {})
+            return probe.run_perf_doc(ctx, {"perf_doc": str(p), "compare": compare})
+
+    def test_good_doc_passes(self):
+        self.assertIn("5 rows within budget", self.run_doc(GOOD_PERF))
+
+    def test_missing_doc_row_budget_or_over_budget_fails(self):
+        with self.assertRaisesRegex(probe.StepFailed, "PERFORMANCE.md"):
+            self.run_doc(None)
+        with self.assertRaisesRegex(probe.StepFailed, "rows"):
+            self.run_doc(GOOD_PERF.replace("| hotkey_p99_ms | < 200 | 64 |\n", ""))
+        with self.assertRaisesRegex(probe.StepFailed, "budget"):
+            self.run_doc(GOOD_PERF.replace("< 200", "< 300"))
+        with self.assertRaisesRegex(probe.StepFailed, "over budget"):
+            self.run_doc(GOOD_PERF.replace("| 41.3 |", "| 81 |"))
+        with self.assertRaisesRegex(probe.StepFailed, "not a number"):
+            self.run_doc(GOOD_PERF.replace("| 41.3 |", "| ~41 MB |"))
+        with self.assertRaisesRegex(probe.StepFailed, "two idle_cpu_percent rows"):
+            self.run_doc(GOOD_PERF + "| idle_cpu_percent | < 0.5 | 0.2 |\n")
+
+    def test_compare_within_tolerance(self):
+        near = {"idle_cpu_percent": 0.3, "physical_footprint_mb": 47.0, "stripped_binary_mb": 12.9,
+                "hotkey_p50_ms": 45.0, "hotkey_p99_ms": 90.0}
+        self.assertIn("matching", self.run_doc(GOOD_PERF, near, compare=True))
+        far = dict(near, physical_footprint_mb=60.0)
+        with self.assertRaisesRegex(probe.StepFailed, "disagrees"):
+            self.run_doc(GOOD_PERF, far, compare=True)
+        far = dict(near, stripped_binary_mb=14.0)
+        with self.assertRaisesRegex(probe.StepFailed, "disagrees"):
+            self.run_doc(GOOD_PERF, far, compare=True)
+
+    def test_tolerance_is_the_larger_of_absolute_and_relative(self):
+        self.assertEqual(probe.perf_tolerance("hotkey_p99_ms", 40), 40.0)
+        self.assertEqual(probe.perf_tolerance("hotkey_p99_ms", 150), 75.0)
+        self.assertEqual(probe.perf_tolerance("idle_cpu_percent", 0.1), 0.25)
+
+
+class ListCommand(unittest.TestCase):
+    def test_manifest_names_the_15_phase1_scenarios_and_each_is_valid(self):
+        rows = probe.load_manifest()
+        names = [n for n, _ in rows]
+        self.assertEqual(names, [
+            "capture-view", "copy-link", "backlinks", "link-browser", "link-browser-filter", "browser-select",
+            "browser-drill", "link-marking", "onboarding", "settings-adapters", "graph-roundtrip", "graph-reset",
+            "launch-at-login", "theming", "performance"])
+        self.assertEqual([r for _, r in rows], [f"R{i}" for i in range(1, 16)])
+        for name, req in rows:
+            with self.subTest(name=name):
+                sc = probe.load_scenario(name)
+                self.assertRegex(sc["requirement"], rf"^{req}\b")
+
+    def test_scenarios_use_only_probes_fixtures_and_placeholders(self):
+        # Phase 1's guard diffs only desktop-gpui/probes and scripts/probe.py, so a
+        # scenario must not read a file anywhere else, except PERFORMANCE.md, which
+        # is R15's product output under judgment, through {repo}.
+        for name, _ in probe.load_manifest():
+            text = (probe.PROBES_DIR / f"{name}.json").read_text()
+            for m in re.finditer(r"\{repo\}([^\"]*)", text):
+                self.assertEqual(m.group(1), "/docs/PERFORMANCE.md", name)
+            sc = probe.load_scenario(name)
+            for step in sc["steps"]:
+                for key in ("seed_graph",):
+                    if key in step:
+                        self.assertTrue((probe.FIXTURES_DIR / step[key]).is_file(), step[key])
+            for g in ([sc.get("setup", {}).get("graph")] if isinstance(sc.get("setup", {}).get("graph"), str)
+                      else sc.get("setup", {}).get("graph", [])):
+                self.assertTrue((probe.FIXTURES_DIR / g).is_file(), g)
+            for p in (sc.get("setup", {}).get("fixtures") or {}).values():
+                if not p.startswith("{"):
+                    self.assertTrue((probe.FIXTURES_DIR / p).is_file(), p)
+
+    def test_verdict(self):
+        all_fail = [(f"s{i}", f"R{i}", 1) for i in range(3)]
+        self.assertEqual(probe.list_verdict(all_fail, 3, 3), [])
+        self.assertTrue(probe.list_verdict(all_fail, 4, None), "wrong count")
+        one_error = all_fail[:2] + [("s2", "R2", 2)]
+        self.assertTrue(any("exited 2" in p for p in probe.list_verdict(one_error, 3, 3)))
+        blocked = all_fail[:2] + [("s2", "R2", 3)]
+        problems = probe.list_verdict(blocked, 3, 2)
+        self.assertTrue(any("ENV-BLOCKED" in p for p in problems), "a 3 counts against the expectation")
+        mixed = [("a", "R1", 0), ("b", "R2", 1)]
+        self.assertEqual(probe.list_verdict(mixed, 2, 1), [])
+        self.assertTrue(probe.list_verdict([("a", "R1", None)], 1, 1), "not run")
+
+    def test_bad_manifest(self):
+        with tempfile.TemporaryDirectory() as d:
+            for doc in ({}, {"scenarios": []}, {"scenarios": [{"name": "a"}]},
+                        {"scenarios": [{"name": "a", "requirement": "R1"}, {"name": "a", "requirement": "R2"}]}):
+                p = Path(d) / "m.json"
+                p.write_text(json.dumps(doc))
+                with self.subTest(doc=doc), self.assertRaises(probe.ScenarioError):
+                    probe.load_manifest(p)
+
+    def test_first_problem_line(self):
+        out = "PASS  x\nFAIL  s [2/9] see ...\n      detail\nFAIL: run s\n"
+        self.assertEqual(probe.first_problem_line(out), "FAIL  s [2/9] see ...")
+
+
+class CaptureSubjectFixture(unittest.TestCase):
+    def test_subject_capture_must_be_the_backlinks_subject(self):
+        good = {"name": "Subject Note", "uri": probe._BACKLINKS_SUBJECT_URI, "app": "Safari"}
+        self.assertEqual(probe._validate_capture_subject(good), [])
+        self.assertTrue(probe._validate_capture_subject(dict(good, uri="https://example.com/")))
+        self.assertTrue(probe._BACKLINKS_SUBJECT_URI.startswith("https://"),
+                        "the core's default capture allowlist must admit the subject")
 
 
 if __name__ == "__main__":

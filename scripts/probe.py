@@ -590,7 +590,7 @@ def _validate_graph_5000(doc) -> list:
 # the decoy that must never appear. Hardcoded (not derived from the file) so a hand
 # edit that reorders the JSON or nudges a timestamp is caught instead of the check
 # silently re-deriving a new "documented" order from whatever is there.
-_BACKLINKS_SUBJECT_URI = "ubilink-fixture://subject"
+_BACKLINKS_SUBJECT_URI = "https://subject.example/note"
 _BACKLINKS_DECOY_URI = "https://decoy.example/unrelated"
 _BACKLINKS_ORDER_NEWEST_FIRST = [
     "https://gamma.example/three",
@@ -645,6 +645,17 @@ def _validate_capture_ok(doc) -> list:
     for k in ("name", "uri", "app"):
         if not isinstance(doc.get(k), str) or not doc[k].strip():
             issues.append(f"{k} must be a non-empty string")
+    return issues
+
+
+def _validate_capture_subject(doc) -> list:
+    # R3: the capture whose backlinks graph-backlinks*.json seeds. Its uri must be
+    # that graph's subject, and an https one: capture goes through the core's
+    # validation policy (D16), whose default scheme allowlist would refuse a made-up
+    # scheme before any backlink could be shown.
+    issues = _validate_capture_ok(doc)
+    if doc.get("uri") != _BACKLINKS_SUBJECT_URI:
+        issues.append(f"uri must be the backlinks subject {_BACKLINKS_SUBJECT_URI!r}")
     return issues
 
 
@@ -805,6 +816,7 @@ _FIXTURE_VALIDATORS = {
     "capture-ok.json": _validate_capture_ok,
     "capture-delayed.json": _validate_capture_delayed,
     "capture-failed.json": _validate_capture_failed,
+    "capture-subject.json": _validate_capture_subject,
     "graph-backlinks.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_ORDER_NEWEST_FIRST),
     "graph-backlinks-newer.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_NEWER_ORDER_NEWEST_FIRST),
     "graph-5000.json": _validate_graph_5000,
@@ -822,6 +834,7 @@ FIXTURE_FILES = [
     "capture-ok.json",
     "capture-delayed.json",
     "capture-failed.json",
+    "capture-subject.json",
     "graph-backlinks.json",
     "graph-backlinks-newer.json",
     "graph-5000.json",
@@ -1547,6 +1560,9 @@ _OPS = {
     "type": lambda a, b: _type_ok(a, b),
     "matches": lambda a, b: isinstance(a, str) and re.search(b, a) is not None,
     "exists": lambda a, b: (a is not _MISSING) == b,
+    # `{"saved": name}` is resolved to `{"eq": <value saved earlier>}` before a check
+    # (`resolve_saved`); if one ever reaches here unresolved it must not pass.
+    "saved": lambda a, b: False,
 }
 
 
@@ -1562,6 +1578,8 @@ def validate_matcher(spec, where: str):
                 raise ScenarioError(f"{where}: {op} needs a non-empty operand")
         if "type" in spec and spec["type"] not in (*_TYPE_NAMES, "number"):
             raise ScenarioError(f"{where}: unknown type {spec['type']!r}")
+        if "saved" in spec and (len(spec) != 1 or not _nonblank(spec["saved"])):
+            raise ScenarioError(f"{where}: saved names one saved value and stands alone")
         if "matches" in spec:
             try:
                 re.compile(spec["matches"])
@@ -1575,6 +1593,19 @@ def match_value(actual, spec) -> bool:
             return spec.get("exists") is False and len(spec) == 1
         return all(_OPS[op](actual, operand) for op, operand in spec.items())
     return actual is not _MISSING and actual == spec
+
+
+def resolve_saved(obj, saved: dict):
+    """Replace every `{"saved": name}` matcher with `{"eq": saved[name]}`."""
+    if isinstance(obj, dict):
+        if set(obj) == {"saved"} and isinstance(obj["saved"], str):
+            if obj["saved"] not in saved:
+                raise ScenarioError(f"saved {obj['saved']!r} has not been saved yet")
+            return {"eq": saved[obj["saved"]]}
+        return {k: resolve_saved(v, saved) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [resolve_saved(v, saved) for v in obj]
+    return obj
 
 
 def check_expect(result, expect: dict) -> list:
@@ -1684,13 +1715,37 @@ def a11y_nodes(tree) -> list:
         stack.extend(reversed(kids))
     order += [k for k in nodes if k not in seen]
 
+    def own_texts(nid):
+        node = nodes.get(nid)
+        aria = (node.get("aria") or {}) if isinstance(node, dict) else {}
+        return [aria[k] for k in A11Y_TEXT_FIELDS if isinstance(aria.get(k), str)]
+
+    # `deep` texts (Phase 1 Task 11): a node's own texts plus every descendant's, in
+    # document order. gpui-component's List puts a row's visible text in Label
+    # children of the ListItem node (A11Y-NOTES.md), so "row 3 shows this uri" is a
+    # question about the row's subtree, not the row node alone.
+    deep_memo = {}
+
+    def deep_texts(nid, trail=()):
+        if nid in deep_memo:
+            return deep_memo[nid]
+        if nid in trail or nid not in nodes:
+            return []
+        node = nodes[nid]
+        kids = (node.get("children") or []) if isinstance(node, dict) else []
+        out_texts = list(own_texts(nid))
+        for kid in kids:
+            out_texts += deep_texts(kid, trail + (nid,))
+        deep_memo[nid] = out_texts
+        return out_texts
+
     out = []
     for nid in order:
         node = nodes[nid]
         if not isinstance(node, dict):
             continue
         aria = node.get("aria") or {}
-        texts = [aria[k] for k in A11Y_TEXT_FIELDS if isinstance(aria.get(k), str)]
+        texts = own_texts(nid)
         state = {k: aria[k] for k in A11Y_STATE_FIELDS if k in aria}
         if "toggled" in state:
             t = str(state["toggled"]).lower()
@@ -1698,14 +1753,19 @@ def a11y_nodes(tree) -> list:
         if "on_action" in aria:
             state["actions"] = aria["on_action"]
         state["focused"] = nid in focus
-        out.append({"id": nid, "role": aria.get("role"), "texts": texts, "state": state})
+        out.append({"id": nid, "role": aria.get("role"), "texts": texts,
+                    "deep": deep_texts(nid), "state": state})
     return out
 
 
-def _node_matches(node, role=None, text=None, state=None, exact=False) -> bool:
+def _node_matches(node, role=None, text=None, state=None, exact=False, deep=False) -> bool:
     if role is not None and _norm_role(node["role"]) != _norm_role(role):
         return False
-    if text is not None and not any(text_matches(text, t, exact) for t in node["texts"]):
+    # deep: any ONE text in the node's subtree must match (never their concatenation,
+    # so a truncated uri label still matches on its own and two labels can't combine
+    # into a match neither holds).
+    texts = node.get("deep", node["texts"]) if deep else node["texts"]
+    if text is not None and not any(text_matches(text, t, exact) for t in texts):
         return False
     # A state the node does not report counts as null: `false` does not match an
     # unselectable node, `{"ne": true}` does.
@@ -1715,33 +1775,49 @@ def _node_matches(node, role=None, text=None, state=None, exact=False) -> bool:
     return True
 
 
-def find_nodes(tree, role=None, text=None, exact=False, state=None) -> list:
-    return [n for n in a11y_nodes(tree) if _node_matches(n, role, text, state, exact)]
+def find_nodes(tree, role=None, text=None, exact=False, state=None, deep=False) -> list:
+    return [n for n in a11y_nodes(tree) if _node_matches(n, role, text, state, exact, deep)]
 
 
-def _describe_node(n) -> str:
+def _describe_node(n, deep=False) -> str:
     flags = {k: v for k, v in n["state"].items() if k not in ("actions",) and v not in (None, False)}
-    return f"{n['role']}: {' | '.join(n['texts'])}" + (f" {flags}" if flags else "")
+    texts = n.get("deep", n["texts"]) if deep else n["texts"]
+    return f"{n['role']}: {' | '.join(texts)}" + (f" {flags}" if flags else "")
 
 
 def check_a11y_query(tree, q: dict, absent=False, exact=False, counts=None):
     """Check one `see` query against a tree; raise StepFailed with what was seen.
 
-    Three shapes (validated by validate_step): a node query {role?, text?, state?}
-    (present, absent, or counted), an index query {role, nth, text?, state?} (the
-    nth node of that role, 0-based, negative from the end, must match), and a
-    sequence query {sequence: {role, texts, mode}} over that role's nodes in
-    document order.
+    Shapes (validated by validate_step): a node query {role?, text?, state?, deep?}
+    (present, absent, or counted), an index query {role, nth, text?, state?, deep?}
+    (the nth node of that role, 0-based, negative from the end, must match), a
+    sequence query {sequence: {role, texts, mode, deep?}} over that role's nodes in
+    document order, and an alternative {any: [[query, ...], ...]} that holds when
+    every query of at least one alternative holds. `deep` matches text anywhere in
+    the node's subtree (see `a11y_nodes`).
     """
     nodes = a11y_nodes(tree)
     seen = [_describe_node(n) for n in nodes][:60]
+    if "any" in q:
+        misses = []
+        for alt in q["any"]:
+            try:
+                for sub in alt:
+                    check_a11y_query(tree, sub, exact=exact)
+                return
+            except StepFailed as e:
+                misses.append(f"{_short(alt, 200)}: {e}")
+        raise StepFailed("no alternative of `any` holds", misses, seen)
     if "sequence" in q:
         seq = q["sequence"]
+        deep = bool(seq.get("deep"))
+        exact = seq.get("exact", exact)
         got = [n for n in nodes if _node_matches(n, role=seq["role"])]
         texts, mode = seq["texts"], seq.get("mode", "prefix")
 
         def m(want, node):
-            return any(text_matches(want, t, exact) for t in node["texts"])
+            pool = node.get("deep", node["texts"]) if deep else node["texts"]
+            return any(text_matches(want, t, exact) for t in pool)
 
         if mode == "ordered":
             i = 0
@@ -1757,22 +1833,26 @@ def check_a11y_query(tree, q: dict, absent=False, exact=False, counts=None):
             raise StepFailed(
                 f"{seq['role']} sequence ({mode}) mismatch",
                 texts,
-                [" | ".join(n["texts"]) for n in got][:60],
+                [" | ".join(n.get("deep", n["texts"]) if deep else n["texts"]) for n in got][:60],
             )
         return
+    deep = bool(q.get("deep"))
+    # A query's own `exact` overrides the step's (an `any` alternative or a
+    # key_until target may need exact text while its neighbours do not).
+    exact = q.get("exact", exact)
     if "nth" in q:
         of_role = [n for n in nodes if _node_matches(n, role=q["role"])]
         k = q["nth"]
         if not -len(of_role) <= k < len(of_role):
             raise StepFailed(
                 f"no {q['role']} node #{k}", f"at least {k + 1 if k >= 0 else -k} {q['role']} node(s)",
-                [_describe_node(n) for n in of_role],
+                [_describe_node(n, deep) for n in of_role][:60],
             )
         node = of_role[k]
-        if not _node_matches(node, None, q.get("text"), q.get("state"), exact):
-            raise StepFailed(f"{q['role']} node #{k} mismatch", _short(q), _describe_node(node))
+        if not _node_matches(node, None, q.get("text"), q.get("state"), exact, deep):
+            raise StepFailed(f"{q['role']} node #{k} mismatch", _short(q), _describe_node(node, deep))
         return
-    hits = [n for n in nodes if _node_matches(n, q.get("role"), q.get("text"), q.get("state"), exact)]
+    hits = [n for n in nodes if _node_matches(n, q.get("role"), q.get("text"), q.get("state"), exact, deep)]
     n = len(hits)
     counts = counts or {}
     bad = (
@@ -1843,10 +1923,10 @@ _READ_ONLY_VERBS = {"state", "metrics", "window_id", "a11y", "opened"}
 # unknown options are scenario errors, so a typo ("expcet") can never make a
 # step vacuously pass.
 STEP_TYPES = {
-    "call": {"args", "expect", "expect_error", "retry_ms"},
+    "call": {"args", "expect", "expect_error", "retry_ms", "save"},
     "see": {"absent", "count", "min_count", "max_count", "exact", "timeout_ms", "route"},
     "ocr": {"absent", "exact"},
-    "pixel": {"color", "delta_e"},
+    "pixel": {"color", "delta_e", "match"},
     "pasteboard": {"expect", "changed"},
     "graph": {"db", "export", "links", "no_links", "link_count", "resource_count", "timeout_ms"},
     "file": {"exists", "expect", "timeout_ms"},
@@ -1855,12 +1935,32 @@ STEP_TYPES = {
     "activate_other": {"settle_ms"},
     "restart": set(),
     "sleep_ms": set(),
+    # Phase 1 Task 11 additions (README "Steps"):
+    "key_until": {"key", "max_presses", "route"},
+    "seed_graph": {"replace"},
+    "process": set(),
+    "screenshot": set(),
+    "release_budget": {"idle_s", "settle_s", "cpu_pct_lt", "footprint_mb_lt", "binary_mb_lt"},
+    "perf_doc": {"compare", "make_target"},
 }
 # `block`: consecutive steps with the same block id are one iteration, the unit a
 # focus-theft retry re-runs (see `run_steps`).
 _COMMON_OPTIONS = {"name", "block"}
 _SCENARIO_KEYS = {"description", "requirement", "notes", "setup", "steps"}
-_SETUP_KEYS = {"fixtures", "files"}
+_SETUP_KEYS = {"fixtures", "files", "graph"}
+
+# What `release_budget` measures and saves, and what `perf_doc` reads from
+# docs/PERFORMANCE.md (Phase 1 R15). Key -> (budget cell the doc must carry, the
+# upper bound it means, tolerance between the doc and a fresh measurement as
+# (absolute, relative): the larger of the two applies).
+PERF_ROWS = {
+    "idle_cpu_percent": ("< 0.5", 0.5, (0.25, 0.0)),
+    "physical_footprint_mb": ("< 80", 80.0, (10.0, 0.15)),
+    "stripped_binary_mb": ("< 20", 20.0, (1.0, 0.0)),
+    "hotkey_p50_ms": ("< 80", 80.0, (20.0, 0.5)),
+    "hotkey_p99_ms": ("< 200", 200.0, (40.0, 0.5)),
+}
+_RELEASE_SAVES = ("idle_cpu_percent", "physical_footprint_mb", "stripped_binary_mb")
 
 
 def step_type(step, where: str) -> str:
@@ -1899,6 +1999,62 @@ def _validate_state(state, where: str):
         validate_matcher(spec, f"{where}: state[{k!r}]")
 
 
+def _validate_query(q, where: str, absent=False, counted=False, nested=False):
+    """One `see` query (also `key_until`'s target and each `any` alternative's)."""
+    if not isinstance(q, dict) or not q:
+        raise ScenarioError(f"{where}: each see query is an object")
+    if "any" in q:
+        alts = q["any"]
+        if set(q) != {"any"} or nested:
+            raise ScenarioError(f"{where}: an any query is {{any: [[query, ...], ...]}} alone, not nested")
+        if not isinstance(alts, list) or len(alts) < 2:
+            raise ScenarioError(f"{where}: any needs at least two alternatives")
+        for alt in alts:
+            if not isinstance(alt, list) or not alt:
+                raise ScenarioError(f"{where}: each any alternative is a non-empty list of queries")
+            for sub in alt:
+                _validate_query(sub, where, nested=True)
+        if absent or counted:
+            raise ScenarioError(f"{where}: absent/count do not apply to an any query")
+        return
+    if "sequence" in q:
+        seq = q["sequence"]
+        if set(q) != {"sequence"} or not isinstance(seq, dict) or not set(seq) <= {"role", "texts", "mode", "deep", "exact"}:
+            raise ScenarioError(f"{where}: a sequence query is {{sequence: {{role, texts, mode, deep, exact}}}} alone")
+        if not _nonblank(seq.get("role")):
+            raise ScenarioError(f"{where}: sequence needs a role")
+        texts = seq.get("texts")
+        if not isinstance(texts, list) or not texts or not all(_nonblank(t) for t in texts):
+            raise ScenarioError(f"{where}: sequence texts must be a non-empty list of non-empty strings")
+        if seq.get("mode", "prefix") not in _SEQUENCE_MODES:
+            raise ScenarioError(f"{where}: sequence mode is one of {', '.join(_SEQUENCE_MODES)}")
+        for flag in ("deep", "exact"):
+            if flag in seq and not isinstance(seq[flag], bool):
+                raise ScenarioError(f"{where}: {flag} is true or false")
+        if absent or counted:
+            raise ScenarioError(f"{where}: absent/count do not apply to a sequence query")
+        return
+    extra = set(q) - {"role", "text", "state", "nth", "deep", "exact"}
+    if extra:
+        raise ScenarioError(f"{where}: unknown see query key(s) {sorted(extra)}")
+    if "role" in q and not _nonblank(q["role"]):
+        raise ScenarioError(f"{where}: role must be a non-empty string")
+    if "text" in q and not _nonblank(q["text"]):
+        raise ScenarioError(f"{where}: text must be non-empty (empty text matches every node)")
+    if "role" not in q and "text" not in q:
+        raise ScenarioError(f"{where}: a see query needs a role or a text")
+    for flag in ("deep", "exact"):
+        if flag in q and (not isinstance(q[flag], bool) or "text" not in q):
+            raise ScenarioError(f"{where}: {flag} is true or false, and needs a text to match")
+    if "state" in q:
+        _validate_state(q["state"], where)
+    if "nth" in q:
+        if not (isinstance(q["nth"], int) and not isinstance(q["nth"], bool)) or "role" not in q:
+            raise ScenarioError(f"{where}: nth is an integer index into the nodes of `role`")
+        if absent or counted:
+            raise ScenarioError(f"{where}: absent/count do not apply to an nth query")
+
+
 def _validate_see(step, where: str):
     v = step["see"]
     queries = v if isinstance(v, list) else [v]
@@ -1908,38 +2064,7 @@ def _validate_see(step, where: str):
     if "route" in step and not _nonblank(step["route"]):
         raise ScenarioError(f"{where}: route must be a route name")
     for q in queries:
-        if not isinstance(q, dict) or not q:
-            raise ScenarioError(f"{where}: each see query is an object")
-        if "sequence" in q:
-            seq = q["sequence"]
-            if set(q) != {"sequence"} or not isinstance(seq, dict) or not set(seq) <= {"role", "texts", "mode"}:
-                raise ScenarioError(f"{where}: a sequence query is {{sequence: {{role, texts, mode}}}} alone")
-            if not _nonblank(seq.get("role")):
-                raise ScenarioError(f"{where}: sequence needs a role")
-            texts = seq.get("texts")
-            if not isinstance(texts, list) or not texts or not all(_nonblank(t) for t in texts):
-                raise ScenarioError(f"{where}: sequence texts must be a non-empty list of non-empty strings")
-            if seq.get("mode", "prefix") not in _SEQUENCE_MODES:
-                raise ScenarioError(f"{where}: sequence mode is one of {', '.join(_SEQUENCE_MODES)}")
-            if step.get("absent") or counted:
-                raise ScenarioError(f"{where}: absent/count do not apply to a sequence query")
-            continue
-        extra = set(q) - {"role", "text", "state", "nth"}
-        if extra:
-            raise ScenarioError(f"{where}: unknown see query key(s) {sorted(extra)}")
-        if "role" in q and not _nonblank(q["role"]):
-            raise ScenarioError(f"{where}: role must be a non-empty string")
-        if "text" in q and not _nonblank(q["text"]):
-            raise ScenarioError(f"{where}: text must be non-empty (empty text matches every node)")
-        if "role" not in q and "text" not in q:
-            raise ScenarioError(f"{where}: a see query needs a role or a text")
-        if "state" in q:
-            _validate_state(q["state"], where)
-        if "nth" in q:
-            if not (isinstance(q["nth"], int) and not isinstance(q["nth"], bool)) or "role" not in q:
-                raise ScenarioError(f"{where}: nth is an integer index into the nodes of `role`")
-            if step.get("absent") or counted:
-                raise ScenarioError(f"{where}: absent/count do not apply to an nth query")
+        _validate_query(q, where, absent=bool(step.get("absent")), counted=counted)
 
 
 def validate_step(step, where: str) -> str:
@@ -1954,6 +2079,14 @@ def validate_step(step, where: str) -> str:
             raise ScenarioError(f"{where}: args must be an object")
         for path, spec in (step.get("expect") or {}).items():
             validate_matcher(spec, f"{where}: expect[{path!r}]")
+        if "save" in step:
+            sv = step["save"]
+            if not isinstance(sv, dict) or not sv or not all(
+                _nonblank(k) and isinstance(p, str) for k, p in sv.items()
+            ):
+                raise ScenarioError(f"{where}: save maps names to dot paths in the result")
+            if "expect_error" in step:
+                raise ScenarioError(f"{where}: save needs a successful call, not expect_error")
     elif kind == "see":
         _validate_see(step, where)
     elif kind == "ocr":
@@ -1961,11 +2094,17 @@ def validate_step(step, where: str) -> str:
         if not texts or not all(_nonblank(t) for t in texts):
             raise ScenarioError(f"{where}: ocr takes a non-empty string or non-empty list of them")
     elif kind == "pixel":
-        if not isinstance(v, dict) or not {"x", "y"} <= set(v) or not set(v) <= {"x", "y", "w", "h"}:
-            raise ScenarioError(f"{where}: pixel takes {{x, y[, w, h]}} in window points")
+        # A literal region, or the dot path of a region the view reports in `state`
+        # (Phase 1 R14: where a view's surface/text/accent are is layout, not a probe
+        # constant; the colours they must have are the probe's).
+        literal = isinstance(v, dict) and {"x", "y"} <= set(v) and set(v) <= {"x", "y", "w", "h"}
+        if not (literal or _nonblank(v)):
+            raise ScenarioError(f"{where}: pixel takes {{x, y[, w, h]}} in window points or a state path")
         if "color" not in step:
             raise ScenarioError(f"{where}: pixel needs color")
         parse_hex(step["color"])
+        if step.get("match", "mean") not in ("mean", "best"):
+            raise ScenarioError(f"{where}: pixel match is mean or best")
     elif kind == "pasteboard":
         if v not in ("set_nonce", "read"):
             raise ScenarioError(f"{where}: pasteboard is set_nonce or read")
@@ -2015,7 +2154,78 @@ def validate_step(step, where: str) -> str:
     elif kind == "sleep_ms":
         if not _num(v) or v < 0:
             raise ScenarioError(f"{where}: sleep_ms takes a non-negative number")
+    elif kind == "key_until":
+        _validate_query(v, where)
+        if "sequence" in v or "any" in v or "nth" in v:
+            raise ScenarioError(f"{where}: key_until's target is a node query (role/text/state/deep)")
+        if "key" in step and not _nonblank(step["key"]):
+            raise ScenarioError(f"{where}: key is a keystroke in GPUI syntax, e.g. tab")
+        mp = step.get("max_presses", 40)
+        if not (isinstance(mp, int) and not isinstance(mp, bool) and 1 <= mp <= 200):
+            raise ScenarioError(f"{where}: max_presses is an integer 1..200")
+        if "route" in step and not _nonblank(step["route"]):
+            raise ScenarioError(f"{where}: route must be a route name")
+    elif kind == "seed_graph":
+        if not _nonblank(v):
+            raise ScenarioError(f"{where}: seed_graph takes a graph JSON fixture path")
+        if "replace" in step and not isinstance(step["replace"], bool):
+            raise ScenarioError(f"{where}: replace is true or false")
+    elif kind == "process":
+        if v != "unchanged":
+            raise ScenarioError(f"{where}: process takes \"unchanged\"")
+    elif kind == "screenshot":
+        if not (_nonblank(v) and re.fullmatch(r"[A-Za-z0-9_.-]+", v)):
+            raise ScenarioError(f"{where}: screenshot takes a file-name-safe label")
+    elif kind == "release_budget":
+        if v is not True:
+            raise ScenarioError(f"{where}: release_budget takes true (options give the budgets)")
+        for k in ("idle_s", "settle_s", "cpu_pct_lt", "footprint_mb_lt", "binary_mb_lt"):
+            if k in step and (not _num(step[k]) or step[k] <= 0):
+                raise ScenarioError(f"{where}: {k} must be a positive number")
+        for k in ("cpu_pct_lt", "footprint_mb_lt", "binary_mb_lt"):
+            if k not in step:
+                raise ScenarioError(f"{where}: release_budget needs {k}")
+    elif kind == "perf_doc":
+        if not _nonblank(v):
+            raise ScenarioError(f"{where}: perf_doc takes the path of docs/PERFORMANCE.md")
+        if "compare" in step and not isinstance(step["compare"], bool):
+            raise ScenarioError(f"{where}: compare is true or false")
+        if "make_target" in step and not (
+            _nonblank(step["make_target"]) and re.fullmatch(r"[A-Za-z0-9_.-]+", step["make_target"])
+        ):
+            raise ScenarioError(f"{where}: make_target is a make target name")
     return kind
+
+
+def _saved_refs(obj) -> set:
+    """Names a `{"saved": name}` matcher refers to, anywhere in an expectation."""
+    if isinstance(obj, dict):
+        if set(obj) == {"saved"} and isinstance(obj["saved"], str):
+            return {obj["saved"]}
+        return set().union(*(_saved_refs(v) for v in obj.values())) if obj else set()
+    if isinstance(obj, list):
+        return set().union(*(_saved_refs(v) for v in obj)) if obj else set()
+    return set()
+
+
+def check_saves(steps: list, where: str):
+    """Statically: every `{"saved": name}` and every `perf_doc compare` refers to a
+    value an EARLIER step saves (a call's `save`, or `release_budget`'s three), so a
+    typo is a scenario error before anything launches, not a vacuous comparison."""
+    have = set()
+    for i, step in enumerate(steps, 1):
+        kind = step_type(step, f"{where} step {i}")
+        for ref in _saved_refs(step.get("expect") or {}) if kind == "call" else ():
+            if ref not in have:
+                raise ScenarioError(f"{where} step {i}: saved {ref!r} is not saved by an earlier step")
+        if kind == "perf_doc" and step.get("compare"):
+            missing = [k for k in PERF_ROWS if k not in have]
+            if missing:
+                raise ScenarioError(f"{where} step {i}: perf_doc compare needs earlier saves of {missing}")
+        if kind == "call":
+            have |= set(step.get("save") or {})
+        if kind == "release_budget":
+            have |= set(_RELEASE_SAVES)
 
 
 def load_scenario(name: str, probes_dir: Path = None) -> dict:
@@ -2041,6 +2251,11 @@ def load_scenario(name: str, probes_dir: Path = None) -> dict:
         raise ScenarioError(f"{path}: steps must be a non-empty list")
     for i, step in enumerate(steps, 1):
         validate_step(step, f"{path.name} step {i}")
+    check_saves(steps, path.name)
+    graphs = setup.get("graph", [])
+    graphs = [graphs] if isinstance(graphs, str) else graphs
+    if not isinstance(graphs, list) or not all(_nonblank(g) for g in graphs):
+        raise ScenarioError(f"{path}: setup.graph is a graph JSON fixture path or a list of them")
     sc["_name"] = path.stem
     sc["_path"] = path
     return sc
@@ -2084,6 +2299,12 @@ class RunContext:
         # new panel appearing, so a `gone` never checks a previous panel's window.
         self.last_panel_wid = None
         self.panel_visible = False
+        # Values a call's `save` recorded (and `release_budget`'s measurements), for
+        # `{"saved": name}` matchers and `perf_doc compare` (Phase 1 Task 11).
+        self.saved = {}
+        # The pid this scenario launched (or last restarted), for `process: unchanged`.
+        proc = getattr(inst, "proc", None)
+        self.start_pid = proc.pid if proc is not None else None
 
     def owned_pids(self) -> set:
         proc = getattr(self.inst, "proc", None)
@@ -2106,6 +2327,7 @@ class RunContext:
             "fixtures": self.inst.fixtures_dir,
             "probes": PROBES_DIR,
             "instance": self.inst.name,
+            "repo": REPO_ROOT,
         }
         if self.nonce is not None:
             t["nonce"] = self.nonce
@@ -2148,7 +2370,7 @@ def _poll(timeout_ms, attempt):
 def run_call(ctx: RunContext, step: dict) -> str:
     verb = step["call"]
     args = expand(step.get("args", {}), ctx.tokens())
-    expect = expand(step.get("expect", {}), ctx.tokens())
+    expect = resolve_saved(expand(step.get("expect", {}), ctx.tokens()), ctx.saved)
     want_error = step.get("expect_error")
 
     def attempt():
@@ -2168,7 +2390,15 @@ def run_call(ctx: RunContext, step: dict) -> str:
                 {p: e for p, e, _ in misses},
                 {p: a for p, _, a in misses},
             )
-        return f"{len(expect)} expectation(s) met" if expect else "ok"
+        saved = {}
+        for name, path in (step.get("save") or {}).items():
+            value = get_path(resp.get("result"), path)
+            if value is _MISSING:
+                raise StepFailed(f"{verb}: nothing to save at {path!r}", f"a value at {path}", resp.get("result"))
+            saved[name] = value
+        ctx.saved.update(saved)
+        detail = f"{len(expect)} expectation(s) met" if expect else "ok"
+        return detail + (f"; saved {_short(saved, 160)}" if saved else "")
 
     return _poll(step.get("retry_ms"), attempt)
 
@@ -2264,20 +2494,55 @@ def run_ocr(ctx: RunContext, step: dict) -> str:
     return f"{len(wants)} OCR text(s) {'absent' if absent else 'present'} ({png.name})"
 
 
+def state_region(state, path: str) -> dict:
+    """The `{x, y, w?, h?}` region a view reports at `path` in its `state` (window
+    points from the top-left), or StepFailed: a view that does not say where its
+    surface is has not met the contract, which is a product failure."""
+    r = get_path(state, path)
+    ok = isinstance(r, dict) and all(_num(r.get(k)) for k in ("x", "y")) and all(
+        _num(r[k]) and r[k] > 0 for k in ("w", "h") if k in r
+    )
+    if not ok:
+        raise StepFailed(f"no sample region at state {path!r}", "{x, y, w, h} in window points",
+                         "<missing>" if r is _MISSING else r)
+    return r
+
+
+def best_pixel(want, pixels: list):
+    """(ΔE, rgb) of the pixel closest to `want`: a text run's glyph cores carry the
+    text colour, its antialiased edges and gaps do not, so a mean over a text run
+    measures the font, not the colour."""
+    best = None
+    for rgb in pixels:
+        de = delta_e(want, rgb)
+        if best is None or de < best[0]:
+            best = (de, rgb)
+    return best
+
+
 def run_pixel(ctx: RunContext, step: dict) -> str:
     region = step["pixel"]
+    if isinstance(region, str):
+        region = state_region(ctx.inst.call("state"), region)
     want = parse_hex(step["color"])
     limit = step.get("delta_e", 3.0)
+    best = step.get("match", "mean") == "best"
     png, bounds = _capture(ctx)
-    got = quartz(
-        "pixel", png, region["x"], region["y"], region.get("w", 1), region.get("h", 1), bounds["w"]
-    )
+    args = ["pixel", png, region["x"], region["y"], region.get("w", 1), region.get("h", 1), bounds["w"]]
+    got = quartz(*args, *(["all"] if best else []))
+    if best:
+        de, rgb = best_pixel(want, got.get("all") or [])
+        hexed = "#%02x%02x%02x" % tuple(rgb)
+        if de > limit:
+            raise StepFailed(f"no pixel in the region within ΔE {limit} (best ΔE {de:.1f})",
+                             step["color"], f"closest {hexed}, mean {got['hex']}")
+        return f"best pixel {hexed} within ΔE {de:.1f} of {step['color']} ({png.name})"
     de = delta_e(want, got["rgb"])
     if de > limit:
         raise StepFailed(
             f"colour off by ΔE {de:.1f} (limit {limit})", step["color"], got["hex"]
         )
-    return f"{got['hex']} within ΔE {de:.1f} of {step['color']}"
+    return f"{got['hex']} within ΔE {de:.1f} of {step['color']} ({png.name})"
 
 
 # The user's pasteboard text, saved before the first nonce of the run and put back
@@ -2356,7 +2621,7 @@ def read_graph(db: Path = None, export: Path = None):
 def run_graph(ctx: RunContext, step: dict) -> str:
     step = expand(step, ctx.tokens())
     export = Path(step["export"]) if "export" in step else None
-    db = Path(step.get("db") or ctx.inst.data_dir / "ubilink-graph.sqlite")
+    db = Path(step.get("db") or ctx.inst.data_dir / GRAPH_DB_NAME)
 
     def attempt():
         src = export or db
@@ -2550,12 +2815,331 @@ def run_activate_other(ctx: RunContext, step: dict) -> str:
 
 def run_restart(ctx: RunContext, step: dict) -> str:
     ctx.inst.restart()
+    ctx.start_pid = ctx.inst.proc.pid
     return f"restarted (pid {ctx.inst.proc.pid}, {len(ctx.inst._fixtures)} fixture(s) replayed)"
 
 
 def run_sleep(ctx: RunContext, step: dict) -> str:
     time.sleep(step["sleep_ms"] / 1000.0)
     return f"slept {step['sleep_ms']} ms"
+
+
+# ── Phase 1 Task 11 step runners ──────────────────────────────────────────
+
+GRAPH_DB_NAME = "ubilink-graph.sqlite"
+# ubilink-core's graph schema (src-tauri/src/graph.rs `create_base_tables`, the v1
+# migration; v2/v3 add nothing to a fresh DB) and the version its MIGRATIONS bring a
+# DB to. `seed_graph` writes exactly this so `LinkGraph::open` takes its fast path.
+# test_probe.py pins both against graph.rs, so a core schema change fails the
+# engine's self-tests instead of silently seeding a graph the core reads wrongly.
+CORE_GRAPH_SCHEMA = """
+            CREATE TABLE IF NOT EXISTS resources (
+                id           TEXT PRIMARY KEY,
+                name         TEXT NOT NULL,
+                uri          TEXT NOT NULL,
+                path         TEXT,
+                content_hash TEXT,
+                guid         TEXT,
+                created_at   INTEGER,
+                updated_at   INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS links (
+                id         TEXT PRIMARY KEY,
+                lo_id      TEXT NOT NULL REFERENCES resources(id),
+                hi_id      TEXT NOT NULL REFERENCES resources(id),
+                created_at INTEGER,
+                UNIQUE (lo_id, hi_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_lo ON links(lo_id);
+            CREATE INDEX IF NOT EXISTS idx_links_hi ON links(hi_id);
+"""
+CORE_GRAPH_VERSION = 3
+
+
+def _fixture_path(inst, rel) -> Path:
+    p = Path(rel)
+    return p if p.is_absolute() else Path(inst.fixtures_dir) / p
+
+
+def seed_graph(db: Path, json_path: Path, replace: bool = False) -> tuple:
+    """Put a v3 graph fixture into ubilink-core's SQLite file the way the core's own
+    `LinkGraph::import_json` writes it (same INSERT ... ON CONFLICT statements, the
+    file's guids kept, `updated_at = created_at`, resources in file order so rowids
+    follow it, links as one `lo<0x1f>hi` row per unordered pair, dangling or self links
+    skipped). `replace` first deletes every link and resource, like `LinkGraph::clear`.
+
+    Why not drive the app's own import: the probes for R3-R8 must seed a graph
+    without depending on R11's Settings import being built yet. What this skips is
+    only the core's URI validation (D16), so fixtures here use allowed schemes.
+
+    Safe while the app has the file open: SQLite's locking (WAL or rollback) makes
+    this one more writer, and the app re-reads on its next query. Returns
+    (resources, links) written.
+    """
+    if not Path(json_path).is_file():
+        raise ScenarioError(f"seed_graph: {json_path} not found")
+    doc = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    if doc.get("schema") != "ubilink.graph.v3":
+        raise ScenarioError(f"seed_graph: {json_path} is not a ubilink.graph.v3 export")
+    Path(db).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db), timeout=15)
+    try:
+        conn.execute("PRAGMA busy_timeout = 15000")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 0:
+            conn.executescript(CORE_GRAPH_SCHEMA)
+            conn.execute(f"PRAGMA user_version = {CORE_GRAPH_VERSION}")
+        elif version != CORE_GRAPH_VERSION:
+            raise ProbeError(f"seed_graph: {db} is at schema v{version}, the probe knows v{CORE_GRAPH_VERSION}")
+        by_guid, nres, nlinks = {}, 0, 0
+        with conn:
+            if replace:
+                conn.execute("DELETE FROM links")
+                conn.execute("DELETE FROM resources")
+            for r in doc.get("resources", []):
+                uri, name = r.get("uri"), r.get("name")
+                if not isinstance(uri, str) or not uri or not isinstance(name, str):
+                    continue
+                guid = r.get("guid")
+                created = r.get("created_at") if isinstance(r.get("created_at"), int) else 0
+                conn.execute(
+                    "INSERT INTO resources (id, name, uri, path, content_hash, guid, created_at, updated_at) "
+                    "VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?6) "
+                    "ON CONFLICT(id) DO UPDATE SET name=excluded.name, path=excluded.path, "
+                    "updated_at=excluded.updated_at",
+                    (uri, name, uri, r.get("path"), guid, created),
+                )
+                by_guid[guid] = uri
+                nres += 1
+            for k in doc.get("links", []):
+                a, b = by_guid.get(k.get("a")), by_guid.get(k.get("b"))
+                if not a or not b or a == b:
+                    continue
+                lo, hi = (a, b) if a <= b else (b, a)
+                conn.execute(
+                    "INSERT INTO links (id, lo_id, hi_id, created_at) VALUES (?1, ?2, ?3, ?4) "
+                    "ON CONFLICT(lo_id, hi_id) DO NOTHING",
+                    (f"{lo}\x1f{hi}", lo, hi, k.get("created_at")),
+                )
+                nlinks += 1
+    finally:
+        conn.close()
+    return nres, nlinks
+
+
+def run_seed_graph(ctx: RunContext, step: dict) -> str:
+    src = _fixture_path(ctx.inst, expand(step["seed_graph"], ctx.tokens()))
+    db = Path(ctx.inst.data_dir) / GRAPH_DB_NAME
+    nres, nlinks = seed_graph(db, src, replace=step.get("replace", False))
+    how = "replaced the graph with" if step.get("replace") else "merged"
+    return f"{how} {src.name}: {nres} resource(s), {nlinks} link(s) into {db.name}"
+
+
+def run_key_until(ctx: RunContext, step: dict) -> str:
+    """Press `key` (default tab) until the target node query holds, at most
+    `max_presses` times: "this control is reachable from the keyboard" (U4) without
+    the probe hard-coding the view's tab order. Checks before the first press too."""
+    q = expand(step["key_until"], ctx.tokens())
+    key = step.get("key", "tab")
+    most = step.get("max_presses", 40)
+    if "route" in step:
+        route = ctx.inst.call("state").get("route")
+        if route != step["route"]:
+            raise StepFailed("wrong view", f"route {step['route']}", route)
+    last = None
+    for presses in range(most + 1):
+        try:
+            tree = ctx.inst.call("a11y")
+        except CallError as e:
+            raise StepFailed("a11y failed", "an accessibility tree", str(e))
+        try:
+            check_a11y_query(tree, q)
+            return f"reached after {presses} press(es) of {key}"
+        except StepFailed as e:
+            last = e
+        if presses == most:
+            break
+        resp = ctx.inst.request("key", {"keys": key})
+        if not resp.get("ok"):
+            raise StepFailed(f"key {key} returned an error", "ok", resp.get("error"))
+    raise StepFailed(f"not reached within {most} press(es) of {key}", _short(q), last.actual if last else None)
+
+
+def run_process(ctx: RunContext, step: dict) -> str:
+    proc = getattr(ctx.inst, "proc", None)
+    if proc is None or proc.poll() is not None:
+        raise StepFailed("instance process exited", f"pid {ctx.start_pid} alive", "exited")
+    if proc.pid != ctx.start_pid:
+        raise StepFailed("instance process changed", f"pid {ctx.start_pid}", proc.pid)
+    return f"same process (pid {proc.pid}) still running"
+
+
+_SHOTS_DIR = None
+
+
+def shots_dir() -> Path:
+    """Where `screenshot` steps keep their images after the run (instance temp roots
+    are deleted): CACHE_ROOT/shots/<timestamp>-<pid>/, printed at the end of a run."""
+    global _SHOTS_DIR
+    if _SHOTS_DIR is None:
+        _SHOTS_DIR = CACHE_ROOT / "shots" / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+        _SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    return _SHOTS_DIR
+
+
+def run_screenshot(ctx: RunContext, step: dict) -> str:
+    png, _ = _capture(ctx)
+    dest = shots_dir() / f"{ctx.scenario.get('_name', 'scenario')}-{step['screenshot']}.png"
+    shutil.copy2(png, dest)
+    return f"recorded {dest}"
+
+
+def parse_cputime(text: str) -> float:
+    """`ps -o time=` ("0:01.23", "1:02:03.45", "2-01:02:03") -> seconds."""
+    text = text.strip()
+    days = 0
+    if "-" in text:
+        d, text = text.split("-", 1)
+        days = int(d)
+    parts = [float(x) for x in text.split(":")]
+    secs = 0.0
+    for part in parts:
+        secs = secs * 60 + part
+    return days * 86400 + secs
+
+
+def parse_footprint(text: str) -> float:
+    """MB from `vmmap --summary`'s "Physical footprint:" line (the same number as
+    Activity Monitor's Memory column), e.g. "Physical footprint:   41.3M"."""
+    m = re.search(r"^Physical footprint:\s+([\d.]+)\s*([KMGT]?)B?\s*$", text, re.M)
+    if not m:
+        raise ProbeError("vmmap --summary printed no 'Physical footprint:' line")
+    scale = {"": 1 / (1024 * 1024), "K": 1 / 1024, "M": 1.0, "G": 1024.0, "T": 1024.0 * 1024}[m.group(2)]
+    return float(m.group(1)) * scale
+
+
+def _cputime(pid: int) -> float:
+    out = subprocess.run(["ps", "-o", "time=", "-p", str(pid)], capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        raise ProbeError(f"ps could not read pid {pid}'s CPU time")
+    return parse_cputime(out.stdout)
+
+
+def stripped_size_mb(binary: Path, work: Path) -> float:
+    """Size of the binary after `strip` (a copy; idempotent on an already-stripped
+    release build, which `strip = true` in desktop-gpui's release profile makes it)."""
+    copy = Path(work) / "stripped-ubilink-next"
+    shutil.copy2(binary, copy)
+    proc = subprocess.run(["strip", str(copy)], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise ProbeError(f"strip failed: {proc.stderr.strip()}")
+    return copy.stat().st_size / (1024 * 1024)
+
+
+_RUN_DIR = None
+
+
+def run_release_budget(ctx: RunContext, step: dict) -> str:
+    """Phase 1 R15/O1: launch the RELEASE build (not the automation build, TN3) as a
+    second isolated instance, let it settle, then over `idle_s` seconds measure its
+    CPU (ps cumulative CPU time delta / wall time) and, at the end, its physical
+    footprint (vmmap --summary); measure the stripped binary's size. Each must be
+    under its budget; all three are saved for `perf_doc compare`."""
+    idle_s = step.get("idle_s", 60)
+    settle = step.get("settle_s", 5)
+    run_dir = _RUN_DIR or Path(tempfile.mkdtemp(prefix="ubprobe-run-", dir=_tmpdir()))
+    build = build_binary(run_dir, release=True)
+    size_mb = stripped_size_mb(build.path, run_dir)
+    rel = Instance(f"{ctx.scenario.get('_name', 'scenario')}-release", build, release=True)
+    try:
+        rel.start()
+        time.sleep(settle)
+        if rel.proc.poll() is not None:
+            raise StepFailed("release app", "running at idle", f"exited {rel.proc.returncode}\n{rel.log_tail()}")
+        t0, c0 = time.monotonic(), _cputime(rel.proc.pid)
+        time.sleep(idle_s)
+        t1, c1 = time.monotonic(), _cputime(rel.proc.pid)
+        vm = subprocess.run(["vmmap", "--summary", str(rel.proc.pid)], capture_output=True, text=True)
+        if vm.returncode != 0:
+            raise EnvBlocked(f"vmmap could not read the release app's memory: {vm.stderr.strip()[:200]}")
+        foot_mb = parse_footprint(vm.stdout)
+    finally:
+        rel.stop()
+    cpu = (c1 - c0) / (t1 - t0) * 100.0
+    measured = {"idle_cpu_percent": round(cpu, 3), "physical_footprint_mb": round(foot_mb, 1),
+                "stripped_binary_mb": round(size_mb, 2)}
+    ctx.saved.update(measured)
+    over = []
+    if not cpu < step["cpu_pct_lt"]:
+        over.append(f"idle CPU {cpu:.3f}% >= {step['cpu_pct_lt']}%")
+    if not foot_mb < step["footprint_mb_lt"]:
+        over.append(f"footprint {foot_mb:.1f} MB >= {step['footprint_mb_lt']} MB")
+    if not size_mb < step["binary_mb_lt"]:
+        over.append(f"stripped binary {size_mb:.2f} MB >= {step['binary_mb_lt']} MB")
+    if over:
+        raise StepFailed("release app over budget", "within budget", "; ".join(over))
+    return f"release {build.sha256[:12]}: {_short(measured, 200)} over {idle_s:g}s idle"
+
+
+def parse_perf_table(text: str) -> dict:
+    """docs/PERFORMANCE.md's budget table -> {key: (budget cell, measured float)}.
+
+    Rows are `| <key> | <budget> | <measured> |` (README "PERFORMANCE.md format");
+    other lines are ignored. A key listed twice, or a measured cell that is not a
+    plain number, is an error: the doc must say one thing."""
+    rows = {}
+    for line in text.splitlines():
+        cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or cells[0] not in PERF_ROWS:
+            continue
+        key = cells[0]
+        if key in rows:
+            raise StepFailed(f"PERFORMANCE.md has two {key} rows", f"one {key} row", "two")
+        try:
+            value = float(cells[2])
+        except ValueError:
+            raise StepFailed(f"PERFORMANCE.md {key}: measured is not a number", f"a number in {key}'s measured column", cells[2])
+        rows[key] = (cells[1], value)
+    return rows
+
+
+def perf_tolerance(key: str, measured: float) -> float:
+    absolute, relative = PERF_ROWS[key][2]
+    return max(absolute, relative * abs(measured))
+
+
+def run_perf_doc(ctx: RunContext, step: dict) -> str:
+    path = Path(expand(step["perf_doc"], ctx.tokens()))
+    if not path.is_file():
+        raise StepFailed("PERFORMANCE.md is missing", f"{path} exists", "missing")
+    rows = parse_perf_table(path.read_text(encoding="utf-8"))
+    missing = [k for k in PERF_ROWS if k not in rows]
+    if missing:
+        raise StepFailed("PERFORMANCE.md rows", sorted(PERF_ROWS), f"missing {missing}")
+    for key, (budget, value) in rows.items():
+        want_budget, bound, _ = PERF_ROWS[key]
+        if budget != want_budget:
+            raise StepFailed(f"PERFORMANCE.md {key} budget", want_budget, budget)
+        if not value < bound:
+            raise StepFailed(f"PERFORMANCE.md {key} is over budget", f"< {bound:g}", value)
+    detail = f"{len(rows)} rows within budget"
+    if step.get("compare"):
+        off = []
+        for key in PERF_ROWS:
+            doc, now = rows[key][1], ctx.saved[key]
+            tol = perf_tolerance(key, now)
+            if abs(doc - now) > tol:
+                off.append(f"{key}: doc {doc:g}, measured {now:g} (tolerance {tol:g})")
+        if off:
+            raise StepFailed("PERFORMANCE.md disagrees with this run", "within tolerance", off)
+        detail += ", matching this run's measurements"
+    if step.get("make_target"):
+        mk = subprocess.run(["make", "-n", step["make_target"]], cwd=REPO_ROOT, capture_output=True, text=True)
+        if mk.returncode != 0:
+            raise StepFailed(f"make target {step['make_target']!r}", "make -n exits 0",
+                             (mk.stderr or mk.stdout).strip()[:300])
+        detail += f", make -n {step['make_target']} ok"
+    return detail
 
 
 STEP_RUNNERS = {
@@ -2571,6 +3155,12 @@ STEP_RUNNERS = {
     "activate_other": run_activate_other,
     "restart": run_restart,
     "sleep_ms": run_sleep,
+    "key_until": run_key_until,
+    "seed_graph": run_seed_graph,
+    "process": run_process,
+    "screenshot": run_screenshot,
+    "release_budget": run_release_budget,
+    "perf_doc": run_perf_doc,
 }
 assert set(STEP_RUNNERS) == set(STEP_TYPES)
 
@@ -2806,7 +3396,7 @@ def side_by_side_checks(name: str, instances: list, tally: Tally):
 
 def _copy_setup_files(inst: Instance, setup: dict):
     tokens = {"root": inst.root, "data_dir": inst.data_dir, "fixtures": inst.fixtures_dir,
-              "probes": PROBES_DIR, "instance": inst.name}
+              "probes": PROBES_DIR, "instance": inst.name, "repo": REPO_ROOT}
     for dest, src in (setup.get("files") or {}).items():
         d = Path(expand(dest, tokens))
         s = Path(expand(src, tokens))
@@ -2831,6 +3421,9 @@ def run_scenario(sc: dict, binary: Path, n: int, tally: Tally):
         for inst in instances:
             inst.prepare()
             tokens = _copy_setup_files(inst, setup)
+            graphs = setup.get("graph", [])
+            for g in [graphs] if isinstance(graphs, str) else graphs:
+                seed_graph(inst.data_dir / GRAPH_DB_NAME, _fixture_path(inst, expand(g, tokens)))
             inst.start()
             for kind, path in (setup.get("fixtures") or {}).items():
                 p = Path(expand(path, tokens))
@@ -2895,6 +3488,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     # This run's own copy of the binary lives here until the run ends (build_binary).
     run_dir = Path(tempfile.mkdtemp(prefix="ubprobe-run-", dir=_tmpdir()))
+    global _RUN_DIR
+    _RUN_DIR = run_dir
     build = None
     awake = keep_awake()
     try:
@@ -2905,6 +3500,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         _helper(_QUARTZ_SWIFT)
         if any(step_type(st, "") == "ocr" for sc in scenarios for st in sc["steps"]):
             _helper(_OCR_SWIFT)
+        if any(step_type(st, "") == "release_budget" for sc in scenarios for st in sc["steps"]):
+            build_binary(run_dir, release=True)
         if any(step_type(st, "") == "activate_other" for sc in scenarios for st in sc["steps"]):
             _helper(_ACTIVATOR_SWIFT)
         wait_for_display()
@@ -2935,7 +3532,115 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     # Evidence names what ran: the exact binary and the source it came from.
     print(f"ran: {build.describe() if build else 'no binary'}")
+    if "release" in _builds:
+        print(f"ran: {_builds['release'].describe()}")
+    if _SHOTS_DIR is not None:
+        print(f"screenshots: {_SHOTS_DIR}")
     return code
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `list`: the Phase 1 acceptance scenarios and how each one currently exits
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Phase 1 may not edit desktop-gpui/probes or this file (spec T4), so the 15
+# scenarios that judge it are fixed now. `list` reads the manifest naming them
+# (desktop-gpui/probes/phase1.json, name -> requirement), validates each, runs each
+# in its own `probe.py run` (so each exit code is exactly what that command
+# reports), and checks how many there are and how many fail. Before Phase 1 every
+# one must exit 1, a product FAIL: a scenario that exits 2 (malformed) or 3
+# (ENV-BLOCKED) proves nothing about the product, so it counts against
+# --expect-failing.
+
+PHASE1_MANIFEST = PROBES_DIR / "phase1.json"
+_EXIT_NAMES = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}
+
+
+def load_manifest(path: Path = None) -> list:
+    """[(scenario name, requirement id)] from phase1.json, in its order."""
+    path = Path(path or PHASE1_MANIFEST)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise ScenarioError(f"{path}: {e}")
+    rows = doc.get("scenarios") if isinstance(doc, dict) else None
+    if not isinstance(rows, list) or not rows or not all(
+        isinstance(r, dict) and set(r) == {"name", "requirement"}
+        and _nonblank(r["name"]) and _nonblank(r["requirement"]) for r in rows
+    ):
+        raise ScenarioError(f"{path}: scenarios must be a non-empty list of {{name, requirement}}")
+    names = [r["name"] for r in rows]
+    if len(set(names)) != len(names):
+        raise ScenarioError(f"{path}: a scenario is listed twice")
+    return [(r["name"], r["requirement"]) for r in rows]
+
+
+def first_problem_line(output: str) -> str:
+    for line in output.splitlines():
+        if line.startswith(("FAIL", "ERROR", "ENV-BLOCKED")):
+            return line.strip()
+    return ""
+
+
+def list_verdict(results: list, expect=None, expect_failing=None) -> list:
+    """Problems with a list run. `results` = [(name, requirement, exit code or None)];
+    None means not run. --expect N: exactly N scenarios. --expect-failing N: exactly
+    N exit 1 and every other one exits 0; any 2 (scenario error) or 3 (ENV-BLOCKED)
+    is a problem, since neither says anything about the product."""
+    problems = []
+    if expect is not None and len(results) != expect:
+        problems.append(f"expected {expect} scenarios, the manifest lists {len(results)}")
+    if expect_failing is not None:
+        codes = [c for _, _, c in results]
+        if any(c is None for c in codes):
+            problems.append("--expect-failing needs every scenario to run")
+        bad = [(n, c) for n, _, c in results if c not in (0, 1, None)]
+        for n, c in bad:
+            problems.append(f"{n} exited {c} ({_EXIT_NAMES.get(c, '?')}), not a product PASS/FAIL")
+        failing = sum(1 for c in codes if c == 1)
+        if failing != expect_failing:
+            problems.append(f"expected {expect_failing} product FAIL(s), got {failing}")
+    return problems
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    try:
+        manifest = load_manifest(args.manifest)
+    except ScenarioError as e:
+        print(f"ERROR {e}")
+        return 2
+    results, logs = [], None
+    if not args.no_run:
+        logs = CACHE_ROOT / "list-logs" / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+        logs.mkdir(parents=True, exist_ok=True)
+    width = max(len(n) for n, _ in manifest)
+    print(f"{'scenario'.ljust(width)}  req  result       first failing step")
+    for name, req in manifest:
+        code, why = None, ""
+        try:
+            sc = load_scenario(name)
+            declared = str(sc.get("requirement", ""))
+            if not re.match(rf"{re.escape(req)}\b", declared):
+                raise ScenarioError(f"{name}.json says requirement {declared!r}, the manifest {req!r}")
+        except ScenarioError as e:
+            code, why = 2, str(e)
+        if code is None and not args.no_run:
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "run", name],
+                cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            (logs / f"{name}.log").write_text(proc.stdout)
+            code, why = proc.returncode, first_problem_line(proc.stdout)
+        shown = "valid" if code is None else _EXIT_NAMES.get(code, f"exit {code}")
+        print(f"{name.ljust(width)}  {req.ljust(4)} {shown.ljust(12)} {_short(why, 160)}", flush=True)
+        results.append((name, req, code))
+    problems = list_verdict(results, args.expect, args.expect_failing)
+    if logs is not None:
+        print(f"logs: {logs}")
+    for p in problems:
+        print(f"FAIL  {p}")
+    print(("PASS" if not problems else "FAIL") + f": list ({len(results)} scenario(s))")
+    return 0 if not problems else 1
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3347,6 +4052,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run each scenario against N simultaneous instances and check they stay isolated.",
     )
     p_run.set_defaults(func=cmd_run)
+
+    # ── list ───────────────────────────────────────────────────────────
+    p_list = subparsers.add_parser(
+        "list",
+        help="List the Phase 1 scenarios (probes/phase1.json), run each, and check counts.",
+    )
+    p_list.add_argument("--expect", type=int, default=None, help="Require exactly N listed scenarios.")
+    p_list.add_argument(
+        "--expect-failing", type=int, default=None,
+        help="Require exactly N to exit 1 (product FAIL) and the rest 0; exits 2/3 count against it.",
+    )
+    p_list.add_argument("--no-run", action="store_true", help="Only validate the scenarios; run nothing.")
+    p_list.add_argument("--manifest", default=None, help=argparse.SUPPRESS)
+    p_list.set_defaults(func=cmd_list)
 
     # ── fixtures ───────────────────────────────────────────────────────
     p_fixtures = subparsers.add_parser(
