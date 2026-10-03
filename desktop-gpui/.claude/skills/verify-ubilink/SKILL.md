@@ -25,83 +25,102 @@ eleven verbs (`open_view`, `key`, `trigger_hotkey`, `resign_key`, `set_appearanc
 the same code path the real input takes (`desktop-gpui/src/automation/protocol.rs`).
 
 The harness is `scripts/ubilink_instance.py` in this skill. It is a thin split of
-`scripts/probe.py`'s engine (same warm locked build, same `Instance` isolation, same
-desktop lock, same a11y matchers) that keeps an instance alive between commands, so you
-can launch, doctor, drive and record as separate steps. Every harness command prints
-JSON on stdout; build and lock chatter goes to stderr. The scenario runner
-`python3 scripts/probe.py run <scenario>` stays the regression tool; this skill is how a
-verifier proves one head by hand. Scenario and matcher syntax:
+`scripts/probe.py`'s engine that keeps an instance alive between commands, so you can
+launch, doctor, drive and record as separate steps. It uses the same warm locked build,
+the same `Instance` isolation and the same desktop lock as probe.py, and it runs every
+drive step through probe.py's own step runners, matchers and focus-theft guard. Every
+harness command prints JSON on stdout; build and lock chatter goes to stderr. The
+scenario runner `python3 scripts/probe.py run <scenario>` stays the regression tool;
+this skill is how a verifier proves one head. Step and matcher syntax:
 `desktop-gpui/probes/README.md`.
 
 ## Session variables
 
-Run everything from the repository root (or any directory inside the checkout you are
-proving). Set these once per shell:
+`SKILL` is the absolute path to this skill that you were given (under factory-conductor:
+`<worktree>/desktop-gpui/.claude/skills/verify-ubilink`). The checkout that holds it is
+the one you prove: the harness builds that checkout's code, and the recorder binds
+evidence to that checkout's `HEAD`. **cd into that checkout before anything else**,
+because the doctor fails when your shell's `HEAD` is not the skill's checkout's `HEAD`.
 
 ```sh
-SKILL="$(git rev-parse --show-toplevel)/desktop-gpui/.claude/skills/verify-ubilink"
+SKILL=/absolute/path/you/were/given/desktop-gpui/.claude/skills/verify-ubilink
+WT="${SKILL%/desktop-gpui/.claude/skills/verify-ubilink}"
+cd "$WT"
 H="$SKILL/scripts/ubilink_instance.py"
-INSTANCE=a            # 1-16 chars of [a-z0-9-]; a second instance is b
-VERIFIER=verifier-1   # see below
+VERIFIER=your-verifier-id
+INSTANCE="$(python3 "$H" name --verifier "$VERIFIER" a)"
+INSTANCE_B="$(python3 "$H" name --verifier "$VERIFIER" b)"
 ```
 
 `VERIFIER` is who records the proof. Under factory-conductor it is the verifier id the
 verifier brief gives you, and it MUST NOT be the owner that wrote the change. Working
 alone, use one stable name for the whole session (for example your session's agent id),
-never the author of the change. Under factory-conductor also export
-`VERIFY_EVIDENCE_DIR=<run root>/.verify` so records from a task worktree land where the
-conductor reads them; the harness keeps its run state in the sibling `.verify-run/`.
+never the author of the change. `name` turns it into instance names unique to you
+(`v<8 hex of the verifier id>-a`), because under factory-conductor several verifiers
+share one run directory. Under factory-conductor also export
+`VERIFY_EVIDENCE_DIR=<run root>/.verify` (the brief says which), so records land where
+the conductor reads them; the harness keeps its run state in the sibling `.verify-run/`.
 
 ## Launch
 
 ```sh
-python3 "$H" launch --instance "$INSTANCE"
-python3 "$H" launch --instance b              # a second, independent instance
-python3 "$H" list                             # what this checkout has running
+python3 "$H" launch --instance "$INSTANCE" --verifier "$VERIFIER"
+python3 "$H" launch --instance "$INSTANCE_B" --verifier "$VERIFIER"
+python3 "$H" list
 ```
 
 What `launch` does, in order:
 
-1. Claims `.verify-run/$INSTANCE/instance.json` with an O_EXCL create. A live claim
-   exits 3 ("already running"); a stale one (dead pid) is replaced. This claim is how
-   two owners are kept apart.
-2. Builds the automation binary with probe.py's `build_binary`
-   (`cargo build --locked --features automation`, the warm shared target dir under
-   `~/Library/Caches/ubilink-probe/target`, held under its target lock) and clones the
-   produced executable to `.verify-run/$INSTANCE/ubilink-next-automation`. It prints
-   the binary's sha256 and the source commit on stderr. A warm build takes a few
-   seconds; a cold one several minutes.
-3. Starts the instance with probe.py's `Instance` isolation: its own temp root
-   `$TMPDIR/ubprobe-vf-$INSTANCE-*` holding `UBILINK_DATA_DIR=<root>/data` (the app's
-   one data-dir resolver, `src/paths.rs`, honours it), its own single-instance socket
-   `UBILINK_INSTANCE_SOCKET=<root>/si.sock`, its own copy of `probes/fixtures/`,
-   `UBILINK_SKIP_HOTKEYS=1`, and every other `UBILINK_*` variable from your shell
-   dropped.
+1. Claims `.verify-run/$INSTANCE/instance.json` with an O_EXCL create, naming you as
+   the verifier. A live claim exits 3 ("already running"); a stale one (dead pid) is
+   replaced.
+2. Takes or joins the **session lease** `~/Library/Caches/ubilink-probe/verify-lease.json`
+   (O_EXCL; it names one run directory, one verifier and that verifier's instances).
+   Only one verifier at a time drives instances on this desktop, so two verifiers' GUI
+   steps can never interleave between calls. If another verifier holds it, `launch`
+   waits up to 900 seconds (`--lease-timeout`) and then exits 3. A lease whose
+   instances and launcher are all dead is stale and gets replaced. Your last `stop`
+   releases it.
+3. Builds the automation binary with probe.py's `build_binary` and clones the produced
+   executable to `.verify-run/$INSTANCE/ubilink-next-automation`. The build is
+   `cargo build --locked --features automation` in the warm shared target dir under
+   `~/Library/Caches/ubilink-probe/target`, held under its target lock. `launch` prints
+   the binary's sha256 and source commit on stderr. A warm build takes a few seconds; a
+   cold one takes several minutes.
+4. Under probe.py's desktop lock, starts the instance with probe.py's `Instance`
+   isolation. Each instance gets:
+   - its own temp root `$TMPDIR/ubprobe-vf-$INSTANCE-*`
+   - `UBILINK_DATA_DIR=<root>/data` (the app's one data-dir resolver, `src/paths.rs`,
+     honours it)
+   - its own single-instance socket `UBILINK_INSTANCE_SOCKET=<root>/si.sock`
+   - its own copy of `probes/fixtures/`
+   - `UBILINK_SKIP_HOTKEYS=1`, with every other `UBILINK_*` variable from your shell
+     dropped
 
 **No network port.** ubilink-next opens no TCP port and has no login, so there is no
 port to claim with `verify_evidence.py port` and no auth session to keep apart. The
-per-instance endpoint that plays the port's role is the automation socket
-`$TMPDIR/ubilink-<uid>/vf-$INSTANCE-<hash>/auto.sock`, where `UBILINK_INSTANCE` is
-`vf-$INSTANCE-<6 hex of this checkout's run dir>`, so two worktrees that both name an
-instance `a` still get different sockets. Ownership is enforced twice: the O_EXCL claim
-above, and the app itself refuses to bind a socket another live process is serving
-(`automation/socket.rs`). The per-instance data store is the temp root's `data/`; the
-"session" is that data dir plus the fixture copy, nothing else.
+automation socket plays the port's role: `$TMPDIR/ubilink-<uid>/vf-$INSTANCE-<hash>/auto.sock`,
+with `UBILINK_INSTANCE` set to `vf-$INSTANCE-<6 hex of the run dir>`, so two run
+directories that use the same name still get different sockets. Three things keep owners
+apart: the O_EXCL claim, the session lease, and the app itself, which refuses to bind a
+socket another live process is serving (`automation/socket.rs`). The per-instance data
+store is the temp root's `data/`. The "session" is that data dir plus the fixture copy,
+nothing else.
 
 **Ready** means the automation socket answered a `state` request. `launch` waits up to
-60 seconds for it (`--timeout` to change), then prints `{"INSTANCE": {...}}` with the
-pid, socket, data dir, binary sha256 and commit, and exits 0. If the process exits or
-the socket never answers within the timeout, it prints the app log's tail, removes the
-instance and exits 2: stop waiting and read that log. The instance keeps running after
-`launch` returns (it is in its own session) until you clean it up.
+60 seconds for it (`--timeout` to change). It then prints `{"INSTANCE": {...}}` with the
+pid, socket, data dir, binary sha256 and commit, and exits 0. If the process exits, or
+the socket never answers within the timeout, `launch` prints the app log's tail, removes
+the instance and exits 2: stop waiting and read that log. The instance keeps running
+after `launch` returns (it is in its own session) until you clean it up.
 
-Before the first launch on a host, `python3 scripts/probe.py doctor` (read-only) tells
-you whether this Mac can host GUI probes at all: Screen Recording for screenshots, an
-awake display, swiftc for the Quartz helper, the pinned Rust toolchain.
+Before the first launch on a host, run `python3 scripts/probe.py doctor` (read-only). It
+tells you whether this Mac can host GUI probes at all: Screen Recording for screenshots,
+an awake display, swiftc for the Quartz helper, the pinned Rust toolchain.
 
 ## Doctor
 
-One read-only check per instance, recorded before the first drive and again after any
+One read-only check per instance. Record it before the first drive and again after any
 failure:
 
 ```sh
@@ -109,70 +128,103 @@ python3 "$H" doctor --instance "$INSTANCE"
 python3 "$SKILL"/scripts/verify_evidence.py doctor --instance "$INSTANCE" --verifier "$VERIFIER" $(python3 "$H" doctor --instance "$INSTANCE" --as-args)
 ```
 
-The first command prints `{"doctor": {"ok": ..., "checks": {...}, "detail": {...}}}`
-and exits 0 when every check passes, 1 when one fails. `--as-args` prints the same
-verdict as `--ok|--fail --check name=pass|fail ...` for the recorder, which writes
+The first command prints `{"doctor": {"ok": ..., "checks": {...}, "detail": {...}}}`. It
+exits 0 when every check passes and 1 when one fails. `--as-args` prints the same
+verdict for the recorder: `--worktree <the skill's checkout> --ok|--fail --check
+name=pass|fail ...`. The recorder then writes
 `.verify/$INSTANCE/doctor/<sha>/doctor.json` (`DOCTOR: ok <path>`). The checks:
 
 | check | passes when |
 |---|---|
 | `process` | the recorded pid is alive and still runs this instance's binary copy (not a reused pid) |
-| `build` | the binary's sha256 is the one built at launch, it was built from the current `HEAD`, and neither then nor now are `desktop-gpui/`, `app/`, `src-tauri/` or `design/` dirty. Evidence is bound to `HEAD`, so a dirty or moved checkout cannot be proven: commit, then relaunch |
+| `build` | all of these hold: the binary's sha256 is the one built at launch; the commit it was built from equals the skill's checkout's `HEAD` and your cwd's `HEAD`; and `desktop-gpui/`, `app/`, `src-tauri/` and `design/` were clean at build time and are clean now. Evidence is bound to `HEAD`, so a dirty or moved checkout cannot be proven: commit, then relaunch. A cwd in another checkout fails here, so cd into `$WT` |
 | `endpoint` | the instance's automation socket answers `state` and reports this instance's own `data_dir` (the port check, for a socket) |
 | `isolation` | `state.shell.hotkeys_skipped` is true and the data dir is inside the instance's temp root, never `~/Library/Application Support` |
+| `desktop` | the login session's screen is not locked. On a locked screen no panel becomes active and every a11y read fails for a reason that is not the product's; `call` refuses to drive one (exit 3). A sleeping display is fine: `call` holds `caffeinate -d -i -u` like `probe.py run`, which wakes it |
 
-The JSON also reports `screen_recording` (needed only for `screenshot` steps) and the
-current `route`. There is no `auth` check because the app has no login.
+The JSON also reports `screen_recording` (needed only for screenshots) and the current
+`route`. There is no `auth` check because the app has no login.
 
 ## Drive
 
-Every drive is `call`: one or more steps, sent in order over one socket connection
-while holding probe.py's desktop lock (`~/Library/Caches/ubilink-probe/desktop.lock`;
-the key window and pasteboard are shared by the whole desktop, so a concurrent
-`probe.py run` waits for you and you wait for it, up to 15 minutes).
+**One proof is one `call`**, and that includes its side-effect checks. A call:
+
+1. holds probe.py's desktop lock throughout and keeps the display awake (the key window and pasteboard belong to the
+   whole desktop; a concurrent `probe.py run` and you wait for each other, up to 15
+   minutes)
+2. checks you still hold the session lease
+3. starts by closing any open panel (probe.py's `reset_panel`, saved as the call's first
+   record)
+4. runs each step through probe.py's own runner
+5. restores your pasteboard text at the end
 
 ```sh
-OUT="$(git rev-parse --show-toplevel)/.verify-run/$INSTANCE/captures/shell"
-python3 "$H" call --instance "$INSTANCE" --out "$OUT" \
-  state \
+OUT="$WT/.verify-run/$INSTANCE/captures/shell"
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
+  pasteboard:set_nonce \
   'trigger_hotkey:{"action":"capture"}' \
   'wait_state:{"window_verified":true,"shell.visible":true,"shell.route":"capture"}' \
   'see:{"role":"Label","text":"Capture"}' \
-  'absent:{"text":"Browse links"}' \
-  a11y screenshot:capture opened
+  a11y screenshot:capture opened 'pasteboard:{"changed":false}'
 ```
 
-A step is a verb (`state`) or `verb:JSON-args` (`'open_view:{"route":"browser"}'`,
-`'key:{"keys":"down down enter"}'`, `'set_appearance:{"mode":"dark"}'`,
-`'load_fixture:{"kind":"capture","path":"{fixtures}/capture-ok.json"}'`), or a harness
-check:
+A step is one of:
 
-- `wait_state:{dot.path: value}` polls `state` until every path holds (literals or
-  probe.py matchers such as `{"len": 0}`, `{"in": [...]}`, `{"gt": 0}`).
-- `see:QUERY` / `absent:QUERY` poll the accessibility tree (GPUI's AccessKit dump, no
-  TCC grant needed) until a node matches / no node matches. QUERY is probe.py's `see`
-  query: `{"role": "ListItem", "text": "beta.md", "deep": true, "state": {"selected": true}}`.
-- `screenshot[:label]` captures the panel window by its `window_id` with
-  `screencapture -x -o -l<id>` (needs Screen Recording; exit 3 without it).
-- `seed_graph:{"fixture": "graph-backlinks.json"}` is setup, not proof: it writes a
+- **A verb.** `state`, or `verb:JSON-args`: `'open_view:{"route":"browser"}'`,
+  `'key:{"keys":"down down enter"}'`, `'set_appearance:{"mode":"dark"}'`,
+  `'load_fixture:{"kind":"capture","path":"{fixtures}/capture-ok.json"}'`.
+- **`wait_state:{dot.path: value}`.** Polls `state` until every path holds. Values are
+  literals or probe.py matchers such as `{"len": 0}`, `{"in": [...]}`, `{"gt": 0}`.
+- **`see:QUERY` / `absent:QUERY`.** Polls the accessibility tree (GPUI's AccessKit dump,
+  no TCC grant needed) until a node matches, or until none does. QUERY is probe.py's
+  `see` query, for example
+  `{"role": "ListItem", "text": "beta.md", "deep": true, "state": {"selected": true}}`.
+- **`pasteboard:set_nonce`, then `pasteboard:{"expect": ..., "changed": true|false}`.**
+  A side effect on the pasteboard, checked inside the same call. `{nonce}` is usable
+  after `set_nonce`.
+- **`screenshot[:label]`.** Captures the panel window by its `window_id` with
+  `screencapture -x -o -l<id>` into `--out`. It needs Screen Recording.
+- **`step:{any probe.py step}`.** For example
+  `{"call": "resign_key", "expect": {"closed": true}}`, `{"winframe": "gone"}`,
+  `{"activate_other": true}` (a real loss of key status to probe.py's own activator
+  app), `{"file": "{data_dir}/plugins-state.json", "expect": {...}}`,
+  `{"graph": true, "links": [[...]]}` or `{"key_until": {...}}`. `restart`, `process`,
+  `release_budget` and `perf_doc` need `probe.py run` itself and are refused.
+- **`seed_graph:{"fixture": "graph-backlinks.json"}`.** Setup, not proof: it writes a
   graph fixture into the instance's own `ubilink-graph.sqlite` the way probe.py's
-  `setup.graph` does, before you drive a view that reads the graph.
+  `setup.graph` does.
 
 Strings may use `{fixtures}`, `{data_dir}`, `{root}` and `{instance}`. Each step prints
-one JSON line (`ok`, `result` or `error`; a11y trees are summarised on stdout, pass
-`--full` to print them) and, with `--out`, is saved as `NN-verb.json` plus
-`transcript.jsonl`, numbered after whatever is already in that directory. Exit codes:
-0 every step held; 1 the product did not (an `ok: false` reply, or a check that never
-held within `--timeout-ms`, default 5000); 2 harness error (no such instance, socket
-gone, bad step); 3 environment-blocked (no Screen Recording).
+one JSON line (`ok`, `detail`, plus `result` for verb calls other than `a11y`). With
+`--out`, each step is also saved as `NN-kind.json`, holding every request and response
+the step exchanged, plus a line in `transcript.jsonl`. Files are numbered after whatever
+is already in that directory.
 
-Stable handles only: route names (`capture`, `browser`, `settings`, `onboarding`),
-hotkey actions (`capture`, `browser`, `settings`), a11y roles and their text, and the
-`state` fields (`route`, `window_verified`, `shell.*`, `view.*`, `data_dir`) listed in
-the README's "Phase 1 view-state contract". Keyboard input goes through the `key` verb
-with GPUI key names. Never aim at the screen by position, and never assume which control
-the focus lands on next: assert the focused node with
-`see:{"role": ..., "state": {"focused": true}}` instead.
+Exit codes:
+
+| exit | meaning |
+|---|---|
+| 0 | every step held |
+| 1 | the product did not do it: an `ok: false` reply, or a check that never held within `--timeout-ms` (default 5000) |
+| 2 | harness error: no such instance, socket gone, bad step |
+| 3 | environment-blocked: screen locked, display still asleep after the wake, no Screen Recording, the lease is not yours, or focus stolen twice |
+
+**Focus theft.** A capture or browser panel hides whenever it loses key status. When a
+visibility step fails and another app became frontmost during it (probe.py's
+`focus_thief`), the whole call is re-run once from a closed panel (`"attempt": 2`). A
+second theft exits 3. A failure with no theft is exit 1.
+
+Use stable handles only:
+
+- route names (`capture`, `browser`, `settings`, `onboarding`)
+- hotkey actions (`capture`, `browser`, `settings`)
+- a11y roles and their text
+- the `state` fields (`route`, `window_verified`, `shell.*`, `view.*`, `data_dir`)
+  listed in the README's "Phase 1 view-state contract"
+
+Keyboard input goes through the `key` verb with GPUI key names. Never aim at the screen
+by position, and never assume which control the focus lands on next: assert the focused
+node with `see:{"role": ..., "state": {"focused": true}}` instead.
 
 The per-feature recipes, with their expected output and proof, are in
 `features/README.md` and one file per feature.
@@ -188,55 +240,72 @@ The per-feature recipes, with their expected output and proof, are in
 - Harness output is JSON wherever the harness can emit it, so a verifier can read it without a human.
 - Cleanup removes instances, never evidence.
 
-In this app, "the real user path" is the automation verb that runs the user's code path
-(`trigger_hotkey` for a hotkey press, `open_view` for the tray's Open, `key` for typing
-in the panel), never a fixture or `seed_graph` standing in for the behaviour being
+In this app, "the real user path" is the automation verb that runs the user's code path:
+`trigger_hotkey` for a hotkey press, `open_view` for the tray's Open, `key` for typing
+in the panel. It is never a fixture or `seed_graph` standing in for the behaviour being
 proven. Fixtures (`load_fixture`) stand in only where a production boundary already
 isolates an external system: the frontmost app being captured, macOS permission state,
-SMAppService, file dialogs. Side effects to observe: the `opened` sink (what the app
-would have opened through the core opener; opens never launch anything in an automation
-build), files under the instance's `{data_dir}` (`ubilink-graph.sqlite`,
-`plugins-state.json`), the pasteboard (`pbpaste`) and fixture files the app rewrites.
+SMAppService, file dialogs.
 
-Record each proof once the drive passed (or failed: record `--result fail` with what you
-saw):
+Check side effects inside the same `call` as the action:
+
+- `opened`: the sink of what the app would have opened through the core opener (opens
+  never launch anything in an automation build)
+- `step:{"file": ...}` / `step:{"graph": ...}`: files under the instance's `{data_dir}`
+  (`ubilink-graph.sqlite`, `plugins-state.json`) and fixture files the app rewrites
+- `pasteboard:{...}`: the pasteboard
+
+Once the drive has passed, record each proof. If it failed, record `--result fail` with
+what you saw:
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
-python3 "$SKILL"/scripts/verify_evidence.py record --instance "$INSTANCE" --feature shell \
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature shell \
   --verifier "$VERIFIER" --result pass \
-  --action "trigger_hotkey capture, then open_view browser and back, on instance $INSTANCE" \
-  --observed "state: window_verified, popup, blurred, accessory, route capture; a11y Label Capture, no Browse links" \
-  --side-effect "opened sink stayed [] (nothing launched); data_dir is the instance's own temp dir" \
+  --action "trigger_hotkey capture/browser/settings, resign_key and a real deactivation on each, open_view browser, on instance $INSTANCE" \
+  --observed "capture and browser: verified popup, blurred, hide on loss of key; settings stays open; tray open_view switches route" \
+  --side-effect "opened sink stayed [] (nothing launched); pasteboard unchanged; data_dir is the instance's own temp dir" \
   $(for f in "$OUT"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
-The recorder reads `HEAD` from git (never from a flag), copies each artifact into
-`.verify/$INSTANCE/shell/<sha>/` and pins it by sha256 in `evidence.json`
-(`EVIDENCE: pass <path>`). The `for` loop passes every file the drive saved in `$OUT`
-(each step's JSON, screenshots, `transcript.jsonl`); it assumes the checkout path has no
-spaces, otherwise list the files with one `--artifact` each. `--side-effect` is required (write `none: <why>` only when
-there truly is none) and so is at least one `--artifact`. Artifacts are copied by file
-name, so two with the same name in one record are refused: keep each feature's
-captures in its own `--out` directory. Run the doctor again right before recording if
-anything (a commit, a rebase) could have moved `HEAD` since launch: a record must name
-the commit the binary was built from.
+The recorder reads `HEAD` from git in `--worktree` (never from a flag). That is the
+skill's checkout, the same one the doctor's `build` check compared the binary against.
+It copies each artifact into `.verify/$INSTANCE/shell/<sha>/` and pins it by sha256 in
+`evidence.json` (`EVIDENCE: pass <path>`).
+
+- The `for` loop passes every file the drive saved in `$OUT` (each step's JSON,
+  screenshots, `transcript.jsonl`). It assumes the path has no spaces; otherwise list
+  the files with one `--artifact` each.
+- `--side-effect` is required (write `none: <why>` only when there truly is none), and
+  so is at least one `--artifact`.
+- Artifacts are copied by file name, so two with the same name in one record are
+  refused: keep each feature's captures in its own `--out` directory.
+- Run the doctor again right before recording if anything (a commit, a rebase) could
+  have moved `HEAD` since launch.
 
 ## Cleanup
 
 ```sh
-python3 "$H" stop --instance "$INSTANCE"
-python3 "$H" stop --instance b
+python3 "$H" stop --instance "$INSTANCE" --verifier "$VERIFIER"
+python3 "$H" stop --instance "$INSTANCE_B" --verifier "$VERIFIER"
 python3 "$H" list
 ```
 
-`stop` reads the instance's claim, checks the recorded pid still runs this instance's
-binary copy, sends it SIGTERM, waits up to 5 seconds, then SIGKILL (probe.py's
-`Instance.stop` semantics), and removes its automation socket and socket directory, its
-temp root (data dir, fixture copy, app log) and `.verify-run/$INSTANCE/` (claim, binary
-copy, captures: by now they are copied into `.verify/`). It prints
-`{"STOPPED": {..., "still_running": false}}` and exits 0, or 2 if the process survived.
-It kills only by the recorded pid, never by process name, because another owner's
-instance runs the same binary name. It never touches `.verify/`: the evidence gate
-reads those records after cleanup has run. `list` printing nothing means nothing of
-this checkout's is left running.
+`stop` touches only instances whose claim names you as the verifier; anyone else's exits
+3. It reads the claim, checks the recorded pid still runs this instance's binary copy,
+sends it SIGTERM, waits up to 5 seconds, then sends SIGKILL (probe.py's `Instance.stop`
+semantics). Then it removes:
+
+- the automation socket and its directory
+- the temp root (data dir, fixture copy, app log)
+- `.verify-run/$INSTANCE/` (claim and binary copy)
+
+It also drops the instance from your session lease, and releases the lease with your
+last instance. It prints `{"STOPPED": {..., "still_running": false, "lease": ...}}` and
+exits 0, or exits 2 if the process survived. It kills only by the recorded pid, never by
+process name, because another owner's instance runs the same binary name. It never
+touches `.verify/`: the evidence gate reads those records after cleanup has run.
+
+`list` shows every instance claimed under the run directory, from every verifier sharing
+it, with its verifier and whether it is alive, plus the current session lease. Done means
+none of yours is listed and the lease no longer names you.

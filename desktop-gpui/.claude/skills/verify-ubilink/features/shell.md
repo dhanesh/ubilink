@@ -14,77 +14,117 @@ shell (capture, browser, settings, onboarding) depends on this working first.
 
 ## How to reach it
 
-- Global hotkeys (`src/shell/hotkeys.rs`, `bindings`): Cmd+Shift+K opens capture,
+- **Global hotkeys** (`src/shell/hotkeys.rs`, `bindings`): Cmd+Shift+K opens capture,
   Cmd+Shift+L opens the link browser, Cmd+Shift+, opens settings. Automation instances
   skip registering them (`UBILINK_SKIP_HOTKEYS=1`), so the verifier drives the same code
-  path with `trigger_hotkey {"action": "capture" | "browser" | "settings"}`, which posts
+  path with `trigger_hotkey {"action": "capture" | "browser" | "settings"}`. That posts
   the event into `shell::handle_event` exactly where a real Carbon hotkey event enters.
-- Tray menu items `capture`, `browse`, `settings`, `quit` (`src/shell/tray.rs`,
-  `command_for`) map to `Command::Open(route)`, the same command the `open_view` verb
-  executes (`open_view {"route": "browser"}`).
-- The three real hotkey registrations themselves are a maintainer's attended check
-  (probes/shell.json notes): an automation instance must never grab the user's keys.
+  The proof drives all three.
+- **Tray menu items** `capture`, `browse`, `settings` (`src/shell/tray.rs`,
+  `command_for`) map to `Command::Open(route)`. That is the same command the `open_view`
+  verb executes, and the proof drives it.
+- **Not driven here:**
+  - the tray's `quit` item: there is no automation verb for it, and Cleanup's stop
+    covers ending the process
+  - clicking the tray icon itself
+  - the three real OS hotkey registrations, which are a maintainer's attended check
+    (probes/shell.json notes), because an automation instance must never grab the
+    user's keys
 
 ## Drive it
 
-On a launched instance, after a passing doctor (SKILL.md, Launch and Doctor), from the
-repository root with the session variables set:
+On a launched instance, after a passing doctor (SKILL.md, Launch and Doctor), in `$WT`
+with the session variables set. The whole proof, side effects included, is one `call`:
 
 ```sh
-OUT="$(git rev-parse --show-toplevel)/.verify-run/$INSTANCE/captures/shell"
-python3 "$H" call --instance "$INSTANCE" --out "$OUT" \
-  'wait_state:{"shell.tray_present":true,"shell.activation_policy":"accessory","shell.hotkeys_skipped":true,"shell.hotkeys_registered":{"len":0},"window_verified":false,"route":null}' \
+OUT="$WT/.verify-run/$INSTANCE/captures/shell"
+python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
+  pasteboard:set_nonce \
+  'wait_state:{"shell.tray_present":true,"shell.activation_policy":"accessory","shell.hotkeys_skipped":true,"shell.hotkeys_registered":{"len":0},"shell.visible":false}' \
   opened \
   'trigger_hotkey:{"action":"capture"}' \
   'wait_state:{"window_verified":true,"shell.window_kind":"popup","shell.background":"blurred","shell.route":"capture","shell.visible":true}' \
   'see:{"role":"Label","text":"Capture"}' \
   'absent:{"text":"Browse links"}' \
-  a11y window_id screenshot:capture \
-  'open_view:{"route":"browser"}' \
-  'wait_state:{"window_verified":true,"shell.window_kind":"popup","shell.route":"browser"}' \
+  'step:{"winframe":"any"}' \
+  a11y screenshot:capture \
+  'step:{"call":"resign_key","expect":{"route":"capture","closed":true,"state.shell.visible":false,"state.route":null}}' \
+  'step:{"winframe":"gone"}' \
+  'trigger_hotkey:{"action":"browser"}' \
+  'wait_state:{"window_verified":true,"shell.window_kind":"popup","shell.background":"blurred","shell.route":"browser","shell.visible":true}' \
   'see:{"role":"Label","text":"Browse links"}' \
+  'step:{"winframe":"any"}' \
   screenshot:browser \
-  'open_view:{"route":"capture"}' \
-  opened
+  'step:{"activate_other":true}' \
+  'wait_state:{"shell.visible":false,"route":null}' \
+  'step:{"winframe":"gone"}' \
+  'trigger_hotkey:{"action":"settings"}' \
+  'wait_state:{"window_verified":true,"shell.window_kind":"popup","shell.route":"settings","shell.visible":true}' \
+  'step:{"winframe":"any"}' \
+  screenshot:settings \
+  'step:{"call":"resign_key","expect":{"route":"settings","closed":false,"state.shell.visible":true,"state.route":"settings"}}' \
+  'step:{"activate_other":true,"settle_ms":800}' \
+  'step:{"call":"state","expect":{"shell.visible":true,"route":"settings"}}' \
+  'step:{"winframe":"any"}' \
+  'open_view:{"route":"browser"}' \
+  'wait_state:{"window_verified":true,"shell.route":"browser","shell.visible":true}' \
+  'see:{"role":"Label","text":"Browse links"}' \
+  opened \
+  'pasteboard:{"changed":false}'
 echo "exit $?"
 ```
 
-Expected: fifteen JSON lines, each with `"ok": true`, then `exit 0`. Line 2 and the last
-line show `"result": []` for `opened`. Line 3 (`trigger_hotkey`) already reports
-`"route": "capture"`; line 4's state has `window_verified: true`, `window_kind: "popup"`,
-`background: "blurred"`, `activation_policy: "accessory"` and `data_dir` equal to the
-instance's own `data_dir` from `launch`. `window_id` is a positive number and each
-`screenshot` line names a PNG under `$OUT`. Any `"ok": false` line ends the call with
-exit 1 (the product did not do it); exit 2 is the harness (read stderr), exit 3 means
-Screen Recording is missing for the screenshots.
+Expected output: 34 JSON lines, each with `"ok": true`, then `exit 0`. The first line is
+`reset_panel`; the steps follow, numbered 2 to 34. The two `opened` lines show
+`"result": []`. Each `screenshot` line names a PNG under `$OUT`, and the last line
+reports the pasteboard's change count unchanged.
 
-Then record it (SKILL.md, Evidence) with `--feature shell`, every file in `$OUT` as an
-artifact, and the `opened` sink plus the instance-owned `data_dir` as side effects.
+- Any `"ok": false` line ends the call with exit 1: the product did not do it.
+- A line with `"outcome": "focus-stolen-retry"` means another app took focus. The
+  proof re-runs once with `"attempt": 2`, and a second theft exits 3 (ENV-BLOCKED,
+  not a product failure).
+- Exit 2 is the harness: read stderr.
+- Exit 3 can also mean Screen Recording is missing for the screenshots.
+
+Then record it (SKILL.md, Evidence) with `--worktree "$WT" --feature shell`, passing
+every file in `$OUT` as an artifact. The side effects to name are the `opened` sink, the
+unchanged pasteboard and the instance-owned `data_dir`.
 
 ## Proof
 
-- Before any panel, `state` pins the defaults (`window_verified: false`, `route: null`)
-  so the later `popup` / `blurred` / `window_verified: true` cannot be defaults: the
-  panel was really created and read back from AppKit.
-- After the hotkey path: `shell.window_kind == "popup"`, `shell.background ==
-  "blurred"`, `shell.activation_policy == "accessory"` (no Dock icon), `shell.visible`,
-  `shell.route == "capture"`, and the a11y tree shows a `Label` "Capture" and no
-  "Browse links" node; the screenshot shows that panel.
-- `open_view browser` switches the same panel's route (still verified, Label
-  "Browse links"), and back.
-- Side effects: the `opened` sink stays `[]` before and after (the shell launched
-  nothing), and `state.data_dir` is the instance's own temp `data` dir, never
-  `~/Library/Application Support`. With two instances, each reports its own `data_dir`
-  and pid (doctor `endpoint` and `isolation`).
+- **The flags are not defaults.** Before any panel, `state` shows tray present,
+  accessory policy, hotkeys skipped, none registered, and not visible. The proof starts
+  from a closed panel (`reset_panel`). So the later `popup`, `blurred` and
+  `window_verified: true` are read back from a real AppKit panel; they are not defaults.
+- **Capture (hotkey path).** The panel is a verified blurred popup on route `capture`,
+  on screen (Quartz `winframe any`). The a11y tree has a `Label` "Capture" and no
+  "Browse links". `resign_key` (the click-away observer's code) closes it: `closed:
+  true`, not visible, and its window left Quartz's on-screen list (`winframe gone`).
+- **Browser (hotkey path).** The panel is a verified blurred popup on route `browser`,
+  with Label "Browse links". A real loss of key status hides it, with its window gone.
+  That loss comes from probe.py's activator app becoming active.
+- **Settings (hotkey path).** The panel is a verified popup on route `settings`. Neither
+  `resign_key` (`closed: false`) nor a real deactivation hides it: it is still visible
+  and still on screen.
+- **Tray Open path.** `open_view browser` shows the browser route in the same verified
+  panel.
+- **Side effects.** The `opened` sink stays `[]`, so the shell launched nothing. The
+  pasteboard change count is unchanged, so the shell copied nothing. `state.data_dir` is
+  the instance's own temp `data` dir. With two instances, each reports its own
+  `data_dir` and pid (doctor's `endpoint` and `isolation` checks).
 
 ## Gotchas
 
 - Phase 0 views are stubs: the panel shows only its route's title Label ("Capture",
   "Browse links"). Phase 1 replaces them; the shell checks above must keep holding.
-- The panel hides when it loses key status, by design. If another app takes focus
-  between steps (a notification, a concurrent GUI probe), `wait_state` on `visible`
-  fails. Keep a whole proof inside one `call` (one desktop-lock hold) and re-run it
-  once if the frontmost app changed; a second failure is a finding.
+- The capture and browser panels hide when they lose key status, by design. The
+  harness re-runs the whole proof once from a closed panel if another app took focus
+  during a visibility step, and exits 3 (ENV-BLOCKED) if focus is taken again. A
+  failure with no focus theft is exit 1, a product failure.
+- On this Phase 0 build, `a11y` on the settings panel answers "no accessibility frame
+  ... active=false": the panel stays open without becoming the active window. That is
+  why the settings part of the proof uses `state`, Quartz `winframe` and a screenshot,
+  not `see`. Phase 1's settings view (U4) must make it readable.
 - `trigger_hotkey` with `UBILINK_SKIP_HOTKEYS=1` drives the hotkey handler, not the OS
   registration: `hotkeys_registered` is `[]` on purpose.
 - `display_id` and the panel's position depend on the cursor's display; assert the
