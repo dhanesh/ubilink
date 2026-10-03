@@ -37,7 +37,7 @@ one representative query.
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
 # Final review C1: R5 ([after: R4]) lands `link-browser-filter`, so at task R4's head
 # only `link-browser` can pass; every other head (TASK empty included) needs both.
-case "$TASK" in R4) SCENARIOS="link-browser" ;; *) SCENARIOS="link-browser link-browser-filter" ;; esac
+case "$TASK" in R4|T4) SCENARIOS="link-browser" ;; *) SCENARIOS="link-browser link-browser-filter" ;; esac
 for name in $SCENARIOS; do
   python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
   echo "$name exit $?"

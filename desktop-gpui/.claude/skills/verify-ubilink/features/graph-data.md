@@ -31,7 +31,7 @@ confirmation before Reset), both run through the harness's `scenario` command.
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
 # Final review C1: R12 ([after: R11]) lands `graph-reset`, so at task R11's head
 # only `graph-roundtrip` can pass; every other head (TASK empty included) needs both.
-case "$TASK" in R11) SCENARIOS="graph-roundtrip" ;; *) SCENARIOS="graph-roundtrip graph-reset" ;; esac
+case "$TASK" in R11|T11) SCENARIOS="graph-roundtrip" ;; *) SCENARIOS="graph-roundtrip graph-reset" ;; esac
 for name in $SCENARIOS; do
   python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
   echo "$name exit $?"

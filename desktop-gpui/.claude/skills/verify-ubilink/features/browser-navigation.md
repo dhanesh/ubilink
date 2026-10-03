@@ -37,7 +37,7 @@ scenario makes, not a hand-picked subset.
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
 # Final review C1: R7 ([after: R6]) lands `browser-drill`, so at task R6's head
 # only `browser-select` can pass; every other head (TASK empty included) needs both.
-case "$TASK" in R6) SCENARIOS="browser-select" ;; *) SCENARIOS="browser-select browser-drill" ;; esac
+case "$TASK" in R6|T6) SCENARIOS="browser-select" ;; *) SCENARIOS="browser-select browser-drill" ;; esac
 for name in $SCENARIOS; do
   python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
   echo "$name exit $?"

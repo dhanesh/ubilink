@@ -48,7 +48,7 @@ WT="${SKILL%/desktop-gpui/.claude/skills/verify-ubilink}"
 cd "$WT"
 H="$SKILL/scripts/ubilink_instance.py"
 VERIFIER=your-verifier-id
-TASK=R0   # the task id your brief names (e.g. R4); "" when working alone
+TASK=R0   # the task id your brief names; factory-conductor passes T-ids (e.g. T4), R-ids (e.g. R4) are also accepted for humans; "" when working alone
 INSTANCE="$(python3 "$H" name --verifier "$VERIFIER" a)"
 INSTANCE_B="$(python3 "$H" name --verifier "$VERIFIER" b)"
 ```
