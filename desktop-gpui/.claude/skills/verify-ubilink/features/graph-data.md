@@ -2,7 +2,7 @@
 
 - id: graph-data
 - proven: no
-- anchors: src/views/settings.rs:SettingsView, probes/graph-roundtrip.json, probes/graph-reset.json, probes/fixtures/graph-backlinks.json, probes/fixtures/graph-empty.json
+- anchors: probes/graph-roundtrip.json, probes/graph-reset.json, probes/fixtures/graph-backlinks.json, probes/fixtures/graph-empty.json
 - constraints: linking-manifesto-app:T2
 
 ## What it is

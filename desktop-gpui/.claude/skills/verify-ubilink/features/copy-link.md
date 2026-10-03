@@ -2,7 +2,7 @@
 
 - id: copy-link
 - proven: no
-- anchors: src/views/capture.rs:CaptureView, probes/copy-link.json, probes/fixtures/capture-ok.json
+- anchors: probes/copy-link.json, probes/fixtures/capture-ok.json
 - constraints: linking-manifesto-app:U2
 
 ## What it is

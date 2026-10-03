@@ -2,7 +2,7 @@
 
 - id: browser-navigation
 - proven: no
-- anchors: src/views/browser.rs:BrowserView, probes/browser-select.json, probes/browser-drill.json, probes/fixtures/graph-backlinks.json
+- anchors: probes/browser-select.json, probes/browser-drill.json, probes/fixtures/graph-backlinks.json
 - constraints: linking-manifesto-app:U4
 
 ## What it is

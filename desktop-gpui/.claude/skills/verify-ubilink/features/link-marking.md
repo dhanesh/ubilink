@@ -2,7 +2,7 @@
 
 - id: link-marking
 - proven: no
-- anchors: src/views/browser.rs:BrowserView, probes/link-marking.json, probes/fixtures/graph-backlinks.json
+- anchors: probes/link-marking.json, probes/fixtures/graph-backlinks.json
 - constraints: linking-manifesto-app:T2
 
 ## What it is

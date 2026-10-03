@@ -2,7 +2,7 @@
 
 - id: theming
 - proven: no
-- anchors: src/views/capture.rs, src/views/browser.rs, src/views/onboarding.rs, src/views/settings.rs, src/theme/mod.rs:sync, src/theme/convert.rs:light_theme_config, src/theme/convert.rs:dark_theme_config, probes/theming.json
+- anchors: src/theme/mod.rs:sync, src/theme/convert.rs:light_theme_config, src/theme/convert.rs:dark_theme_config, probes/theming.json
 
 ## What it is
 

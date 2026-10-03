@@ -5,6 +5,17 @@ anchors (paths relative to `desktop-gpui/`), how to reach it, the exact drive, a
 proves it. A diff touching an anchor makes that feature *touched*, and a touched feature
 needs fresh evidence on the new head.
 
+Anchoring rule (final review C1). The conductor (`touched_features`) strips `:Symbol`
+and matches anchors by FILE, and every touched feature needs a passing record. So a
+file one Phase 1 task edits may anchor only features that task can already prove:
+each view file anchors only the FIRST feature of its chain (`views/capture.rs` →
+capture-view, `views/browser.rs` → link-browser, `views/onboarding.rs` → onboarding,
+`views/settings.rs` → settings-adapters). The later features on the same file
+(copy-link, backlinks, browser-navigation, link-marking, graph-data, launch-at-login),
+theming and resource-budget anchor only files no Phase 1 task edits (their scenario
+JSON, fixtures, `theme/`, `login_item.rs`, `automation/store.rs`); each Phase 1 task's
+`[feature:]` tag declares its own feature, so it is still on the gate where it lands.
+
 - [shell](shell.md) — the menu-bar app opens its blurred pop-up panel from a hotkey or the tray and switches views in place
 - [capture-view](capture-view.md) — the capture view shows what you just copied, render-first, including what to do when it fails
 - [copy-link](copy-link.md) — Enter or Cmd-C on a captured link copies it in at most two actions from the hotkey

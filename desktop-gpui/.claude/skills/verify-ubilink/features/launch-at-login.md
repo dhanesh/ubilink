@@ -2,7 +2,7 @@
 
 - id: launch-at-login
 - proven: no
-- anchors: src/views/settings.rs:SettingsView, src/login_item.rs:Status, src/login_item.rs:Report, src/login_item.rs:status, src/login_item.rs:register, src/login_item.rs:unregister, probes/launch-at-login.json, probes/fixtures/login-item-enabled.json, probes/fixtures/login-item-requires-approval.json, probes/fixtures/login-item-not-found.json
+- anchors: src/login_item.rs:Status, src/login_item.rs:Report, src/login_item.rs:status, src/login_item.rs:register, src/login_item.rs:unregister, probes/launch-at-login.json, probes/fixtures/login-item-enabled.json, probes/fixtures/login-item-requires-approval.json, probes/fixtures/login-item-not-found.json
 
 ## What it is
 
