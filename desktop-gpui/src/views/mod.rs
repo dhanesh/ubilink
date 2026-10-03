@@ -86,11 +86,10 @@ pub struct RouteEntry {
     /// for instead of matching on `Route` itself.
     pub build: fn(&mut App) -> AnyView,
     /// The view-state Task 6's automation `state` verb serialises for this route.
-    /// `desktop-gpui` is a `[[bin]]`-only crate, so rustc's dead-code analysis treats
-    /// this field (and `state_for`/`ViewState::to_json` below) as unreachable until
-    /// Task 6 actually calls it — the same situation `theme/tokens.rs` documents for
-    /// its own ahead-of-use constants.
-    #[allow(dead_code)]
+    /// Only that verb reads it (and `state_for`/`ViewState::to_json` below), so in a
+    /// release build — which has no automation module (S1) — rustc's dead-code
+    /// analysis rightly sees no reader; the allow is scoped to that build.
+    #[cfg_attr(not(feature = "automation"), allow(dead_code))]
     pub state: fn() -> ViewState,
 }
 
@@ -140,7 +139,7 @@ pub fn build_for(route: Route, cx: &mut App) -> AnyView {
 }
 
 /// `route`'s current view-state, for Task 6's automation `state` verb.
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "automation"), allow(dead_code))]
 pub fn state_for(route: Route) -> ViewState {
     (entry_for(route).state)()
 }
@@ -158,7 +157,7 @@ pub enum ViewState {
 
 impl ViewState {
     /// Serialise to the JSON Task 6's `state` verb returns for the live route.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "automation"), allow(dead_code))]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).expect("every stub view-state serialises to JSON")
     }

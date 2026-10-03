@@ -1,6 +1,6 @@
 //! The browser stub (Phase 0 R13). Phase 1 O2 ports this into the real link-browser
-//! view; until then it renders only its title, through a normal GPUI text element (see
-//! `capture.rs`'s doc comment for why that matters for accessibility). No business
+//! view; until then it renders only its title, through GPUI's accessible `text!`
+//! element (see `capture.rs`'s doc comment for why that matters for accessibility). No business
 //! logic: this file is the only one its Phase 1 agent touches.
 
 use gpui_kit::component::ActiveTheme;
@@ -48,7 +48,7 @@ impl Render for BrowserView {
                 div()
                     .text_size(font_size::TITLE)
                     .text_color(theme.foreground)
-                    .child(Route::Browser.title()),
+                    .child(text!(Route::Browser.title())),
             )
     }
 }

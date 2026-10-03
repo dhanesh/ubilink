@@ -1,7 +1,8 @@
 //! The onboarding stub (Phase 0 R13). Phase 1 O2 ports this into the real first-run
-//! flow; until then it renders only its title, through a normal GPUI text element (see
-//! `capture.rs`'s doc comment for why that matters for accessibility). No business
-//! logic: this file is the only one its Phase 1 agent touches.
+//! flow; until then it renders only its title,
+//! through GPUI's accessible `text!` element (see `capture.rs`'s doc comment for why
+//! that matters for accessibility). No business logic: this file is the only one its
+//! Phase 1 agent touches.
 //!
 //! Nothing in the shell opens this route yet (shell/mod.rs's doc comment on `Route`);
 //! it is registered here ahead of that so Phase 1's first-run flow has a router row to
@@ -52,7 +53,7 @@ impl Render for OnboardingView {
                 div()
                     .text_size(font_size::TITLE)
                     .text_color(theme.foreground)
-                    .child(Route::Onboarding.title()),
+                    .child(text!(Route::Onboarding.title())),
             )
     }
 }

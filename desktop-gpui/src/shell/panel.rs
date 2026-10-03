@@ -68,12 +68,7 @@ impl PanelView {
         // now lives in the router table (views::TABLE), not here.
         let activation = cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active();
-            if this.was_active && !active && this.route.hides_on_deactivate() {
-                let id = window.window_handle().window_id();
-                window.remove_window();
-                super::panel_closed(id, cx);
-            }
-            this.was_active = active;
+            this.activation_changed(active, window, cx);
         });
         let child = views::build_for(route, cx);
         PanelView {
@@ -82,6 +77,36 @@ impl PanelView {
             was_active: window.is_window_active(),
             _activation: activation,
         }
+    }
+
+    /// The click-away rule, run on every key-status change. Returns whether it closed
+    /// the panel.
+    fn activation_changed(
+        &mut self,
+        active: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let close = self.was_active && !active && self.route.hides_on_deactivate();
+        if close {
+            let id = window.window_handle().window_id();
+            window.remove_window();
+            super::panel_closed(id, cx);
+        }
+        self.was_active = active;
+        close
+    }
+
+    /// Automation `resign_key` (R6): the panel loses key status, through the same
+    /// `activation_changed` the window-activation observer calls — no AppKit focus
+    /// change, so it works headless of the user's focus and needs no Accessibility
+    /// grant. It simulates a key → not-key transition, so the panel counts as having
+    /// been key first (the guard that ignores an inactive report before the first key
+    /// status is for real AppKit ordering, not for this).
+    #[cfg(feature = "automation")]
+    pub fn simulate_resign_key(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.was_active = true;
+        self.activation_changed(false, window, cx)
     }
 
     pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {

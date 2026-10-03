@@ -10,6 +10,8 @@ adds tasks instead of growing this one into a monolith.
 
 Usage:
     python3 scripts/probe.py toolchain --expect 1.98
+    python3 scripts/probe.py deps-clean app/Cargo.toml
+    python3 scripts/probe.py release-clean
 """
 
 import argparse
@@ -163,6 +165,125 @@ def cmd_deps_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+# Byte strings that only desktop-gpui's `automation` module puts in a binary (spec S1,
+# TN1): its socket file name, a marker constant it prints at startup, and the verb
+# names no other code in the tree uses. Generic verbs ("state", "key", "a11y",
+# "opened", "metrics", "window_id") are left out on purpose — those words occur in
+# GPUI and its dependencies too, so they would make the release check fail for
+# reasons that have nothing to do with the automation channel.
+_AUTOMATION_TOKENS = (
+    "auto.sock",
+    "UBILINK_AUTOMATION_MARKER",
+    "open_view",
+    "trigger_hotkey",
+    "resign_key",
+    "set_appearance",
+    "load_fixture",
+)
+
+_GPUI_MANIFEST = REPO_ROOT / "desktop-gpui" / "Cargo.toml"
+_GPUI_RELEASE_BIN = REPO_ROOT / "desktop-gpui" / "target" / "release" / "ubilink-next"
+
+
+def _cargo_release_build(features):
+    cmd = ["cargo", "build", "--locked", "--release", "--manifest-path", str(_GPUI_MANIFEST)]
+    if features:
+        cmd += ["--features", features]
+    print(f"probe: {' '.join(cmd)}", flush=True)
+    try:
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, check=False)
+    except FileNotFoundError:
+        return "cargo not found on PATH"
+    if proc.returncode != 0:
+        return f"`{' '.join(cmd)}` exited {proc.returncode}"
+    if not _GPUI_RELEASE_BIN.is_file():
+        return f"build succeeded but {_GPUI_RELEASE_BIN} is missing"
+    return None
+
+
+def _tokens_in_binary(path: Path):
+    """Return the automation tokens `strings -a` finds in `path`, or an error string."""
+    try:
+        proc = subprocess.run(["strings", "-a", str(path)], capture_output=True, check=False)
+    except FileNotFoundError:
+        return "`strings` not found on PATH (install the Xcode command line tools)"
+    if proc.returncode != 0:
+        return f"`strings` exited {proc.returncode} on {path}"
+    out = proc.stdout
+    return [t for t in _AUTOMATION_TOKENS if t.encode() in out]
+
+
+def cmd_release_clean(args: argparse.Namespace) -> int:
+    """Prove the release binary has no automation surface, and that the check bites.
+
+    S1/TN1 (GPUI Phase 0 R6): the automation channel is compiled only with the
+    `automation` feature. A `#[cfg]` in the source is a claim; the shipped binary is
+    the fact. So: build the release binary exactly as shipped (no features) and fail
+    if `strings` finds the socket name, the marker or an automation-only verb name.
+    Then build the same profile WITH the feature and require the marker and socket
+    name to be found — otherwise a check that can never find anything would pass.
+    The automation build overwrites target/release/ubilink-next, so the plain build is
+    re-run last (a no-op relink from cache) to leave the shipped binary in place.
+    """
+    failures = []
+
+    err = _cargo_release_build(None)
+    if err:
+        print(f"FAIL: release-clean — release build: {err}")
+        return 1
+    found = _tokens_in_binary(_GPUI_RELEASE_BIN)
+    if isinstance(found, str):
+        print(f"FAIL: release-clean — {found}")
+        return 1
+    if found:
+        failures.append(f"release binary contains automation token(s): {', '.join(found)}")
+    else:
+        print(f"probe: release binary clean of {len(_AUTOMATION_TOKENS)} automation tokens")
+
+    if not args.skip_bite_check:
+        err = _cargo_release_build("automation")
+        if err:
+            print(f"FAIL: release-clean — automation build: {err}")
+            return 1
+        found_auto = _tokens_in_binary(_GPUI_RELEASE_BIN)
+        if isinstance(found_auto, str):
+            print(f"FAIL: release-clean — {found_auto}")
+            return 1
+        # Every token must be visible in the automation build, or its absence from the
+        # release build proves nothing (desktop-gpui logs its verb list at startup
+        # for exactly this reason: LLVM turns short string matches into integer
+        # compares, which leave no string behind).
+        missing = [t for t in _AUTOMATION_TOKENS if t not in found_auto]
+        if missing:
+            failures.append(
+                "the check does not bite: an --features automation build lacks "
+                + ", ".join(missing)
+            )
+        else:
+            print(
+                "probe: automation build contains "
+                f"{len(found_auto)}/{len(_AUTOMATION_TOKENS)} tokens ({', '.join(found_auto)})"
+            )
+        # Leave the shipped (feature-less) binary in target/release.
+        err = _cargo_release_build(None)
+        if err:
+            failures.append(f"rebuilding the release binary afterwards: {err}")
+        else:
+            again = _tokens_in_binary(_GPUI_RELEASE_BIN)
+            if again:
+                failures.append(
+                    f"target/release/ubilink-next after the rebuild still carries: {again}"
+                )
+
+    if failures:
+        print(f"FAIL: release-clean — {len(failures)} issue(s):")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+    print("PASS: release-clean — release binary has no automation socket, marker or verb names")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="probe.py",
@@ -197,6 +318,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the Cargo.toml to check, e.g. app/Cargo.toml.",
     )
     p_deps_clean.set_defaults(func=cmd_deps_clean)
+
+    # ── release-clean ──────────────────────────────────────────────────
+    p_release_clean = subparsers.add_parser(
+        "release-clean",
+        help="Fail if the desktop-gpui release binary contains the automation socket, marker or verbs.",
+    )
+    p_release_clean.add_argument(
+        "--skip-bite-check",
+        action="store_true",
+        help="Skip the --features automation build that proves the check can find the marker.",
+    )
+    p_release_clean.set_defaults(func=cmd_release_clean)
 
     return parser
 

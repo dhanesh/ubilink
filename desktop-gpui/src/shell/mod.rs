@@ -6,8 +6,9 @@
 //! Threads and the event loop (TN4): GPUI owns the main thread's NSApp loop. tray-icon
 //! and global-hotkey are created on that thread inside `Application::run` (by `start`)
 //! and live in the `Shell` global for the app's lifetime. Their event handlers (set in
-//! `start`), plus the single-instance listener thread (the only other thread), post
-//! `ShellEvent`s to one `Inbox`: an mpsc channel and a `wake::Signal`. A GPUI foreground
+//! `start`), plus the single-instance listener thread (and, in `automation` builds only,
+//! the automation socket's threads — R6, see src/automation/), post `ShellEvent`s to
+//! one `Inbox`: an mpsc channel and a `wake::Signal`. A GPUI foreground
 //! task awaits the signal and then drains the channel (`pump`). Nothing runs while
 //! idle: no timer and no poll (Phase 1 O1 idle-CPU budget). Spec D5's fallback (an objc2 NSStatusItem
 //! and a Carbon RegisterEventHotKey shim) was not needed: both crates work in GPUI's
@@ -48,6 +49,10 @@ pub enum ShellEvent {
     Menu(String),
     /// A second instance (single-instance socket) asked for the panel.
     Show,
+    /// R6: a request from the automation socket, run on the main thread by the pump.
+    /// The variant exists only in `automation` builds (S1).
+    #[cfg(feature = "automation")]
+    Automation(crate::automation::Call),
 }
 
 /// The sending side of the shell's event channel: post an event, then wake the pump.
@@ -193,20 +198,52 @@ fn log_state(cx: &mut App) {
     }
 }
 
-/// Drain every event channel, then act. Commands are collected first so no global
+/// Drain every event channel, then act. Events are collected first so no global
 /// borrow is held while windows open or close.
 fn pump(cx: &mut App) {
     let Some(shell) = cx.try_global::<Shell>() else {
         return;
     };
-    let cmds: Vec<Command> = shell
-        .events
-        .try_iter()
-        .filter_map(|e| command_for(&e, &shell.hotkey_routes))
-        .collect();
-    for c in cmds {
+    let events: Vec<ShellEvent> = shell.events.try_iter().collect();
+    for e in events {
+        handle_event(e, cx);
+    }
+}
+
+/// Act on one event: the pump's per-event step, and the path the automation
+/// `trigger_hotkey` verb enters so it runs exactly what a real hotkey runs (R6).
+pub fn handle_event(event: ShellEvent, cx: &mut App) {
+    #[cfg(feature = "automation")]
+    if let ShellEvent::Automation(call) = event {
+        crate::automation::handle(call, cx);
+        return;
+    }
+    let Some(shell) = cx.try_global::<Shell>() else {
+        return;
+    };
+    if let Some(c) = command_for(&event, &shell.hotkey_routes) {
         execute(c, cx);
     }
+}
+
+/// The open panel's window, root view and route, for the automation verbs that act on
+/// it (key, resign_key, a11y, state).
+#[cfg(feature = "automation")]
+pub fn panel(cx: &App) -> Option<(AnyWindowHandle, Entity<panel::PanelView>, Route)> {
+    let p = cx.try_global::<Shell>()?.panel.as_ref()?;
+    Some((p.handle, p.view.clone(), p.route))
+}
+
+/// The global-hotkey id bound to `route`. Known even under `UBILINK_SKIP_HOTKEYS`
+/// (ids are computed from the bindings, not from registration), so `trigger_hotkey`
+/// works in an automation instance that never grabbed the user's chords (O4).
+#[cfg(feature = "automation")]
+pub fn hotkey_id_for(route: Route, cx: &App) -> Option<u32> {
+    cx.try_global::<Shell>()?
+        .hotkey_routes
+        .iter()
+        .find(|(_, r)| *r == route)
+        .map(|(id, _)| *id)
 }
 
 /// Pure: what an event asks for. Only hotkey presses act (a release would toggle the
@@ -220,6 +257,8 @@ fn command_for(event: &ShellEvent, hotkey_routes: &[(u32, Route)]) -> Option<Com
         ShellEvent::HotKey { pressed: false, .. } => None,
         ShellEvent::Menu(id) => tray::command_for(id),
         ShellEvent::Show => Some(Command::Open(Route::Capture)),
+        #[cfg(feature = "automation")]
+        ShellEvent::Automation(_) => None,
     }
 }
 

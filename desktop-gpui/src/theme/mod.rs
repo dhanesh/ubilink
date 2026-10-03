@@ -80,6 +80,13 @@ pub fn install(cx: &mut App) {
         theme.dark_theme = Rc::new(dark_theme_config());
     });
 
+    sync(cx);
+}
+
+/// Apply the light or dark theme matching the app's current appearance. Split out of
+/// `install` so the automation `set_appearance system` verb (R6) re-syncs through the
+/// same code after dropping its override.
+pub fn sync(cx: &mut App) {
     let mode = ThemeMode::from(cx.window_appearance());
     Theme::change(mode, None, cx);
 }

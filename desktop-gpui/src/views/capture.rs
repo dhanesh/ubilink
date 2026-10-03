@@ -4,6 +4,12 @@
 //! for an accessibility tree to find) — so Phase 1's accessibility proofs have real
 //! text here to anchor on. No business logic: this file is the only one its Phase 1
 //! agent touches.
+//!
+//! The title goes through GPUI's `text!` macro, not a bare `&str`: in gpui-pre 0.3.7 a
+//! `&str` child has no id and no accessibility role, so it never reaches the AccessKit
+//! tree. Task 6's `a11y` verb showed this live — the tree held only the Window node
+//! until the title became `text!` (a `Label` node whose value is the title). Phase 1
+//! views need the same for any text a proof reads (spec D6).
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
@@ -50,7 +56,7 @@ impl Render for CaptureView {
                 div()
                     .text_size(font_size::TITLE)
                     .text_color(theme.foreground)
-                    .child(Route::Capture.title()),
+                    .child(text!(Route::Capture.title())),
             )
     }
 }

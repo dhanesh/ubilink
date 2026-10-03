@@ -11,7 +11,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, NSObjectProtocol};
 use objc2::{msg_send, MainThreadMarker};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSEvent, NSScreen, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSScreen, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::NSString;
 
@@ -87,23 +87,79 @@ pub struct PanelFacts {
     pub blurred: bool,
 }
 
-/// Inspect the app's visible GPUI panel window, if any. The shell only ever has one
-/// panel, so the first visible NSPanel is it.
-pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
+/// The app's visible GPUI panel window, if any. The shell has one panel at a time,
+/// but GPUI closes a removed window's NSWindow on a later run-loop turn, so for a
+/// moment after a hide or route reopen the old panel is still visible beside the new
+/// one (Task 6 saw this live: `window_id` right after `resign_key` found the closing
+/// panel). NSApp lists windows oldest first, so the newest visible NSPanel is the
+/// current one; callers that need "is a panel open at all" ask the shell first.
+fn visible_panel(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     let panel_class = AnyClass::get(c"NSPanel")?;
-    let effect_class = AnyClass::get(c"NSVisualEffectView")?;
     let windows = NSApplication::sharedApplication(mtm).windows();
     (0..windows.count())
+        .rev()
         .map(|i| windows.objectAtIndex(i))
         .find(|w| w.isVisible() && w.isKindOfClass(panel_class))
-        .map(|w| {
-            let popup = w.level() == POPUP_WINDOW_LEVEL
-                && w.styleMask()
-                    .contains(NSWindowStyleMask::NonactivatingPanel);
-            let blurred = w.contentView().is_some_and(|v| {
-                let subs = v.subviews();
-                (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(effect_class))
-            });
-            PanelFacts { popup, blurred }
-        })
+}
+
+/// Inspect the app's visible GPUI panel window, if any.
+pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
+    let effect_class = AnyClass::get(c"NSVisualEffectView")?;
+    visible_panel(mtm).map(|w| {
+        let popup = w.level() == POPUP_WINDOW_LEVEL
+            && w.styleMask()
+                .contains(NSWindowStyleMask::NonactivatingPanel);
+        let blurred = w.contentView().is_some_and(|v| {
+            let subs = v.subviews();
+            (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(effect_class))
+        });
+        PanelFacts { popup, blurred }
+    })
+}
+
+/// Automation `window_id` (R6): the panel's CGWindowID (`windowNumber`), what
+/// `screencapture -l` takes.
+#[cfg(feature = "automation")]
+pub fn panel_window_number(mtm: MainThreadMarker) -> Option<u32> {
+    let n = visible_panel(mtm)?.windowNumber();
+    u32::try_from(n).ok().filter(|n| *n > 0)
+}
+
+/// Automation `a11y` (D6, TN5): ask the panel's content view for its accessibility
+/// children, as an assistive client would. GPUI installed accesskit_macos's
+/// subclassing adapter on exactly this view (`SubclassingAdapter::for_window` takes the
+/// window's contentView), and its `accessibilityChildren` override is what activates
+/// the adapter and GPUI's tree. Returns whether there was a view to ask.
+#[cfg(feature = "automation")]
+pub fn poke_accessibility(mtm: MainThreadMarker) -> bool {
+    let Some(view) = visible_panel(mtm).and_then(|w| w.contentView()) else {
+        return false;
+    };
+    // SAFETY: accessibilityChildren is NSAccessibility API on every NSView, takes no
+    // arguments and returns nil or an autoreleased NSArray, which `Retained` balances.
+    let _children: Option<Retained<AnyObject>> =
+        unsafe { msg_send![&*view, accessibilityChildren] };
+    true
+}
+
+/// Automation `set_appearance` (R6): set NSApp's appearance by name
+/// ("NSAppearanceNameAqua", "NSAppearanceNameDarkAqua"), or clear it (`None`) to
+/// follow the system again. Raw messages for the same reason as `screen_number`: the
+/// typed API needs objc2-app-kit's NSAppearance feature, which Cargo.toml does not
+/// enable.
+#[cfg(feature = "automation")]
+pub fn set_app_appearance(mtm: MainThreadMarker, name: Option<&str>) {
+    let app = NSApplication::sharedApplication(mtm);
+    let appearance: Option<Retained<AnyObject>> = name.and_then(|n| {
+        let class = AnyClass::get(c"NSAppearance")?;
+        let n = NSString::from_str(n);
+        // SAFETY: +[NSAppearance appearanceNamed:] takes an NSString and returns nil
+        // or an autoreleased NSAppearance.
+        unsafe { msg_send![class, appearanceNamed: &*n] }
+    });
+    // SAFETY: -[NSApplication setAppearance:] takes nil or an NSAppearance, on the
+    // main thread (proven by `mtm`).
+    unsafe {
+        let _: () = msg_send![&*app, setAppearance: appearance.as_deref()];
+    }
 }
