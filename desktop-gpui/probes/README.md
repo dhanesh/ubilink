@@ -93,7 +93,7 @@ in the `opened` sink. File dialogs take fixture paths (`load_fixture`).
   before launch, the same way the `seed_graph` step does (below).
 - `setup.fixtures` sends `load_fixture {kind, path}` after launch. Relative paths
   resolve against the instance's fixture copy. The kinds are `capture`,
-  `permission`, `graph_dir`, `export_path` and `import_path`
+  `permission`, `graph_dir`, `export_path`, `import_path` and `login_item`
   (`desktop-gpui/src/automation/protocol.rs`).
 - Unknown top-level keys, unknown step types and unknown step options are
   **scenario errors** (exit 2). A typo can never make a step pass.
@@ -362,9 +362,9 @@ a `text!` element (role `Label`).
   the selected URI through the core opener, End shows the last row. Right drills into
   the selected link's connections (`links_of`, by name); Left returns with the
   previous selection. A Label reads `Your links` at the top level and
-  `Linked to <names joined by " › ">` when drilled. Cmd-L marks the selected link and,
-  on a second link, links the two (plain L types into the filter, as in Tauri); a
-  Label then reads `Linked “<A name>” ↔ “<B name>”`.
+  `Linked to <names joined by " › ">` when drilled. ⌘L (key `cmd-l`; spec R8, ruling
+  R-n) marks the selected link and, on a second link, links the two (plain L types
+  into the filter, as in Tauri); a Label then reads `Linked “<A name>” ↔ “<B name>”`.
 - **Onboarding (R9).** One `ListItem` per missing permission (`Accessibility`,
   `Automation`), each subtree naming the permission and a status Label `Not granted`
   or exactly `Granted`; rows stay listed when granted. Each row has a Button whose
@@ -382,8 +382,29 @@ a `text!` element (role `Label`).
   `Delete all captured links and connections?` with Buttons `Delete everything` and
   `Cancel` (no Dialog role is asserted: A11Y-NOTES.md). A `Switch` named
   `Launch at login` plus a status Label whose text is exactly one of `Enabled`,
-  `Requires approval`, `Not registered`, `Not found` (`SMAppService.mainApp.status`);
-  with `Requires approval`, a Label explaining it that contains `Login Items`.
+  `Requires approval`, `Not registered`, `Not found` (`login_item::Status::label`);
+  with requires-approval or not-found, a Label with the report's `explanation`
+  verbatim. The switch is on for Enabled and Requires approval, off otherwise. See the
+  launch-at-login seam below.
+
+### Launch-at-login seam (R13, spec D6, ruling R-o)
+
+Probes never register a real login item (O4), so the settings view must route every
+SMAppService call through `desktop-gpui/src/login_item.rs` (Phase 0 code, all builds):
+
+| Call | Returns | The view must |
+|---|---|---|
+| `login_item::status()` | `Option<Result<Report, String>>` | call it each time settings is shown; `Some(Ok(r))` → show `r.status.label()` (and `r.explanation`); `Some(Err(e))` → show `e` (U3); `None` → read `SMAppService.mainApp.status` itself |
+| `login_item::register()` | same | call it when the switch is turned on, show the result; `None` → `SMAppService.mainApp.register()` |
+| `login_item::unregister()` | same | call it when the switch is turned off, show the result; `None` → `SMAppService.mainApp.unregister()` |
+
+`Some(..)` happens only in an automation build with a `login_item` fixture loaded; a
+release build always gets `None`. The seam treats the fixture file
+(`login-item-*.json`, fixtures/README.md) as the instance's login-item store: register
+sets `status` to the file's `on_register`, unregister to `not_registered`, and both
+append their name to `calls`, which the scenario reads back with `file` steps. The
+view must not cache the status across shows or call SMAppService when the seam
+answers.
 - **Every view (R14).** Colours follow `set_appearance` live, without a new window or
   process. Expected samples (ΔE ≤ 3): light surface `#fafafc`, text `#1e1e1e`
   (text1 over that surface), accent `#007aff`; dark surface `#1c1c1e`, text `#f6f6f6`,
