@@ -4,7 +4,7 @@
 # lint fails CI after passing locally (exactly what bit us: local 1.92 vs CI 1.96).
 # Bump deliberately, and keep .github/workflows/ci.yml's toolchain input in sync.
 [toolchain]
-channel = "1.92.0"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]
 # Both macOS architectures, for the universal release build (scripts/bundle-macos.sh).
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
