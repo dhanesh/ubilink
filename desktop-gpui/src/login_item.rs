@@ -6,10 +6,12 @@
 //! register and unregister asks this seam first, the same way file sources ask
 //! [`crate::fixtures::path`]:
 //!
-//! - [`status`], [`register`] and [`unregister`] return `Some(..)` only in an
-//!   `automation` build with a `login_item` fixture loaded. The view then shows that
-//!   result and must not touch `SMAppService`.
-//! - `None` (always, in a release build) means "no seam": the view calls
+//! - [`status`], [`register`] and [`unregister`] return `Some(..)` in every
+//!   `automation` build: the fixture's result when a `login_item` fixture is loaded,
+//!   else `Some(Err(..))` saying none is (final review I9: falling through to the
+//!   real `SMAppService` there would let a probe touch the host's login items, O4).
+//!   The view then shows that result and must not touch `SMAppService`.
+//! - `None` (always, and only, in a release build) means "no seam": the view calls
 //!   `SMAppService.mainApp` itself (Phase 1's job; this module never does).
 //!
 //! The fixture file is this instance's login-item store: a register or unregister
@@ -104,10 +106,28 @@ enum Op {
     Unregister,
 }
 
+/// The error an automation build reports when no `login_item` fixture is loaded.
+#[cfg(any(feature = "automation", test))]
+pub const NO_FIXTURE: &str = "no login_item fixture loaded";
+
+/// Final review I9 (O4): an automation build never falls through to the real
+/// `SMAppService`. Without a fixture it answers with an error the view shows (U3),
+/// so a probe that forgot `load_fixture` sees a visible failure, not a real login
+/// item registered on the host.
 #[cfg(feature = "automation")]
 fn seam(op: Op) -> Option<Result<Report, String>> {
-    let path = crate::fixtures::path(crate::fixtures::Fixture::LoginItem)?;
-    Some(run_on_file(&path, op))
+    Some(seam_with(
+        crate::fixtures::path(crate::fixtures::Fixture::LoginItem),
+        op,
+    ))
+}
+
+#[cfg(feature = "automation")]
+fn seam_with(fixture: Option<std::path::PathBuf>, op: Op) -> Result<Report, String> {
+    match fixture {
+        Some(path) => run_on_file(&path, op),
+        None => Err(NO_FIXTURE.into()),
+    }
 }
 
 #[cfg(not(feature = "automation"))]
@@ -215,6 +235,20 @@ mod tests {
         assert_eq!(Status::NotFound.label(), "Not found");
         assert!(Status::Enabled.is_on() && Status::RequiresApproval.is_on());
         assert!(!Status::NotFound.is_on() && !Status::NotRegistered.is_on());
+    }
+
+    /// I9: with no fixture loaded an automation build answers every call with an
+    /// error, never `None` (which would send the view to the real SMAppService).
+    #[cfg(feature = "automation")]
+    #[test]
+    fn automation_builds_without_a_fixture_fail_closed() {
+        for op in [Op::Status, Op::Register, Op::Unregister] {
+            assert_eq!(seam_with(None, op), Err(NO_FIXTURE.to_string()));
+        }
+        // Through the public calls too: this test binary loads no fixture.
+        assert_eq!(status(), Some(Err(NO_FIXTURE.to_string())));
+        assert_eq!(register(), Some(Err(NO_FIXTURE.to_string())));
+        assert_eq!(unregister(), Some(Err(NO_FIXTURE.to_string())));
     }
 
     #[cfg(not(feature = "automation"))]

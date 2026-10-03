@@ -12,6 +12,7 @@
 // R6/S1: the automation channel exists only in `automation` builds; gating the module
 // declaration itself keeps every byte of it out of a release binary (TN1, checked by
 // `scripts/probe.py release-clean`).
+mod app_state;
 #[cfg(feature = "automation")]
 mod automation;
 mod fixtures;
@@ -59,6 +60,10 @@ fn main() {
     // requests queue in the inbox until the pump starts.
     #[cfg(feature = "automation")]
     automation::start(inbox.clone());
+    // Final review I5: the one AppState every view reads through app_state::get(),
+    // built once here (primary instance only, so a second launch never opens the
+    // graph) from paths::data_dir(); automation builds skip the OS permission probe.
+    app_state::init();
 
     let app = gpui_kit::application();
     // `open ubilink-next.app` while it runs: LaunchServices sends a reopen instead of
