@@ -9,6 +9,13 @@
 // see src/shell/). Building needs full Xcode (GPUI compiles Metal shaders); running needs a
 // desktop session.
 
+// R6/S1: the automation channel exists only in `automation` builds; gating the module
+// declaration itself keeps every byte of it out of a release binary (TN1, checked by
+// `scripts/probe.py release-clean`).
+#[cfg(feature = "automation")]
+mod automation;
+mod fixtures;
+mod opener;
 mod shell;
 mod theme;
 mod views;
@@ -32,6 +39,11 @@ fn main() {
         Claim::Primary => {}
         Claim::Unguarded(e) => eprintln!("[ubilink-next] single-instance guard unavailable: {e}"),
     }
+    // After the single-instance claim, so a second launch never binds (or clears) the
+    // first one's automation socket; before GPUI, like the single-instance listener:
+    // requests queue in the inbox until the pump starts.
+    #[cfg(feature = "automation")]
+    automation::start(inbox.clone());
 
     let app = gpui_kit::application();
     // `open ubilink-next.app` while it runs: LaunchServices sends a reopen instead of
