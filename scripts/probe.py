@@ -320,6 +320,7 @@ PROBES_DIR = REPO_ROOT / "desktop-gpui" / "probes"
 _GPUI_SOURCE_TARGET = REPO_ROOT / "desktop-gpui" / "target"
 _OCR_SWIFT = REPO_ROOT / "scripts" / "ocr.swift"
 _QUARTZ_SWIFT = REPO_ROOT / "scripts" / "probe-helpers" / "quartz.swift"
+_ACTIVATOR_SWIFT = REPO_ROOT / "scripts" / "probe-helpers" / "activator.swift"
 
 # How long an instance may take to serve its socket after launch. A debug GPUI
 # binary starts in about a second; the margin covers a cold Metal shader cache.
@@ -1264,7 +1265,9 @@ STEP_TYPES = {
     "restart": set(),
     "sleep_ms": set(),
 }
-_COMMON_OPTIONS = {"name"}
+# `block`: consecutive steps with the same block id are one iteration, the unit a
+# focus-theft retry re-runs (see `run_steps`).
+_COMMON_OPTIONS = {"name", "block"}
 _SCENARIO_KEYS = {"description", "requirement", "notes", "setup", "steps"}
 _SETUP_KEYS = {"fixtures", "files"}
 
@@ -1411,8 +1414,10 @@ def validate_step(step, where: str) -> str:
         if not ok:
             raise ScenarioError(f"{where}: warp_cursor takes a display index or {{display, x, y}}")
     elif kind == "activate_other":
-        if not (v is True or isinstance(v, str)):
-            raise ScenarioError(f"{where}: activate_other takes an app name or true (Finder)")
+        # O4: probes never launch the user's apps; the probe's own activator is the
+        # only "other app" there is.
+        if v is not True:
+            raise ScenarioError(f"{where}: activate_other takes true (the probe's own activator app)")
     elif kind == "restart":
         if v is not True:
             raise ScenarioError(f"{where}: restart takes true")
@@ -1480,8 +1485,28 @@ class RunContext:
         self.nonce = None
         self.pb_count = None
         self.shots = 0
-        # The panel window a `winframe` step last found, for `winframe: "gone"`.
+        # Processes that may be frontmost without it counting as focus theft.
+        # The instance's own pid is added at check time (`restart` changes it).
+        self.own_pids = {os.getpid()}
+        # The panel window a `winframe` step (or a `window_id` call) last found for
+        # the current panel, for `winframe: "gone"`. Cleared whenever a call shows a
+        # new panel appearing, so a `gone` never checks a previous panel's window.
         self.last_panel_wid = None
+        self.panel_visible = False
+
+    def owned_pids(self) -> set:
+        proc = getattr(self.inst, "proc", None)
+        return self.own_pids | ({proc.pid} if proc is not None else set())
+
+    def observe(self, verb: str, result):
+        """Track the panel across call results (see `last_panel_wid`)."""
+        if verb == "window_id" and isinstance(result, dict) and result.get("window_id"):
+            self.last_panel_wid = result["window_id"]
+            self.panel_visible = True
+            return
+        self.last_panel_wid, self.panel_visible = track_panel(
+            self.last_panel_wid, self.panel_visible, visible_in(result)
+        )
 
     def tokens(self) -> dict:
         t = {
@@ -1494,6 +1519,27 @@ class RunContext:
         if self.nonce is not None:
             t["nonce"] = self.nonce
         return t
+
+
+def visible_in(result):
+    """`shell.visible` from a call result: `state`/`trigger_hotkey`/`open_view` carry
+    it at `shell`, `resign_key` at `state.shell`. None when the result has neither."""
+    if not isinstance(result, dict):
+        return None
+    for shell in (result.get("shell"), (result.get("state") or {}).get("shell")):
+        if isinstance(shell, dict) and isinstance(shell.get("visible"), bool):
+            return shell["visible"]
+    return None
+
+
+def track_panel(wid, was_visible: bool, visible):
+    """(tracked window, visible) after a call reporting `visible`. A hidden → shown
+    transition is a new panel window, so the tracked number is dropped."""
+    if visible is None:
+        return wid, was_visible
+    if visible and not was_visible:
+        wid = None
+    return wid, visible
 
 
 def _poll(timeout_ms, attempt):
@@ -1523,6 +1569,7 @@ def run_call(ctx: RunContext, step: dict) -> str:
             return f"error: {err}"
         if not resp.get("ok"):
             raise StepFailed(f"{verb} returned an error", "ok", resp.get("error"))
+        ctx.observe(verb, resp.get("result"))
         misses = check_expect(resp.get("result"), expect)
         if misses:
             raise StepFailed(
@@ -1582,7 +1629,7 @@ def _panel_window(ctx: RunContext):
         wid = ctx.inst.call("window_id")["window_id"]
     except CallError as e:
         raise StepFailed("no panel window", "an open panel", str(e))
-    for w in quartz("windows", ctx.inst.proc.pid):
+    for w in screen_windows(ctx.inst.proc.pid):
         if w["number"] == wid:
             ctx.last_panel_wid = wid
             return wid, w["bounds"]
@@ -1769,6 +1816,29 @@ def run_file(ctx: RunContext, step: dict) -> str:
     return _poll(step.get("timeout_ms", 0), attempt)
 
 
+def displays_or_blocked(displays: list) -> list:
+    """An empty active-display list means the display is asleep (or the session has
+    no screen): the host cannot show a window, which is not a product failure."""
+    if not displays:
+        raise EnvBlocked("display asleep: CGGetActiveDisplayList reports no active display")
+    return displays
+
+
+def active_displays() -> list:
+    return displays_or_blocked(quartz("displays"))
+
+
+def screen_windows(pid: int) -> list:
+    """The pid's on-screen windows. The helper fails when the window server returns
+    no list at all; that is the environment, never an empty list (see `gone`)."""
+    try:
+        return quartz("windows", pid)
+    except ProbeError as e:
+        if "returned nil" in str(e):
+            raise EnvBlocked(f"the window server returned no window list (display asleep?): {e}")
+        raise
+
+
 def _display_for(target, displays: list, ctx: RunContext) -> dict:
     ordered = order_displays(displays)
     if target == "cursor":
@@ -1805,15 +1875,18 @@ def run_winframe(ctx: RunContext, step: dict) -> str:
         # it hid the panel is `state.shell.visible`; this checks the window server.
         def gone():
             wid = ctx.last_panel_wid
-            if not window_gone(wid, quartz("windows", ctx.inst.proc.pid)):
+            if not window_gone(wid, screen_windows(ctx.inst.proc.pid)):
                 raise StepFailed(f"window {wid} still on screen", "absent from CGWindowList", "on screen")
             return f"window {wid} no longer on screen"
 
-        return _poll(step.get("timeout_ms", 2000), gone)
+        detail = _poll(step.get("timeout_ms", 2000), gone)
+        # Used up: a second `gone` must first see a window again.
+        ctx.last_panel_wid = None
+        return detail
 
     def attempt():
         wid, bounds = _panel_window(ctx)
-        displays = quartz("displays")
+        displays = active_displays()
         if target == "any":
             if any(rect_within(bounds, d["bounds"]) for d in displays):
                 return f"window {wid} {bounds} lies within a display"
@@ -1829,7 +1902,7 @@ def run_winframe(ctx: RunContext, step: dict) -> str:
 def run_warp_cursor(ctx: RunContext, step: dict) -> str:
     v = step["warp_cursor"]
     spec = v if isinstance(v, dict) else {"display": v}
-    d = _display_for(spec["display"], quartz("displays"), ctx)
+    d = _display_for(spec["display"], active_displays(), ctx)
     b = d["bounds"]
     x = b["x"] + b["w"] * spec.get("x", 0.5)
     y = b["y"] + b["h"] * spec.get("y", 0.5)
@@ -1837,15 +1910,51 @@ def run_warp_cursor(ctx: RunContext, step: dict) -> str:
     return f"cursor at ({now['x']:.0f}, {now['y']:.0f}) on display {d['id']}"
 
 
+# Every activator process this probe started, so the run's teardown can stop any
+# that a step did not (Ctrl-C, SIGTERM mid-step).
+_ACTIVATORS: list = []
+_ACTIVATOR_TIMEOUT_S = 8.0
+
+
+def stop_activators():
+    for proc in _ACTIVATORS:
+        if proc.poll() is None:
+            with contextlib.suppress(OSError):
+                proc.stdin.close()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+    _ACTIVATORS.clear()
+
+
 def run_activate_other(ctx: RunContext, step: dict) -> str:
-    app = "Finder" if step["activate_other"] is True else step["activate_other"]
-    # A real activation of another app: the panel loses key status the way it does
-    # when the user clicks elsewhere, not through the resign_key verb's shortcut.
-    proc = subprocess.run(["open", "-a", app], capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise EnvBlocked(f"open -a {app} failed: {proc.stderr.strip()}")
-    time.sleep(step.get("settle_ms", 300) / 1000.0)
-    return f"activated {app}"
+    # A real loss of key status, the way the user clicking into another app causes
+    # it — not the resign_key verb's shortcut. The "other app" is the probe's own
+    # activator (scripts/probe-helpers/activator.swift), never one of the user's
+    # apps (O4), and it is gone again when this step ends.
+    import select
+
+    proc = subprocess.Popen(
+        [str(_helper(_ACTIVATOR_SWIFT))], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    _ACTIVATORS.append(proc)
+    ctx.own_pids.add(proc.pid)
+    try:
+        ready, _, _ = select.select([proc.stdout], [], [], _ACTIVATOR_TIMEOUT_S)
+        line = proc.stdout.readline().strip() if ready else ""
+        if not line.startswith("active"):
+            raise EnvBlocked(f"the probe's activator could not take focus ({line or 'no answer'})")
+        time.sleep(step.get("settle_ms", 300) / 1000.0)
+    finally:
+        stop_activators()
+        # Let AppKit hand activation back before the next step reads the frontmost
+        # app, so the focus-theft check never mistakes that hand-back for a theft.
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline and quartz("frontmost").get("pid") == proc.pid:
+            time.sleep(0.05)
+    return f"probe activator (pid {proc.pid}) took key status, then quit"
 
 
 def run_restart(ctx: RunContext, step: dict) -> str:
@@ -1911,12 +2020,105 @@ def _report_fail(e: StepFailed):
         print(f"      actual:   {_short(e.actual, 600)}")
 
 
-def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
-    """Run every step against one instance; stop at the first FAIL. Returns ok."""
-    steps = ctx.scenario["steps"]
+_VISIBILITY_PATHS = re.compile(r"(^|\.)(visible|route|closed|window_id)$")
+
+
+def is_visibility_step(kind: str, step: dict) -> bool:
+    """Steps whose failure can be caused by another app taking focus: they assert the
+    panel is shown or hidden (a capture/browser panel hides on any loss of key
+    status, by design)."""
+    if kind == "winframe":
+        return True
+    if kind != "call":
+        return False
+    if step["call"] in ("window_id", "resign_key"):
+        return True
+    return any(_VISIBILITY_PATHS.search(p) for p in (step.get("expect") or {}))
+
+
+def focus_thief(before, after, own_pids: set):
+    """The name of an app that became frontmost during a step, or None. The app that
+    was frontmost when the step began (the user's terminal) and the probe's own
+    processes (itself, the instance, its activator) never count."""
+    if not isinstance(after, dict) or not after.get("pid"):
+        return None
+    if after["pid"] in own_pids:
+        return None
+    if isinstance(before, dict) and before.get("pid") == after["pid"]:
+        return None
+    return after.get("name") or f"pid {after['pid']}"
+
+
+def step_units(steps: list) -> list:
+    """Group steps into iterations: consecutive steps sharing a `block` id form one,
+    every other step is its own. Returns lists of (1-based index, step)."""
+    units, current, current_block = [], [], None
     for i, step in enumerate(steps, 1):
+        block = step.get("block")
+        if current and (block is None or block != current_block):
+            units.append(current)
+            current = []
+        current.append((i, step))
+        current_block = block
+        if block is None:
+            units.append(current)
+            current, current_block = [], None
+    if current:
+        units.append(current)
+    return units
+
+
+def _frontmost():
+    try:
+        return quartz("frontmost")
+    except ProbeError:
+        return None
+
+
+def reset_panel(ctx: RunContext):
+    """Before re-running an iteration: no panel open. `open_view capture` then
+    `resign_key` closes whatever is showing (capture hides on resign_key)."""
+    if visible_in(ctx.inst.call("state")):
+        ctx.inst.call("open_view", route="capture")
+        ctx.inst.call("resign_key")
+    ctx.panel_visible = False
+    ctx.last_panel_wid = None
+
+
+def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
+    """Run every step against one instance; stop at the first FAIL. Returns ok.
+
+    Unattended guard (Phase 1 R15 runs these with nobody watching): when a step that
+    asserts the panel's visibility fails and another app became frontmost during
+    it, the failure may be that app's doing, not the product's. The iteration (its
+    `block`, or the step alone) is re-run once from a closed panel; a second theft
+    makes it ENV-BLOCKED ("focus taken by <app>"), never a FAIL."""
+    steps = ctx.scenario["steps"]
+    for unit in step_units(steps):
+        for attempt in (1, 2):
+            outcome, passed = _run_unit(ctx, unit, tally, prefix, len(steps), retry_left=attempt == 1)
+            if outcome == "retry":
+                tally.passed -= passed
+                try:
+                    reset_panel(ctx)
+                except (ProbeError, CallError) as e:
+                    tally.failed += 1
+                    print(f"FAIL  {prefix}: could not reset the panel for a retry: {e}")
+                    return False
+                continue
+            if outcome == "fail":
+                return False
+            break
+    return True
+
+
+def _run_unit(ctx, unit, tally, prefix, total, retry_left):
+    """One attempt at an iteration. Returns ("ok"|"retry"|"blocked"|"fail", passes)."""
+    passed = 0
+    for n, (i, step) in enumerate(unit):
         kind = step_type(step, f"step {i}")
-        head = f"{prefix} [{i}/{len(steps)}] {_describe(kind, step)}"
+        head = f"{prefix} [{i}/{total}] {_describe(kind, step)}"
+        before = _frontmost() if is_visibility_step(kind, step) else None
         try:
             detail = STEP_RUNNERS[kind](ctx, step)
         except EnvBlocked as e:
@@ -1926,20 +2128,34 @@ def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
         except ScenarioError as e:
             tally.errors += 1
             print(f"ERROR {head}\n      {e}")
-            return False
+            return "fail", passed
         except (StepFailed, ProbeError, CallError) as e:
+            thief = None
+            if isinstance(e, StepFailed) and is_visibility_step(kind, step):
+                thief = focus_thief(before, _frontmost(), ctx.owned_pids())
+            if thief and retry_left:
+                print(f"RETRY {head}\n      focus taken by {thief} during the step: {e}\n"
+                      f"      re-running this iteration once")
+                return "retry", passed
+            if thief:
+                tally.blocked += 1
+                skipped = len(unit) - n - 1
+                print(f"ENV-BLOCKED {head}\n      focus taken by {thief} (twice): {e}"
+                      + (f"\n      ({skipped} later step(s) of this iteration skipped)" if skipped else ""))
+                return "blocked", passed
             tally.failed += 1
             print(f"FAIL  {head}")
             if isinstance(e, StepFailed):
                 _report_fail(e)
             else:
                 print(f"      {e}")
-            if i < len(steps):
-                print(f"      (stopping: {len(steps) - i} later step(s) not run)")
-            return False
+            if i < total:
+                print(f"      (stopping: {total - i} later step(s) not run)")
+            return "fail", passed
         tally.passed += 1
+        passed += 1
         print(f"PASS  {head} — {detail}")
-    return True
+    return "ok", passed
 
 
 def _check(tally: Tally, head: str, fn):
@@ -2046,6 +2262,31 @@ def run_scenario(sc: dict, binary: Path, n: int, tally: Tally):
             inst.stop()
 
 
+def keep_awake():
+    """Hold display and idle-sleep assertions for the whole run (an unattended run
+    must not watch the display sleep under it): `caffeinate -d -i -u`, tied to this
+    process with `-w` so it ends even if the probe is killed, and terminated in
+    `cmd_run`'s teardown. `-u` also wakes a display that is already asleep."""
+    try:
+        return subprocess.Popen(
+            ["caffeinate", "-d", "-i", "-u", "-t", "86400", "-w", str(os.getpid())],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return None
+
+
+def wait_for_display(timeout_s: float = 5.0):
+    """Give a display woken by `keep_awake` a moment to come back. Not an error if it
+    does not: the steps that need one report "display asleep" as ENV-BLOCKED."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        with contextlib.suppress(ProbeError):
+            if quartz("displays"):
+                return
+        time.sleep(0.25)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run scenario files against fresh isolated automation instances (R8)."""
     tally = Tally()
@@ -2064,6 +2305,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     # This run's own copy of the binary lives here until the run ends (build_binary).
     run_dir = Path(tempfile.mkdtemp(prefix="ubprobe-run-", dir=_tmpdir()))
     build = None
+    awake = keep_awake()
     try:
         build = build_binary(run_dir)
         binary = build
@@ -2072,6 +2314,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         _helper(_QUARTZ_SWIFT)
         if any(step_type(st, "") == "ocr" for sc in scenarios for st in sc["steps"]):
             _helper(_OCR_SWIFT)
+        if any(step_type(st, "") == "activate_other" for sc in scenarios for st in sc["steps"]):
+            _helper(_ACTIVATOR_SWIFT)
+        wait_for_display()
         with desktop_lock():
             for sc in scenarios:
                 run_scenario(sc, binary, args.instances, tally)
@@ -2082,8 +2327,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"ENV-BLOCKED {e}")
         return 3
     finally:
+        stop_activators()
         restore_pasteboard()
         shutil.rmtree(run_dir, ignore_errors=True)
+        if awake is not None:
+            awake.terminate()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                awake.wait(timeout=5)
 
     code = tally.exit_code()
     verdict = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code]
