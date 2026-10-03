@@ -121,10 +121,9 @@ unchanged pasteboard and the instance-owned `data_dir`.
   harness re-runs the whole proof once from a closed panel if another app took focus
   during a visibility step, and exits 3 (ENV-BLOCKED) if focus is taken again. A
   failure with no focus theft is exit 1, a product failure.
-- On this Phase 0 build, `a11y` on the settings panel answers "no accessibility frame
-  ... active=false": the panel stays open without becoming the active window. That is
-  why the settings part of the proof uses `state`, Quartz `winframe` and a screenshot,
-  not `see`. Phase 1's settings view (U4) must make it readable.
+- The settings part of the proof reads `state`, Quartz `winframe` and a screenshot. It
+  does not read the a11y tree, which only answers once the panel's window is active: on
+  a locked screen no window is, and `call` refuses to drive one (exit 3).
 - `trigger_hotkey` with `UBILINK_SKIP_HOTKEYS=1` drives the hotkey handler, not the OS
   registration: `hotkeys_registered` is `[]` on purpose.
 - `display_id` and the panel's position depend on the cursor's display; assert the
