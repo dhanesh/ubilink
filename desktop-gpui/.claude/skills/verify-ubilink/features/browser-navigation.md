@@ -28,49 +28,60 @@ reachable and operable from the keyboard alone."
 
 ## Drive it
 
+Two frozen scenarios are this feature's acceptance proof: `probes/browser-select.json`
+(R6, Up/Down/Enter) and `probes/browser-drill.json` (R7, Right/Left), both run
+through the harness's `scenario` command — every key and every assertion each
+scenario makes, not a hand-picked subset.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/browser-navigation"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'seed_graph:{"fixture":"graph-backlinks.json"}' \
-  'trigger_hotkey:{"action":"browser"}' \
-  'wait_state:{"shell.visible":true,"route":"browser"}' \
-  'see:{"role":"ListItem","nth":0,"state":{"selected":true}}' \
-  'key:{"keys":"down down"}' \
-  'see:{"role":"ListItem","nth":2,"state":{"selected":true},"text":"Beta Post","deep":true}' \
-  'key:{"keys":"up"}' \
-  'see:{"role":"ListItem","nth":1,"state":{"selected":true},"text":"Gamma Doc","deep":true}' \
-  'key:{"keys":"enter"}' \
-  'step:{"call":"opened","expect":{"":{"len":1}}}' \
-  'key:{"keys":"right"}' \
-  'see:{"role":"Label","text":"Linked to Gamma Doc"}' \
-  'absent:{"role":"ListItem","text":"Beta Post","deep":true}' \
-  'key:{"keys":"left"}' \
-  'absent:{"text":"Linked to"}' \
-  'see:{"role":"ListItem","nth":1,"state":{"selected":true}}'
-echo "exit $?"
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name browser-select
+echo "browser-select exit $?"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name browser-drill
+echo "browser-drill exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0. The row order before any key is
-`list_links`' own order (`updated_at` DESC, then rowid DESC) — on
-`graph-backlinks.json` that is the decoy, then Gamma Doc, then Beta Post, as
-`probes/browser-select.json` and `probes/browser-drill.json` both document. After
-`enter` the `opened` sink names the opened URI (its length goes from 0 to 1).
+Expected: both exit 0. `$OUT/browser-select/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "row 1 selected at open", "row 3 carries the
+selected flag", "row 2 carries the selected flag" and "the opened sink reports row
+2's URI, once". `$OUT/browser-drill/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "top level: no trail", "the trail names the
+parent", "the child list is the parent's connections, exactly", "top-level rows are
+gone while drilled" and "row 2 carries the selected flag again".
 
 ## Proof
 
-- **Selection moves.** `Down Down` puts the `selected` flag on row 3 (and only row
-  3); `Up` moves it back to row 2 (and only row 2) — the `ne: true` checks the real
-  Phase 1 scenarios add on the other rows (`probes/browser-select.json`) are what
-  rule out "every row is selected" as a false pass.
-- **Enter opens.** The `opened` sink grows by one entry naming the selected row's
-  URI, proving Enter routes through the core opener (S2/O4: automation builds record
-  opens instead of launching anything).
-- **Drill in.** `Right` on the selected row shows a trail Label ("Linked to
-  <name>") and the child list becomes exactly that link's own connections; the
-  top-level rows are gone while drilled in.
-- **Drill out.** `Left` empties the trail and restores the previous top-level
-  selection (row 2 again) — proving the browser remembers where it was, not just
-  that it can get back to the top.
+- **Selection moves.** `browser-select`'s "row 3 carries the selected flag" and "row
+  2 carries the selected flag" each assert the `selected` flag on exactly one row
+  (the other rows' `{"ne": true}` checks rule out "every row is selected" as a false
+  pass).
+- **Enter opens.** "nothing opened yet" (`opened` sink `== []`) immediately before
+  Enter, then "the opened sink reports row 2's URI, once" (`len: 1`,
+  `0.target: <row 2's URI>`) immediately after — proving Enter is what grows the
+  sink, and by exactly the selected row's URI, through the core opener (S2/O4:
+  automation builds record opens instead of launching anything).
+- **Drill in.** `browser-drill`'s "the trail names the parent" and "the child list
+  is the parent's connections, exactly" together prove Right shows the drilled-in
+  view's trail and child set; "top-level rows are gone while drilled" proves the
+  parent list is replaced, not merely overlaid.
+- **Drill out.** "the trail is empty again" and "row 2 carries the selected flag
+  again" prove Left returns to the top level with the previous selection restored,
+  not just to some default.
+
+Record each scenario separately (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+for name in browser-select browser-drill; do
+  R="$OUT/$name"
+  python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature browser-navigation \
+    --verifier "$VERIFIER" --result pass \
+    --action "scenario $name (desktop-gpui/probes/$name.json) on instance $INSTANCE" \
+    --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+    --side-effect "opened sink grows by exactly the opened row's URI; see result.json" \
+    $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+done
+```
 
 ## Gotchas
 
@@ -79,9 +90,11 @@ Expected: every step prints `"ok": true`, exit 0. The row order before any key i
   a capture-phase action listener and stops propagation; Right/Left reach the parent
   only at the Input's text edges (bubble phase) — A11Y-NOTES.md's per-key table is
   the reference this behaviour must match, proven live in `a11y-spike.json`.
-- "Reachable from the keyboard" here means the harness never asserts a hard-coded
-  focus order on its own control; it drives the same keys a user would and reads the
-  `selected`/trail state back, the way `probes/README.md`'s `key_until` step proves
-  reach for other views without hard-coding their layout.
-- Today's stub has no `ListItem` rows and no trail Label at all, so this call fails
-  at the first `see` until Phase 1 lands.
+- "Reachable from the keyboard" here means the scenario never asserts a hard-coded
+  focus order on its own control; it drives the same keys a user would and reads
+  the `selected`/trail state back.
+- `scenario` replaces the instance's process and temp root before each run, so run
+  `browser-select` and `browser-drill` as two separate invocations, each seeding
+  its own fresh copy of `graph-backlinks.json`.
+- Today's stub has no `ListItem` rows and no trail Label at all, so both scenarios
+  exit 1 at their first `see` until Phase 1 lands.

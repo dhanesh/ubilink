@@ -10,80 +10,92 @@
 Settings can export the whole graph to a JSON file and import it back with no
 change (Phase 1 R11), and can reset the graph to empty — but only after an explicit
 confirmation step, never on the first press (Phase 1 R12). A stats line
-(`"<resources> link(s) · <links> connection(s)"`) is re-read every time Settings is
-shown, so it reflects whatever the graph holds right now, in-process edit or
-out-of-band seed alike.
+(exactly `"<n> links · <n> connections"`) is re-read every time Settings is shown,
+so it reflects whatever the graph holds right now, in-process edit or out-of-band
+seed alike.
 
 ## How to reach it
 
-- **Tab to Export/Import/Reset, then Enter** (`step:{"key_until": {...}}`, then
+- **Tab to Export/Import/Reset, then Enter** (the scenario's `key_until` step, then
   `key {"keys": "enter"}`).
 - **Not driven here:** the launch-at-login switch (`launch-at-login.md`), adapter
   switches (`settings-adapters.md`) — same view, different controls.
 
 ## Drive it
 
+Two frozen scenarios are this feature's acceptance proof: `probes/graph-roundtrip.json`
+(R11, export then import with no change) and `probes/graph-reset.json` (R12,
+confirmation before Reset), both run through the harness's `scenario` command.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/graph-data"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'seed_graph:{"fixture":"graph-backlinks.json"}' \
-  'open_view:{"route":"settings"}' \
-  'wait_state:{"shell.visible":true,"route":"settings"}' \
-  'see:{"role":"Label","text":"5 link(s) · 3 connection(s)","exact":true}' \
-  'step:{"key_until":{"role":"Button","text":"Export","state":{"focused":true}},"key":"tab"}' \
-  'key:{"keys":"enter"}' \
-  'step:{"graph":true,"export":true,"link_count":3,"resource_count":5}' \
-  'step:{"key_until":{"role":"Button","text":"Reset","state":{"focused":true}},"key":"tab"}' \
-  'key:{"keys":"enter"}' \
-  'see:{"role":"Label","text":"Delete all captured links and connections?"}' \
-  'step:{"key_until":{"role":"Button","text":"Delete everything","state":{"focused":true}},"key":"tab"}' \
-  'key:{"keys":"enter"}' \
-  'step:{"graph":true,"resource_count":0,"link_count":0}' \
-  'see:{"role":"Label","text":"0 link(s) · 0 connection(s)","exact":true}' \
-  'step:{"key_until":{"role":"Button","text":"Import","state":{"focused":true}},"key":"tab"}' \
-  'key:{"keys":"enter"}' \
-  'step:{"graph":true,"resource_count":5,"link_count":3}' \
-  'see:{"role":"Label","text":"5 link(s) · 3 connection(s)","exact":true}' \
-  opened
-echo "exit $?"
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name graph-roundtrip
+echo "graph-roundtrip exit $?"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name graph-reset
+echo "graph-reset exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0; `opened` reports `"result": []`.
-The scenario's own `export_path`/`import_path` fixture binding (same file both ways,
-no dialog, per probes/README.md's `setup.fixtures`) is set at launch, outside this
-`call`; `probes/graph-roundtrip.json` seeds the empty-graph fixture between export
-and import with `seed_graph ... replace: true` rather than Reset, so this map's use
-of Reset to empty the graph before Import is a deliberate substitution that also
-exercises R12 in the same pass.
+Expected: both exit 0. `$OUT/graph-roundtrip/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "a11y counts", "exported to the fixture path as
+ubilink.graph.v3", "its link set equals the seed", "a11y counts read 0" and "a11y
+counts equal the original". `$OUT/graph-reset/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "no confirmation before Reset", "confirmation
+shown: question, Delete everything, Cancel", "asking deleted nothing", "Cancel left
+graph_stats unchanged", "Confirm: graph_stats report 0" and "the a11y count reads
+0".
 
 ## Proof
 
-- **Export preserves the link set.** Reading the export path back
-  (`step:{"graph": true, "export": true}`) shows the same resource/link counts the
-  live graph had.
-- **Reset asks first.** No confirmation `Label`/buttons exist before Reset is
-  pressed; pressing it shows the question and both buttons, and the graph is
-  unchanged until "Delete everything" is actually pressed — a Cancel path (not driven
-  in this command; see `probes/graph-reset.json`) must leave the graph untouched too.
+- **Export preserves the link set.** `graph-roundtrip`'s "its link set equals the
+  seed" reads the export file back (`graph: true, export: true`) and requires the
+  same resource/link counts the live graph had.
+- **Reset asks first.** `graph-reset`'s "no confirmation before Reset" requires no
+  confirmation `Label`/buttons exist before Reset is pressed; "confirmation shown"
+  requires the question and both buttons after pressing it; "asking deleted
+  nothing" and "Cancel left graph_stats unchanged" require the graph untouched
+  until "Delete everything" is actually pressed.
 - **No role asserted on the confirmation surface itself** — gpui-component's
   `Dialog` container never reaches AccessKit in this gpui-pre version
-  (A11Y-NOTES.md); the proof is the question text and the two buttons, not a
-  `Dialog` role.
-- **Import restores exactly.** After the graph is emptied, Import brings the counts
-  and the stats line back to the original.
-- **Stats re-read every show.** The Label matches the Tauri wording exactly
-  (`"<n> link(s) · <n> connection(s)"`) and is asserted fresh after every graph
-  change in this command, proving Settings does not cache it.
-- **Side effect.** The `opened` sink stays `[]`: export/import/reset never open
-  anything.
+  (A11Y-NOTES.md); the scenario's proof is the question text and the two buttons,
+  never a `Dialog` role.
+- **Import restores exactly.** `graph-roundtrip`'s "graph_stats equal the original"
+  and "a11y counts equal the original" require both the counts and the stats line
+  to return to the pre-export values after emptying the graph and importing.
+- **Stats line is exact and re-read every show.** Both scenarios assert the stats
+  `Label` reads exactly `"5 links · 3 connections"` or `"0 links · 0 connections"`
+  (`exact: true`), the frozen scenarios' own wording — re-asserted fresh after every
+  graph change, proving Settings does not cache it.
+- **Side effect.** Both scenarios' "nothing launched" step requires the `opened`
+  sink to equal `[]`.
+
+Record each scenario separately (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+for name in graph-roundtrip graph-reset; do
+  R="$OUT/$name"
+  python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature graph-data \
+    --verifier "$VERIFIER" --result pass \
+    --action "scenario $name (desktop-gpui/probes/$name.json) on instance $INSTANCE" \
+    --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+    --side-effect "opened sink stayed []; see result.json" \
+    $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+done
+```
 
 ## Gotchas
 
+- The stats text is exactly `"<n> links · <n> connections"` — **not**
+  `"<n> link(s) · <n> connection(s)"` (an earlier draft of this map assumed the
+  parenthetical-plural wording from the README's prose description; the frozen
+  scenarios use the plain plural, and the scenario's literal text wins).
 - Import **merges** into the live graph (`LinkGraph::import_json`'s own semantics);
-  emptying it first (Reset here, `seed_graph ... replace: true` in the Phase 1
-  scenario) is required before Import can be read as "restores exactly," not just
-  "adds more."
+  `graph-roundtrip`'s `seed_graph ... replace: true` between export and import is
+  what makes "restores exactly" a real emptying, not just "adds more" — not Reset
+  (that is `graph-reset`'s own proof).
 - `graph-empty.json` alone, imported without first clearing, would change nothing —
   it is not itself a reset.
-- Today's stub has no stats Label and no Export/Import/Reset buttons at all, so this
-  call fails at the first `see` until Phase 1 lands.
+- `scenario` replaces the instance's process and temp root before each run, so run
+  `graph-roundtrip` and `graph-reset` as two separate invocations.
+- Today's stub has no stats Label and no Export/Import/Reset buttons at all, so
+  both scenarios exit 1 at their first `see` until Phase 1 lands.

@@ -22,58 +22,58 @@ appear.
 
 ## Drive it
 
+The acceptance proof is the frozen scenario `probes/backlinks.json`, run with the
+harness's `scenario` command. It seeds `graph-backlinks.json`, captures the subject,
+asserts the exact backlink set and order, merges a fourth newer backlink, and
+asserts the reopened view's new order — every assertion the Phase 1 scenario makes,
+not a hand-picked subset.
+
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/backlinks"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'seed_graph:{"fixture":"graph-backlinks.json"}' \
-  'step:{"graph":true,"link_count":3,"resource_count":5}' \
-  'load_fixture:{"kind":"capture","path":"{fixtures}/capture-subject.json"}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":true,"route":"capture"}' \
-  'see:{"role":"Label","text":"Subject Note"}' \
-  'see:{"sequence":{"role":"ListItem","texts":["Gamma Doc","Beta Post","Alpha Paper"],"mode":"exact","deep":true}}' \
-  'absent:{"text":"Decoy Unrelated"}' \
-  'seed_graph:{"fixture":"graph-backlinks-newer.json"}' \
-  'step:{"graph":true,"link_count":4,"resource_count":6}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'wait_state:{"shell.visible":false,"route":null}' \
-  'trigger_hotkey:{"action":"capture"}' \
-  'see:{"sequence":{"role":"ListItem","texts":["Delta Memo","Gamma Doc","Beta Post","Alpha Paper"],"mode":"exact","deep":true}}' \
-  'absent:{"text":"Decoy Unrelated"}' \
-  opened
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name backlinks
 echo "exit $?"
 ```
 
-Expected: every step prints `"ok": true`, exit 0; the final `opened` line reports
-`"result": []`. `seed_graph` merges a fixture into the live instance's own
-`ubilink-graph.sqlite` exactly as `LinkGraph::import_json` would (probes/README.md),
-so the two `step:{"graph":...}` checks read back the merge immediately, before the
-view ever reopens.
+Expected: exit 0. `$OUT/backlinks/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS lines for "exactly the 3 backlinks, newest first (URIs
+and names)", "the decoy is not listed" (twice — before and after the fourth
+backlink lands), and "the newer backlink comes first, then the other three".
 
 ## Proof
 
-- **Exactly the seeded backlinks, newest first.** The `ListItem` sequence (`deep:
-  true`, since `List` puts a row's text in a `Label` child — A11Y-NOTES.md) matches
-  the three backlinks' names/URIs in recency order and nothing else; the decoy, which
-  the fixture captures but never links to the subject, is absent from the view both
-  before and after the new link lands.
-- **Re-query on reopen.** A fourth, newer backlink seeded into the graph while the
-  panel is open does not appear until the capture view is closed and reopened — the
-  reopen is the proof that the view re-reads the graph rather than caching its first
-  read.
-- **Side effect.** The `opened` sink stays `[]`.
+- **Exactly the seeded backlinks, newest first.** The scenario's sequence queries
+  (`mode: "exact"`, `deep: true`) match both the three backlinks' URIs and their
+  names, in recency order, with nothing else — a view that gets the order right by
+  URI but shows a stale or swapped name fails the second sequence query even if the
+  first passes.
+- **Decoy never appears.** "the decoy is not listed" is asserted both before and
+  after the fourth backlink is seeded.
+- **Re-query on reopen.** The fourth, newer backlink is seeded while the panel is
+  open; the scenario closes and reopens the capture view (two more `trigger_hotkey`
+  calls) before asserting the new order — proving the view re-reads the graph
+  rather than caching its first read.
+- **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+
+Record it (SKILL.md, Evidence):
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/backlinks"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature backlinks \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario backlinks (desktop-gpui/probes/backlinks.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "opened sink stayed []; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
-- `seed_graph` is setup, not proof — it stands in for links an earlier capture/mark
-  action would have created; the Drive section's own graph reads back confirm the
-  merge happened before asserting anything about the view.
+- `scenario` replaces the instance's process and temp root with a fresh one before
+  it runs, so any graph state from an earlier `call` on this instance is gone —
+  the scenario's own `setup.graph` is what seeds it.
 - The sequence query's `mode: "exact"` means exactly that many `ListItem`s must
   exist, in that order — a view that renders the decoy anywhere, or in the wrong
   order, fails here even if the three real backlinks are all present.
-- Matching on **both** URI and name (two separate sequence assertions in the Phase 1
-  scenario, `probes/backlinks.json`) is what catches a view that gets the order right
-  by URI but renders a stale or swapped name alongside it; this map's command checks
-  names only to keep the command short, but a full proof checks both.
-- Today's stub shows only its static title and never lists anything, so this call
-  fails at the first backlink `see` until Phase 1 lands.
+- Today's stub shows only its static title and never lists anything, so `scenario
+  --name backlinks` exits 1 at the first backlink assertion until Phase 1 lands.

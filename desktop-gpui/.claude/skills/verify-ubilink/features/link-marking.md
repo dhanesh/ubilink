@@ -10,7 +10,8 @@
 Pressing Cmd-L on one link, moving to a second, and pressing Cmd-L again links them
 both ways in the graph and shows a confirmation naming both. Phase 1 R8, matching
 the Tauri browser's own Cmd-L binding (plain `L` still types into the always-focused
-filter — spec ruling R-n).
+filter — spec ruling R-n). After a real restart, drilling into the second link must
+still list the first among its connections.
 
 ## How to reach it
 
@@ -23,72 +24,65 @@ filter — spec ruling R-n).
 
 ## Drive it
 
-Two commands: a `call` that marks A then B, then a real `restart` (SKILL.md's
-"Proving persistence" section) followed by a second `call` that reopens the browser
-and drills into B to see A listed among its connections — proving the link was
-written to the graph, not held only in the view's in-memory state.
+The acceptance proof is the frozen scenario `probes/link-marking.json`, run with the
+harness's `scenario` command. The scenario marks A then B, confirms the graph holds
+the bidirectional link, restarts the instance in place (probe.py's own `restart`
+step, run by `scenario` itself — SKILL.md's "What `scenario` does"), reopens the
+browser, and drills into B to confirm A is listed among its connections after the
+restart.
 
 ```sh
-OUT="$WT/.verify-run/$INSTANCE/captures/link-marking"
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'seed_graph:{"fixture":"graph-backlinks.json"}' \
-  'step:{"graph":true,"no_links":[["https://decoy.example/unrelated","https://gamma.example/three"]]}' \
-  'trigger_hotkey:{"action":"browser"}' \
-  'wait_state:{"shell.visible":true,"route":"browser"}' \
-  'see:{"role":"ListItem","nth":0,"state":{"selected":true},"text":"Decoy Unrelated","deep":true}' \
-  'key:{"keys":"cmd-l"}' \
-  'key:{"keys":"down"}' \
-  'key:{"keys":"cmd-l"}' \
-  'see:{"role":"Label","text":"Linked “Decoy Unrelated” ↔ “Gamma Doc”"}' \
-  'step:{"graph":true,"links":[["https://decoy.example/unrelated","https://gamma.example/three"]],"link_count":4}' \
-  opened
-echo "mark exit $?"
-
-python3 "$H" restart --instance "$INSTANCE" --verifier "$VERIFIER"
-echo "restart exit $?"
-
-python3 "$H" call --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" \
-  'trigger_hotkey:{"action":"browser"}' \
-  'wait_state:{"shell.visible":true,"route":"browser"}' \
-  'see:{"role":"ListItem","nth":1,"state":{"selected":true},"text":"Gamma Doc","deep":true}' \
-  'key:{"keys":"right"}' \
-  'see:{"role":"ListItem","text":"Decoy Unrelated","deep":true}'
-echo "drill-after-restart exit $?"
+OUT="$WT/.verify-run/$INSTANCE/scenarios"
+python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name link-marking
+echo "exit $?"
 ```
 
-Expected: every `call` prints `"ok": true` lines and exits 0; `restart` prints
-`{"RESTARTED": {..., "data_dir_kept": true, ...}}` and exits 0 (`seed_graph` wrote
-straight to the instance's `ubilink-graph.sqlite`, not to the app's in-memory state,
-so nothing needs replaying for the graph itself to survive — only `load_fixture`
-kinds are replayed). The link row order and A = row 1 / B = row 2 pairing follow
-`probes/link-marking.json`'s own setup (`graph-backlinks.json`'s `list_links`
-order); after the restart, row 2 ("Gamma Doc", B) is selected again (`list_links`
-order is unchanged) and drilling right lists "Decoy Unrelated" (A) among its
-connections, in addition to the connection the fixture already seeded.
+Expected: exit 0. `$OUT/link-marking/result.json`'s `verdict` is `"PASS"`;
+`transcript.txt` shows PASS for "an a11y node confirms the link", "the graph links A
+and B (one unordered row: both directions)", the `restart` line, "drilled into B"
+and "B's connections list A (and its existing link)".
 
 ## Proof
 
-- **Confirmation.** An a11y `Label` reads `Linked "<A name>" ↔ "<B name>"` after the
-  second Cmd-L (README's exact Tauri wording).
-- **Bidirectional in the graph.** `step:{"graph": ..., "links": [[A, B]]}` reads the
-  instance's own `ubilink-graph.sqlite` directly: ubilink-core stores one row per
-  unordered pair and `links_of` reads either end, so this single check is the proof
-  that both `links_of(A) ∋ B` and `links_of(B) ∋ A` hold, not just that *some* row
-  was written.
-- **Survives a real restart.** After the mark and a real `restart` (same binary,
-  same data dir), reopening the browser and drilling into B lists A among its
-  connections — proof the link lives in the graph the view reads on every open, not
-  only in whatever state the view held before the restart.
-- **Side effect.** The `opened` sink stays `[]`: marking a link never opens it.
+- **Confirmation.** "an a11y node confirms the link" requires a `Label` reading
+  `Linked "<A name>" ↔ "<B name>"` after the second Cmd-L (README's exact Tauri
+  wording).
+- **Bidirectional in the graph.** "the graph links A and B (one unordered row: both
+  directions)" reads the instance's own `ubilink-graph.sqlite` directly
+  (`links: [[A, B]]`): ubilink-core stores one row per unordered pair and
+  `links_of` reads either end, so this one check is the proof that both
+  `links_of(A) ∋ B` and `links_of(B) ∋ A` hold, not just that *some* row was
+  written.
+- **Survives a real restart.** The scenario's `restart` step relaunches the same
+  binary with the same data dir kept; "drilled into B" and "B's connections list A
+  (and its existing link)" after it prove the link lives in the graph the view
+  reads on every open, not only in whatever state the view held before the
+  restart.
+- **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+
+Record it (SKILL.md, Evidence) — the scenario's own restart step is captured inside
+`$OUT/link-marking/` as one of its per-step artifacts, so no separate restart record
+is needed:
+
+```sh
+python3 "$H" doctor --instance "$INSTANCE"
+R="$OUT/link-marking"
+python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature link-marking \
+  --verifier "$VERIFIER" --result pass \
+  --action "scenario link-marking (desktop-gpui/probes/link-marking.json) on instance $INSTANCE" \
+  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
+  --side-effect "opened sink stayed []; the graph holds the bidirectional link before and after a real restart; see result.json" \
+  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+```
 
 ## Gotchas
 
-- `restart` (SKILL.md's "Proving persistence" section) is a harness command run
-  between two `call`s, not a step inside `call` — `call` itself still refuses a
-  `restart` step. It keeps the temp root (so the instance's `ubilink-graph.sqlite`
-  survives untouched) and relaunches the same binary.
+- `scenario`'s `restart` step is probe.py's own, run inside the scenario — it is
+  not the harness's separate `restart` command (SKILL.md's "Proving persistence"
+  section is for hand-written `call` sequences only); a verifier never issues
+  `restart` by hand for this feature.
 - Plain `l` (no Cmd) must keep typing into the filter — a browser that intercepts
   bare `l` as a mark shortcut breaks `link-browser.md`'s filter contract for every
   query containing the letter.
-- Today's stub has no `ListItem` rows and no Cmd-L handling at all, so this call
-  fails at the first `see` until Phase 1 lands.
+- Today's stub has no `ListItem` rows and no Cmd-L handling at all, so `scenario
+  --name link-marking` exits 1 at its first `see` until Phase 1 lands.
