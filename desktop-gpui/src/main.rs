@@ -15,23 +15,22 @@ mod theme;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use shell::single_instance::{self, Claim};
-use shell::{Command, Route};
+use shell::{Command, Route, ShellEvent};
 
 fn main() {
     // Single instance (R4's "one process"): settle it before GPUI starts, so a second
     // launch exits without ever creating windows, a tray item or hotkeys.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let instance_rx = match single_instance::claim(tx) {
+    // The listener thread posts to the shell's inbox, created here so it exists first.
+    let (inbox, events) = shell::inbox();
+    let on_show = inbox.clone();
+    match single_instance::claim(move || on_show.post(ShellEvent::Show)) {
         Claim::Signalled => {
             eprintln!("[ubilink-next] already running: asked it to show the panel");
             return;
         }
-        Claim::Primary => Some(rx),
-        Claim::Unguarded(e) => {
-            eprintln!("[ubilink-next] single-instance guard unavailable: {e}");
-            None
-        }
-    };
+        Claim::Primary => {}
+        Claim::Unguarded(e) => eprintln!("[ubilink-next] single-instance guard unavailable: {e}"),
+    }
 
     let app = gpui_kit::application();
     // `open ubilink-next.app` while it runs: LaunchServices sends a reopen instead of
@@ -52,6 +51,6 @@ fn main() {
         theme::install(cx);
         // TN4: tray-icon and global-hotkey need the main thread and a running NSApp
         // loop, which exist only from here on.
-        shell::start(cx, instance_rx);
+        shell::start(cx, inbox, events);
     });
 }
