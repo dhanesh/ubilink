@@ -35,10 +35,13 @@ scenario makes, not a hand-picked subset.
 
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name browser-select
-echo "browser-select exit $?"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name browser-drill
-echo "browser-drill exit $?"
+# Final review C1: R7 ([after: R6]) lands `browser-drill`, so at task R6's head
+# only `browser-select` can pass; every other head (TASK empty included) needs both.
+case "$TASK" in R6) SCENARIOS="browser-select" ;; *) SCENARIOS="browser-select browser-drill" ;; esac
+for name in $SCENARIOS; do
+  python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
+  echo "$name exit $?"
+done
 ```
 
 Expected: both exit 0. `$OUT/browser-select/result.json`'s `verdict` is `"PASS"`;
@@ -75,15 +78,15 @@ feature-per-head shape) — recording each scenario in its own `record` call wou
 have the second call overwrite the first's `evidence.json` and same-named
 artifacts (`result.json`, `transcript.txt`, ...), silently losing the R6 proof
 behind the R7 one. Record **one** evidence set for both, with each scenario's
-artifacts renamed to a unique prefix first, and `--result` derived from **both**
-exit codes:
+artifacts renamed to a unique prefix first, and `--result` derived from **every**
+scenario's exit code (both, except at the first task's head: see Drive it):
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 REC="$WT/.verify-run/$INSTANCE/record-browser-navigation"
 rm -rf "$REC"; mkdir -p "$REC"
 RESULT=pass
-for name in browser-select browser-drill; do
+for name in $SCENARIOS; do
   R="$OUT/$name"
   e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
   [ "$e" -eq 0 ] || RESULT=fail
@@ -91,9 +94,9 @@ for name in browser-select browser-drill; do
 done
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature browser-navigation \
   --verifier "$VERIFIER" --result "$RESULT" \
-  --action "scenario browser-select + browser-drill (desktop-gpui/probes/{browser-select,browser-drill}.json) on instance $INSTANCE" \
-  --observed "browser-select: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/browser-select/result.json"); browser-drill: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/browser-drill/result.json")" \
-  --side-effect "opened sink grows by exactly the opened row's URI in browser-select; nothing opened in browser-drill; see each scenario's renamed result.json" \
+  --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
+  --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
+  --side-effect "opened sink grows by exactly the opened row's URI in browser-select; nothing opened in browser-drill (when run); see each scenario's renamed result.json" \
   $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 

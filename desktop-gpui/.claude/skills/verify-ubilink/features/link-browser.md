@@ -35,10 +35,13 @@ one representative query.
 
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name link-browser
-echo "link-browser exit $?"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name link-browser-filter
-echo "link-browser-filter exit $?"
+# Final review C1: R5 ([after: R4]) lands `link-browser-filter`, so at task R4's head
+# only `link-browser` can pass; every other head (TASK empty included) needs both.
+case "$TASK" in R4) SCENARIOS="link-browser" ;; *) SCENARIOS="link-browser link-browser-filter" ;; esac
+for name in $SCENARIOS; do
+  python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
+  echo "$name exit $?"
+done
 ```
 
 Expected: both exit 0. `$OUT/link-browser/result.json`'s `verdict` is `"PASS"`;
@@ -77,15 +80,15 @@ feature-per-head shape) — recording each scenario in its own `record` call wou
 have the second call overwrite the first's `evidence.json` and same-named
 artifacts (`result.json`, `transcript.txt`, ...), silently losing the R4 proof
 behind the R5 one. Record **one** evidence set for both, with each scenario's
-artifacts renamed to a unique prefix first, and `--result` derived from **both**
-exit codes:
+artifacts renamed to a unique prefix first, and `--result` derived from **every**
+scenario's exit code (both, except at the first task's head: see Drive it):
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 REC="$WT/.verify-run/$INSTANCE/record-link-browser"
 rm -rf "$REC"; mkdir -p "$REC"
 RESULT=pass
-for name in link-browser link-browser-filter; do
+for name in $SCENARIOS; do
   R="$OUT/$name"
   e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
   [ "$e" -eq 0 ] || RESULT=fail
@@ -93,9 +96,9 @@ for name in link-browser link-browser-filter; do
 done
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature link-browser \
   --verifier "$VERIFIER" --result "$RESULT" \
-  --action "scenario link-browser + link-browser-filter (desktop-gpui/probes/{link-browser,link-browser-filter}.json) on instance $INSTANCE" \
-  --observed "link-browser: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/link-browser/result.json"); link-browser-filter: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/link-browser-filter/result.json")" \
-  --side-effect "opened sink stayed [] in both scenarios; see each scenario's renamed result.json" \
+  --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
+  --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
+  --side-effect "opened sink stayed [] in every scenario run; see each scenario's renamed result.json" \
   $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
