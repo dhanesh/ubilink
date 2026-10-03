@@ -242,7 +242,7 @@ file:
 ```
 
 - `capture-ok.json`: no `delay_ms` — resolves immediately.
-- `capture-delayed.json`: `delay_ms: 300` exactly (R1's proof measures the
+- `capture-delayed.json`: `delay_ms: 1000` exactly (spec R1's 1 s delay; its proof measures the
   `capturing` state rendering *before* this resolves, then the real data after).
 - `capture-failed.json`: only `error`, no `name`/`uri`/`app`/`delay_ms`.
 - `capture-subject.json` (R3): a success capture of `graph-backlinks*.json`'s subject

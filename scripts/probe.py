@@ -664,8 +664,8 @@ def _validate_capture_delayed(doc) -> list:
     delay = doc.get("delay_ms")
     if not isinstance(delay, int) or isinstance(delay, bool):
         issues.append("delay_ms must be an integer")
-    elif delay != 300:
-        issues.append(f"delay_ms must be 300 (R1's proof fixture), got {delay}")
+    elif delay != 1000:
+        issues.append(f"delay_ms must be 1000 (R1's 1 s proof fixture), got {delay}")
     return issues
 
 
@@ -1662,9 +1662,10 @@ def text_matches(want: str, have: str, exact: bool = False) -> bool:
     `want` matches `have` when, after normalising both, `want` is a substring of
     `have` (or equal, with exact=True). If `have` was cut with a trailing ellipsis
     ("Capture: https://exa…"), it also matches when the visible text before the
-    ellipsis ends with a prefix of `want` at least 6 characters long (or all of
-    `want`, if shorter); a leading ellipsis is handled the same way from the other
-    end. Rows in a narrow panel are truncated by design, and a probe must not fail
+    ellipsis ends with a prefix of `want` at least max(12, half of `want`)
+    characters long (or all of `want`, if shorter); a leading ellipsis is handled the
+    same way from the other end. The floor keeps an over-truncated label ("https://…")
+    from matching every URI that shares its first few characters (Task 11 fix round 1). Rows in a narrow panel are truncated by design, and a probe must not fail
     because the fixture URI is longer than the row.
     """
     w, h = norm_text(want), norm_text(have)
@@ -1674,7 +1675,7 @@ def text_matches(want: str, have: str, exact: bool = False) -> bool:
         return False
     if (h == w) if exact else (w in h):
         return True
-    need = min(len(w), 6)
+    need = min(len(w), max(12, -(-len(w) // 2)))
     if h.endswith("..."):
         head = h[:-3].rstrip()
         if exact:
@@ -2525,17 +2526,24 @@ def run_ocr(ctx: RunContext, step: dict) -> str:
     return f"{len(wants)} OCR text(s) {'absent' if absent else 'present'} ({png.name})"
 
 
+# Smallest region, in points, a view may report for a colour sample (ruling R-q): a
+# real surface, text run or control, never a 1x1 test swatch painted for the probe.
+STATE_REGION_MIN_PT = 24
+
+
 def state_region(state, path: str) -> dict:
-    """The `{x, y, w?, h?}` region a view reports at `path` in its `state` (window
-    points from the top-left), or StepFailed: a view that does not say where its
-    surface is has not met the contract, which is a product failure."""
+    """The `{x, y, w, h}` region a view reports at `path` in its `state` (window
+    points from the top-left), at least STATE_REGION_MIN_PT on each side, or
+    StepFailed: a view that does not say where its surface is (or points at a token
+    swatch) has not met the contract, which is a product failure."""
     r = get_path(state, path)
-    ok = isinstance(r, dict) and all(_num(r.get(k)) for k in ("x", "y")) and all(
-        _num(r[k]) and r[k] > 0 for k in ("w", "h") if k in r
-    )
+    ok = isinstance(r, dict) and all(_num(r.get(k)) for k in ("x", "y", "w", "h"))
     if not ok:
         raise StepFailed(f"no sample region at state {path!r}", "{x, y, w, h} in window points",
                          "<missing>" if r is _MISSING else r)
+    if r["w"] < STATE_REGION_MIN_PT or r["h"] < STATE_REGION_MIN_PT:
+        raise StepFailed(f"sample region at state {path!r} is too small",
+                         f"w and h >= {STATE_REGION_MIN_PT} pt", r)
     return r
 
 
@@ -3134,6 +3142,15 @@ def parse_perf_table(text: str) -> dict:
     return rows
 
 
+_MAKE_PERF_RE = re.compile(r"scripts/probe\.py\s+budget\b")
+
+
+def make_runs_performance(dry_run: str) -> bool:
+    """Whether `make -n <target>` output has a line running `scripts/probe.py budget`,
+    the measurement that produces PERFORMANCE.md (README "PERFORMANCE.md format")."""
+    return any(_MAKE_PERF_RE.search(line) for line in dry_run.splitlines())
+
+
 def perf_tolerance(key: str, measured: float) -> float:
     absolute, relative = PERF_ROWS[key][2]
     return max(absolute, relative * abs(measured))
@@ -3169,7 +3186,13 @@ def run_perf_doc(ctx: RunContext, step: dict) -> str:
         if mk.returncode != 0:
             raise StepFailed(f"make target {step['make_target']!r}", "make -n exits 0",
                              (mk.stderr or mk.stdout).strip()[:300])
-        detail += f", make -n {step['make_target']} ok"
+        # The target must actually measure (fix round 1): a no-op `budget:` would
+        # otherwise pass. Its recipe has to run the measurement, `probe.py budget`.
+        if not make_runs_performance(mk.stdout):
+            raise StepFailed(f"make {step['make_target']} does not measure",
+                             "a recipe line running scripts/probe.py budget",
+                             mk.stdout.strip()[:300] or "<empty recipe>")
+        detail += f", make -n {step['make_target']} runs probe.py budget"
     return detail
 
 
@@ -3204,7 +3227,7 @@ class Tally:
         self.passed = self.failed = self.blocked = self.errors = 0
 
     def exit_code(self) -> int:
-        # 2 = a scenario is wrong, 1 = the product (or the harness) failed,
+        # 2 = a scenario or the harness is wrong, 1 = the product failed,
         # 3 = only the environment blocked steps; 0 only if everything passed.
         if self.errors:
             return 2
@@ -3313,7 +3336,11 @@ def run_steps(ctx: RunContext, tally: Tally, prefix: str) -> bool:
                 tally.passed -= passed
                 try:
                     reset_panel(ctx)
-                except (ProbeError, CallError) as e:
+                except ProbeError as e:
+                    tally.errors += 1
+                    print(f"ERROR {prefix}: harness: could not reset the panel for a retry: {e}")
+                    return False
+                except CallError as e:
                     tally.failed += 1
                     print(f"FAIL  {prefix}: could not reset the panel for a retry: {e}")
                     return False
@@ -3341,7 +3368,15 @@ def _run_unit(ctx, unit, tally, prefix, total, retry_left):
             tally.errors += 1
             print(f"ERROR {head}\n      {e}")
             return "fail", passed
-        except (StepFailed, ProbeError, CallError) as e:
+        except ProbeError as e:
+            # Harness trouble (a helper, a build, the socket, an instance that will
+            # not start) is never a product FAIL: exit 2, so `list --expect-failing`
+            # and the factory verifier cannot count a broken harness as the product
+            # failing (Task 11 fix round 1, ruling R-q).
+            tally.errors += 1
+            print(f"ERROR {head}\n      harness: {e}")
+            return "fail", passed
+        except (StepFailed, CallError) as e:
             thief = None
             if isinstance(e, StepFailed) and is_visibility_step(kind, step):
                 thief = focus_thief(before, _frontmost(), ctx.owned_pids())
@@ -3373,7 +3408,11 @@ def _run_unit(ctx, unit, tally, prefix, total, retry_left):
 def _check(tally: Tally, head: str, fn):
     try:
         detail = fn()
-    except (StepFailed, ProbeError, CallError) as e:
+    except ProbeError as e:
+        tally.errors += 1
+        print(f"ERROR {head}\n      harness: {e}")
+        return
+    except (StepFailed, CallError) as e:
         tally.failed += 1
         print(f"FAIL  {head}")
         if isinstance(e, StepFailed):
@@ -3461,15 +3500,21 @@ def run_scenario(sc: dict, binary: Path, n: int, tally: Tally):
                 if not p.is_absolute():
                     p = inst.fixtures_dir / p
                 inst.call("load_fixture", kind=kind, path=str(p))
+        sc["_contexts"] = []
         for k, inst in enumerate(instances):
             prefix = f"{name}#{k + 1}" if n > 1 else name
-            run_steps(RunContext(inst, sc), tally, prefix)
+            ctx = RunContext(inst, sc)
+            sc["_contexts"].append(ctx)
+            run_steps(ctx, tally, prefix)
         if n > 1:
             side_by_side_checks(name, instances, tally)
     except ScenarioError as e:
         tally.errors += 1
         print(f"ERROR {name}: {e}")
-    except (ProbeError, CallError) as e:
+    except ProbeError as e:
+        tally.errors += 1
+        print(f"ERROR {name}: harness: {e}")
+    except CallError as e:
         tally.failed += 1
         print(f"FAIL  {name}: {e}")
     finally:
@@ -3504,7 +3549,6 @@ def wait_for_display(timeout_s: float = 5.0):
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run scenario files against fresh isolated automation instances (R8)."""
-    tally = Tally()
     try:
         scenarios = [load_scenario(n) for n in args.names]
     except ScenarioError as e:
@@ -3513,7 +3557,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.instances < 1:
         print("ERROR --instances must be >= 1")
         return 2
+    return run_loaded(scenarios, args.instances, " ".join(args.names))
 
+
+def run_loaded(scenarios: list, instances: int, label: str) -> int:
+    """`run`'s body over already-validated scenarios (also `budget`'s engine). Each
+    scenario dict gets `_contexts`: its instances' RunContexts, for saved values."""
+    tally = Tally()
     # A SIGTERM from a verifier's timeout must still stop the instances and remove
     # their temp roots: turn it into SystemExit so the finally blocks run.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -3538,10 +3588,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         wait_for_display()
         with desktop_lock():
             for sc in scenarios:
-                run_scenario(sc, binary, args.instances, tally)
+                run_scenario(sc, binary, instances, tally)
     except ProbeError as e:
-        print(f"FAIL  {e}")
-        return 1
+        print(f"ERROR harness: {e}")
+        return 2
     except EnvBlocked as e:
         print(f"ENV-BLOCKED {e}")
         return 3
@@ -3557,7 +3607,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     code = tally.exit_code()
     verdict = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "ENV-BLOCKED"}[code]
     print(
-        f"{verdict}: run {' '.join(args.names)} (instances={args.instances}) — "
+        f"{verdict}: run {label} (instances={instances}) — "
         f"{tally.passed} passed, {tally.failed} failed, {tally.blocked} env-blocked, "
         f"{tally.errors} scenario error(s)"
     )
@@ -3568,6 +3618,77 @@ def cmd_run(args: argparse.Namespace) -> int:
     if _SHOTS_DIR is not None:
         print(f"screenshots: {_SHOTS_DIR}")
     return code
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `budget`: measure the numbers docs/PERFORMANCE.md records (Phase 1 R15)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# `make budget` (Phase 1) must run this: it measures the release app exactly as
+# performance.json's `release_budget` step does and the 50-trigger hotkey latency as
+# panel-hotkey.json does, prints the PERFORMANCE.md table, and with --write puts it
+# into the doc between markers. performance.json then re-measures and requires the
+# doc to agree, so the doc can be produced without first having to exist.
+
+BUDGET_BEGIN = "<!-- probe.py budget: begin -->"
+BUDGET_END = "<!-- probe.py budget: end -->"
+
+
+def budget_table(measured: dict) -> str:
+    rows = ["| Metric | Budget | Measured |", "|---|---|---|"]
+    for key, (budget, _, _) in PERF_ROWS.items():
+        rows.append(f"| {key} | {budget} | {measured[key]:g} |")
+    return "\n".join(rows)
+
+
+def write_budget(path: Path, table: str):
+    """Replace the marked block in `path` (or append it, or create the file)."""
+    block = f"{BUDGET_BEGIN}\n{table}\n{BUDGET_END}"
+    path = Path(path)
+    text = path.read_text(encoding="utf-8") if path.is_file() else "# Performance budget\n\n"
+    if BUDGET_BEGIN in text and BUDGET_END in text:
+        head, rest = text.split(BUDGET_BEGIN, 1)
+        tail = rest.split(BUDGET_END, 1)[1]
+        text = head + block + tail
+    else:
+        text = text.rstrip("\n") + "\n\n" + block + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def budget_scenario() -> dict:
+    hot = load_scenario("panel-hotkey")["steps"]
+    steps = [{"name": "release app idle budget", "release_budget": True, "idle_s": 60, "settle_s": 5,
+              "cpu_pct_lt": PERF_ROWS["idle_cpu_percent"][1],
+              "footprint_mb_lt": PERF_ROWS["physical_footprint_mb"][1],
+              "binary_mb_lt": PERF_ROWS["stripped_binary_mb"][1]}] + hot + [
+        {"name": "hotkey latency", "call": "metrics",
+         "save": {"hotkey_p50_ms": "summary.hotkey_to_first_frame.p50",
+                  "hotkey_p99_ms": "summary.hotkey_to_first_frame.p99"}}]
+    for i, st in enumerate(steps, 1):
+        validate_step(st, f"budget step {i}")
+    return {"description": "measure the PERFORMANCE.md numbers", "steps": steps, "_name": "budget"}
+
+
+def cmd_budget(args: argparse.Namespace) -> int:
+    try:
+        sc = budget_scenario()
+    except ScenarioError as e:
+        print(f"ERROR {e}")
+        return 2
+    code = run_loaded([sc], 1, "budget")
+    ctxs = sc.get("_contexts") or []
+    saved = ctxs[0].saved if ctxs else {}
+    if code != 0 or any(k not in saved for k in PERF_ROWS):
+        print("budget: not written (the measurement did not complete within budget)")
+        return code or 2
+    measured = {k: round(float(saved[k]), 3) for k in PERF_ROWS}
+    table = budget_table(measured)
+    print(table)
+    if args.write:
+        write_budget(Path(args.write), table)
+        print(f"budget: wrote {args.write}")
+    return 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -4083,6 +4204,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run each scenario against N simultaneous instances and check they stay isolated.",
     )
     p_run.set_defaults(func=cmd_run)
+
+    # ── budget ─────────────────────────────────────────────────────────
+    p_budget = subparsers.add_parser(
+        "budget",
+        help="Measure the release app and hotkey latency; print (or --write) the PERFORMANCE.md table.",
+    )
+    p_budget.add_argument("--write", default=None, help="Put the table into this file (e.g. docs/PERFORMANCE.md).")
+    p_budget.set_defaults(func=cmd_budget)
 
     # ── list ───────────────────────────────────────────────────────────
     p_list = subparsers.add_parser(

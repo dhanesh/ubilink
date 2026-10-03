@@ -206,3 +206,36 @@ tree):
 - Escape closes a `Dialog` (gpui-component's own binding) and focus returns to what
   was focused before it opened.
 
+### Navigating a list while an Input keeps focus (Task 11 fix round 1)
+
+Phase 1's browser keeps its filter `Input` focused (R5 types into it) while arrows,
+Home/End, Enter, ⌘L, Right/Left drive the list. Key order in gpui-pre 0.3.7
+(`Window::dispatch_key_event`): a keystroke that matches a binding on the focus path
+dispatches that **action first**, with a capture phase (root → focused) then a bubble
+phase (focused → root). Raw `on_key_down`/`capture_key_down` listeners run only if the
+action propagated all the way, and then, for an unmodified printable key (and
+`enter`, `space`, `tab`, which get a simulated `key_char`), the text goes to the
+focused input handler. So a parent's `on_key_down` never sees a key the Input handles.
+
+What a focused single-line gpui-component `Input` (`gpui-base` `input/base`
+`state.rs` bindings, `movement.rs`/`state.rs` handlers) does with each key the Phase 1
+scenarios send, and the pattern a parent view uses:
+
+| Key | The focused Input | Parent pattern |
+|---|---|---|
+| `up` / `down` | `MoveUp`/`MoveDown`: single-line no-op, **not propagated** (swallowed) | `capture_action::<MoveUp>` / `<MoveDown>` on a parent, move the list, `cx.stop_propagation()` (**proven live**, a11y-spike) |
+| `home` / `end` | `MoveHome`/`MoveEnd`: moves the caret, **not propagated** (swallowed) | `capture_action::<MoveHome>` / `<MoveEnd>`, `cx.stop_propagation()` (**proven live**: End selects the last row) |
+| `enter` | `Enter`: single-line emits `PressEnter` and propagates; if nothing stops it, the simulated `"\n"` then reaches the input handler | `capture_action::<Enter>`, open the selection, `cx.stop_propagation()` |
+| `right` / `left` | `MoveRight`/`MoveLeft`: moves the caret; propagates only when the caret is already at the end/start | `on_action::<MoveRight>` / `<MoveLeft>` (bubble phase): runs only at the text edges, always with an empty filter (as in browser-drill and link-marking), and leaves in-text caret moves to the Input (Tauri parity: ← edits a non-empty filter) |
+| `cmd-l` | not bound; no simulated `key_char` (platform modifier), so it reaches raw key listeners | `on_key_down` on a parent: `event.keystroke.key == "l" && event.keystroke.modifiers.platform` → mark/link, `cx.stop_propagation()` |
+| `escape` | `Escape`: propagates (unless `clean_on_escape`) | `capture_action::<Escape>` (or `on_action`) for the Tauri behaviour |
+| `backspace` | deletes; propagates only at the start of the text | nothing: R5 relies on the Input deleting |
+| printable keys | inserted through the input handler (proven live) | nothing |
+
+The action types are re-exported as `gpui_kit::component::input::{MoveUp, MoveDown,
+MoveHome, MoveEnd, MoveLeft, MoveRight, Enter, Escape}`. `views/a11y_spike.rs` is the
+reference: a parent `div` with `.capture_action(cx.listener(|this, _: &MoveEnd,
+window, cx| { /* select last row */ cx.stop_propagation(); }))`. The list is a sibling
+of the Input, so its own `List` bindings are not on the focus path; the parent drives
+it with `ListState::set_selected_index` + `scroll_to_selected_item`.
+

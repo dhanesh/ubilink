@@ -62,7 +62,7 @@ class PathAndMatchers(unittest.TestCase):
         self.assertTrue(ok("abc/export.json", {"matches": r"export\.json$"}))
         self.assertTrue(ok(["a", "b"], {"contains": "a"}))
         self.assertTrue(ok("popup", {"in": ["popup", "other"]}))
-        self.assertTrue(ok("Capture: https://exa…", {"text": "https://example.com"}))
+        self.assertTrue(ok("Capture: https://example…", {"text": "https://example.com"}))
         self.assertTrue(ok(probe._MISSING, {"exists": False}))
         self.assertFalse(ok(probe._MISSING, {"type": "null"}))
         # An object with a non-operator key is a literal, compared for equality.
@@ -82,7 +82,7 @@ class TextMatching(unittest.TestCase):
         self.assertFalse(probe.text_matches("Capture", "Capture link", exact=True))
 
     def test_trailing_ellipsis(self):
-        have = "Capture: https://exa…"
+        have = "Capture: https://example.c…"
         self.assertTrue(probe.text_matches("https://example.com/page", have))
         self.assertTrue(probe.text_matches("https://example.com/page", "https://example.co...", exact=True))
         # Too little visible before the ellipsis to be evidence.
@@ -690,11 +690,11 @@ class FixturesValidators(unittest.TestCase):
         }
         self.assertEqual(probe._validate_graph_shape(clean), [])
 
-    def test_capture_delayed_requires_exactly_300ms(self):
-        ok = {"name": "N", "uri": "u", "app": "A", "delay_ms": 300}
+    def test_capture_delayed_requires_exactly_1s(self):
+        ok = {"name": "N", "uri": "u", "app": "A", "delay_ms": 1000}
         self.assertEqual(probe._validate_capture_delayed(ok), [])
-        wrong = {**ok, "delay_ms": 301}
-        self.assertTrue(any("300" in i for i in probe._validate_capture_delayed(wrong)))
+        wrong = {**ok, "delay_ms": 300}
+        self.assertTrue(any("1000" in i for i in probe._validate_capture_delayed(wrong)))
 
     def test_capture_failed_rejects_a_terse_or_mixed_shape(self):
         self.assertTrue(probe._validate_capture_failed({"error": "nope"}), "too terse for U3")
@@ -1682,10 +1682,13 @@ class SeedGraph(unittest.TestCase):
 
 class PixelRegionsAndBestMatch(unittest.TestCase):
     def test_state_region(self):
-        st = {"view": {"theme_samples": {"surface": {"x": 4, "y": 8, "w": 20, "h": 10}}}}
-        self.assertEqual(probe.state_region(st, "view.theme_samples.surface")["w"], 20)
+        st = {"view": {"theme_samples": {"surface": {"x": 4, "y": 8, "w": 40, "h": 24}}}}
+        self.assertEqual(probe.state_region(st, "view.theme_samples.surface")["w"], 40)
         for bad in ({"view": None}, {"view": {"theme_samples": {"surface": {"x": 1}}}},
-                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1, "w": 0}}}}):
+                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1, "w": 0, "h": 30}}}},
+                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1}}}},  # no size
+                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1, "w": 1, "h": 1}}}},  # a swatch
+                    {"view": {"theme_samples": {"surface": {"x": 1, "y": 1, "w": 200, "h": 23}}}}):
             with self.subTest(bad=bad), self.assertRaises(probe.StepFailed):
                 probe.state_region(bad, "view.theme_samples.surface")
 
@@ -1861,6 +1864,93 @@ class LoginItemFixtures(unittest.TestCase):
     def test_kind_is_one_the_app_accepts(self):
         src = (probe.REPO_ROOT / "desktop-gpui" / "src" / "automation" / "protocol.rs").read_text()
         self.assertIn('(Fixture::LoginItem, "login_item")', src)
+
+
+class FixRound1(unittest.TestCase):
+    def test_ellipsis_floor_is_max_12_or_half(self):
+        uri = "https://fixture-00231.example.test/resource"   # 43 chars: need 22
+        self.assertFalse(probe.text_matches(uri, "https://…"), "over-truncated label is no evidence")
+        self.assertFalse(probe.text_matches(uri, "https://fixture-0…"))          # 17 visible
+        self.assertTrue(probe.text_matches(uri, "https://fixture-00231.exa…"))   # 25 visible
+        self.assertFalse(probe.text_matches("https://fixture-00232.example.test/resource",
+                                            "https://fixture-00231.exa…"))
+        # short expected text: the floor is 12, or all of it
+        self.assertTrue(probe.text_matches("Gamma Doc", "Gamma Doc…"))
+        self.assertFalse(probe.text_matches("Gamma Document", "Gamma Do…"))
+        self.assertTrue(probe.text_matches("https://subject.example/note", "…ubject.example/note"))
+        self.assertFalse(probe.text_matches("https://subject.example/note", "…ple/note"))
+
+    def test_over_truncated_rows_cannot_fake_an_order_or_dodge_absent(self):
+        tree = {"root": "w", "nodes": {
+            "w": {"aria": {"role": "Window"}, "children": ["a", "b"]},
+            "a": {"aria": {"role": "ListItem"}, "children": ["a1"]},
+            "a1": {"aria": {"role": "Label", "value": "https://…"}},
+            "b": {"aria": {"role": "ListItem"}, "children": ["b1"]},
+            "b1": {"aria": {"role": "Label", "value": "https://…"}}}}
+        seq = {"sequence": {"role": "ListItem", "deep": True, "mode": "exact",
+                            "texts": ["https://gamma.example/three", "https://beta.example/two"]}}
+        with self.assertRaises(probe.StepFailed):
+            probe.check_a11y_query(tree, seq)
+        probe.check_a11y_query(tree, {"role": "ListItem", "text": "https://decoy.example/unrelated", "deep": True},
+                               absent=True)
+
+    def test_harness_errors_exit_2_not_1(self):
+        class Inst:
+            root = data_dir = fixtures_dir = Path("/nonexistent")
+            name = "t"
+            proc = None
+
+            def request(self, verb, args):
+                raise probe.ProbeError("instance t closed the socket on state")
+
+        ctx = probe.RunContext(Inst(), {"steps": [{"call": "state"}]})
+        ctx.tokens = lambda: {}
+        tally = probe.Tally()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            probe.run_steps(ctx, tally, "t")
+        self.assertIn("harness", out.getvalue())
+        self.assertEqual((tally.errors, tally.failed), (1, 0))
+        self.assertEqual(tally.exit_code(), 2)
+
+    def test_run_exits_2_when_the_build_fails(self):
+        saved = probe.build_binary
+        probe.build_binary = lambda *a, **k: (_ for _ in ()).throw(probe.ProbeError("automation build exited 101"))
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = probe.main(["run", "shell"])
+        finally:
+            probe.build_binary = saved
+        self.assertEqual(code, 2)
+        self.assertIn("ERROR harness", out.getvalue())
+
+    def test_make_budget_must_run_the_measurement(self):
+        self.assertTrue(probe.make_runs_performance("python3 scripts/probe.py budget --write docs/PERFORMANCE.md\n"))
+        for noop in ("", "true\n", "echo budget\n", "python3 scripts/probe.py list\n",
+                     "python3 scripts/probe.py run performance\n"):
+            with self.subTest(noop=noop):
+                self.assertFalse(probe.make_runs_performance(noop))
+
+    def test_budget_table_round_trips_through_perf_doc(self):
+        measured = {"idle_cpu_percent": 0.05, "physical_footprint_mb": 33.2, "stripped_binary_mb": 12.34,
+                    "hotkey_p50_ms": 30.5, "hotkey_p99_ms": 70.0}
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "docs" / "PERFORMANCE.md"
+            probe.write_budget(doc, probe.budget_table(measured))
+            doc.write_text(doc.read_text() + "\nNotes kept.\n")
+            probe.write_budget(doc, probe.budget_table(dict(measured, hotkey_p99_ms=80.0)))
+            text = doc.read_text()
+            self.assertEqual(text.count(probe.BUDGET_BEGIN), 1)
+            self.assertIn("Notes kept.", text)
+            rows = probe.parse_perf_table(text)
+            self.assertEqual(rows["hotkey_p99_ms"], ("< 200", 80.0))
+            self.assertEqual(set(rows), set(probe.PERF_ROWS))
+
+    def test_budget_scenario_is_valid(self):
+        sc = probe.budget_scenario()
+        kinds = [probe.step_type(st, "") for st in sc["steps"]]
+        self.assertEqual(kinds[0], "release_budget")
+        self.assertGreaterEqual(kinds.count("call"), 100)
+        probe.check_saves(sc["steps"], "budget")
 
 
 class CaptureSubjectFixture(unittest.TestCase):

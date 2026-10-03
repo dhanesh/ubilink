@@ -48,7 +48,7 @@
 //!   usual; only the dialog surface itself, and anything else using
 //!   `.focus_trap(..)`, loses its node. See `probes/A11Y-NOTES.md`.
 
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputState, MoveDown, MoveEnd, MoveHome, MoveUp};
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt};
@@ -139,6 +139,29 @@ impl A11ySpikeView {
     }
 }
 
+impl A11ySpikeView {
+    /// Select row `ix` (0..3) of the spike list.
+    fn select_row(&mut self, ix: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(list) = &self.list {
+            list.update(cx, |state, cx| {
+                state.set_selected_index(ix.map(IndexPath::new), window, cx);
+                state.scroll_to_selected_item(window, cx);
+            });
+        }
+    }
+
+    /// Move the list's selection by `delta`, clamped to its three rows.
+    fn step_row(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self
+            .list
+            .as_ref()
+            .and_then(|l| l.read(cx).selected_index())
+            .map_or(0, |ix| ix.row as isize);
+        let next = (current + delta).clamp(0, 2) as usize;
+        self.select_row(Some(next), window, cx);
+    }
+}
+
 impl Render for A11ySpikeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let list = self
@@ -179,6 +202,31 @@ impl Render for A11ySpikeView {
 
         let theme = cx.theme();
         div()
+            // Task 11 fix round 1: list navigation while the Input keeps focus, the
+            // pattern Phase 1's browser needs (its filter stays focused). The focused
+            // single-line Input binds up/down/home/end to MoveUp/MoveDown/MoveHome/
+            // MoveEnd and never propagates them, and GPUI dispatches a matched
+            // binding's action BEFORE any raw key_down listener, so `on_key_down` on
+            // a parent never sees these keys. A parent's `capture_action` runs in the
+            // action's capture phase (root -> focused), before the Input's own
+            // bubble-phase handler; it moves the list and stops propagation so the
+            // Input's caret does not move too. See A11Y-NOTES.md "Keyboard".
+            .capture_action(cx.listener(|this, _: &MoveEnd, window, cx| {
+                this.select_row(Some(2), window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &MoveHome, window, cx| {
+                this.select_row(Some(0), window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                this.step_row(1, window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
+                this.step_row(-1, window, cx);
+                cx.stop_propagation();
+            }))
             .size_full()
             .flex()
             .flex_col()
