@@ -6,7 +6,8 @@
   "Hidden means three things: state.shell.visible false, the shell has no panel (window_id refuses), and the window number winframe saw is gone from Quartz's on-screen window list (winframe: gone).",
   "Kept open means state.shell.visible true on the same route and the window still within a display.",
   "Onboarding has no hotkey; it opens through open_view (the tray's path).",
-  "Before each real deactivation another app (Calculator) is made frontmost and the panel opened over it, so 'open -a Finder' is always a real change of active app: re-activating an already-frontmost Finder changes nothing and would make the settings/onboarding 'stays open' checks vacuous. Calculator is left running."
+  "activate_other launches the probe's own activator app (scripts/probe-helpers/activator.swift), which takes key status and quits at the end of the step: always a real change of active app, and no user app is launched (O4).",
+  "Each case is a block: if another app takes focus during a visibility check, the probe re-runs that block once and reports ENV-BLOCKED on a second theft (probes/README.md)."
  ],
  "steps": [
   {
@@ -17,7 +18,8 @@
    "expect": {
     "route": "capture"
    },
-   "name": "capture: open"
+   "name": "capture: open",
+   "block": "capture-resign-key"
   },
   {
    "name": "capture: shown",
@@ -27,11 +29,13 @@
     "shell.visible": true,
     "route": "capture",
     "window_verified": true
-   }
+   },
+   "block": "capture-resign-key"
   },
   {
    "name": "capture: on screen",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "capture-resign-key"
   },
   {
    "name": "capture: resign_key hides",
@@ -41,20 +45,19 @@
     "closed": true,
     "state.shell.visible": false,
     "state.route": null
-   }
+   },
+   "block": "capture-resign-key"
   },
   {
    "name": "capture: shell has no panel",
    "call": "window_id",
-   "expect_error": "no panel open"
+   "expect_error": "no panel open",
+   "block": "capture-resign-key"
   },
   {
    "name": "capture: window left the screen (resign_key)",
-   "winframe": "gone"
-  },
-  {
-   "name": "capture: another app frontmost first",
-   "activate_other": "Calculator"
+   "winframe": "gone",
+   "block": "capture-resign-key"
   },
   {
    "call": "trigger_hotkey",
@@ -64,7 +67,8 @@
    "expect": {
     "route": "capture"
    },
-   "name": "capture: reopen"
+   "name": "capture: reopen",
+   "block": "capture-deactivate"
   },
   {
    "name": "capture: shown again",
@@ -73,15 +77,18 @@
    "expect": {
     "shell.visible": true,
     "route": "capture"
-   }
+   },
+   "block": "capture-deactivate"
   },
   {
    "name": "capture: on screen again",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "capture-deactivate"
   },
   {
    "name": "capture: real loss of key status",
-   "activate_other": true
+   "activate_other": true,
+   "block": "capture-deactivate"
   },
   {
    "name": "capture: hidden by the real deactivation",
@@ -90,11 +97,13 @@
    "expect": {
     "shell.visible": false,
     "route": null
-   }
+   },
+   "block": "capture-deactivate"
   },
   {
    "name": "capture: window left the screen (activate_other)",
-   "winframe": "gone"
+   "winframe": "gone",
+   "block": "capture-deactivate"
   },
   {
    "call": "trigger_hotkey",
@@ -104,7 +113,8 @@
    "expect": {
     "route": "browser"
    },
-   "name": "browser: open"
+   "name": "browser: open",
+   "block": "browser-resign-key"
   },
   {
    "name": "browser: shown",
@@ -114,11 +124,13 @@
     "shell.visible": true,
     "route": "browser",
     "window_verified": true
-   }
+   },
+   "block": "browser-resign-key"
   },
   {
    "name": "browser: on screen",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "browser-resign-key"
   },
   {
    "name": "browser: resign_key hides",
@@ -128,20 +140,19 @@
     "closed": true,
     "state.shell.visible": false,
     "state.route": null
-   }
+   },
+   "block": "browser-resign-key"
   },
   {
    "name": "browser: shell has no panel",
    "call": "window_id",
-   "expect_error": "no panel open"
+   "expect_error": "no panel open",
+   "block": "browser-resign-key"
   },
   {
    "name": "browser: window left the screen (resign_key)",
-   "winframe": "gone"
-  },
-  {
-   "name": "browser: another app frontmost first",
-   "activate_other": "Calculator"
+   "winframe": "gone",
+   "block": "browser-resign-key"
   },
   {
    "call": "trigger_hotkey",
@@ -151,7 +162,8 @@
    "expect": {
     "route": "browser"
    },
-   "name": "browser: reopen"
+   "name": "browser: reopen",
+   "block": "browser-deactivate"
   },
   {
    "name": "browser: shown again",
@@ -160,15 +172,18 @@
    "expect": {
     "shell.visible": true,
     "route": "browser"
-   }
+   },
+   "block": "browser-deactivate"
   },
   {
    "name": "browser: on screen again",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "browser-deactivate"
   },
   {
    "name": "browser: real loss of key status",
-   "activate_other": true
+   "activate_other": true,
+   "block": "browser-deactivate"
   },
   {
    "name": "browser: hidden by the real deactivation",
@@ -177,15 +192,13 @@
    "expect": {
     "shell.visible": false,
     "route": null
-   }
+   },
+   "block": "browser-deactivate"
   },
   {
    "name": "browser: window left the screen (activate_other)",
-   "winframe": "gone"
-  },
-  {
-   "name": "settings: another app frontmost first",
-   "activate_other": "Calculator"
+   "winframe": "gone",
+   "block": "browser-deactivate"
   },
   {
    "call": "trigger_hotkey",
@@ -195,7 +208,8 @@
    "expect": {
     "route": "settings"
    },
-   "name": "settings: open"
+   "name": "settings: open",
+   "block": "settings-stays"
   },
   {
    "name": "settings: shown",
@@ -205,11 +219,13 @@
     "shell.visible": true,
     "route": "settings",
     "window_verified": true
-   }
+   },
+   "block": "settings-stays"
   },
   {
    "name": "settings: on screen",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "settings-stays"
   },
   {
    "name": "settings: resign_key keeps it",
@@ -219,16 +235,19 @@
     "closed": false,
     "state.shell.visible": true,
     "state.route": "settings"
-   }
+   },
+   "block": "settings-stays"
   },
   {
    "name": "settings: still on screen (resign_key)",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "settings-stays"
   },
   {
    "name": "settings: real loss of key status",
    "activate_other": true,
-   "settle_ms": 800
+   "settle_ms": 800,
+   "block": "settings-stays"
   },
   {
    "name": "settings: still shown after the real deactivation",
@@ -236,11 +255,13 @@
    "expect": {
     "shell.visible": true,
     "route": "settings"
-   }
+   },
+   "block": "settings-stays"
   },
   {
    "name": "settings: still on screen (activate_other)",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "settings-stays"
   },
   {
    "name": "settings: still open later",
@@ -250,7 +271,8 @@
      "type": "number",
      "gt": 0
     }
-   }
+   },
+   "block": "settings-stays"
   },
   {
    "name": "close settings",
@@ -260,14 +282,13 @@
    },
    "expect": {
     "shell.visible": false
-   }
+   },
+   "block": "settings-stays"
   },
   {
-   "winframe": "gone"
-  },
-  {
-   "name": "onboarding: another app frontmost first",
-   "activate_other": "Calculator"
+   "name": "settings: window left the screen (closed)",
+   "winframe": "gone",
+   "block": "settings-stays"
   },
   {
    "call": "open_view",
@@ -277,7 +298,8 @@
    "expect": {
     "route": "onboarding"
    },
-   "name": "onboarding: open"
+   "name": "onboarding: open",
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: shown",
@@ -287,11 +309,13 @@
     "shell.visible": true,
     "route": "onboarding",
     "window_verified": true
-   }
+   },
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: on screen",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: resign_key keeps it",
@@ -301,16 +325,19 @@
     "closed": false,
     "state.shell.visible": true,
     "state.route": "onboarding"
-   }
+   },
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: still on screen (resign_key)",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: real loss of key status",
    "activate_other": true,
-   "settle_ms": 800
+   "settle_ms": 800,
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: still shown after the real deactivation",
@@ -318,11 +345,13 @@
    "expect": {
     "shell.visible": true,
     "route": "onboarding"
-   }
+   },
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: still on screen (activate_other)",
-   "winframe": "any"
+   "winframe": "any",
+   "block": "onboarding-stays"
   },
   {
    "name": "onboarding: still open later",
@@ -332,7 +361,8 @@
      "type": "number",
      "gt": 0
     }
-   }
+   },
+   "block": "onboarding-stays"
   },
   {
    "name": "nothing launched",
