@@ -1,0 +1,98 @@
+# Satisfies: R2 (GPUI Phase 0 — a GPUI crate that builds `ubilink-next.app`).
+# See docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
+#
+# SEPARATE crate from ubilink-core on purpose (D11's rule, fourth time it applies after
+# registry/ and desktop/): GPUI, tray-icon, global-hotkey and the objc2 AppKit
+# bindings are a large native GUI tree, and the core stays GUI-free (D1/D8) so its S2
+# `no_network_deps` guard stays physically true. It also lives BESIDE desktop/ rather
+# than replacing it (spec D4): the Tauri shell keeps shipping until Phase 2, and this
+# crate builds a separately-identified app (`ubilink-next`, `org.ubilink.next`) so the
+# two never share macOS permission grants or a bundle id.
+[package]
+name = "ubilink-next"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "GPUI desktop shell for ubilink (Phase 0 foundation; replaces desktop/ in Phase 2)."
+publish = false
+
+[[bin]]
+name = "ubilink-next"
+path = "src/main.rs"
+
+[features]
+default = []
+# Off by default. Later tasks gate the test-automation hooks (a scripted driver for the
+# four views) behind it so they never reach a shipped build.
+automation = []
+
+[dependencies]
+ubilink-core = { path = "../src-tauri" }
+
+# GPUI through one pinned facade: gpui-kit re-exports gpui (gpui-pre =0.3.7, a zed
+# snapshot), gpui-base and gpui-component. Never add crates.io `gpui` 0.2.2 beside it —
+# two GPUI copies would not interoperate. Exact pin: gpui-pre moves in lockstep with
+# gpui-kit, so a caret range could pull a mismatched set. Default features (`component`
+# + `assets`) are what the four views need: gpui-component does not feature-gate its
+# widgets, so list, virtual_list, input, switch, setting, dialog, notification and theme
+# all come with `component`, and `assets` supplies the icon set they render. The
+# font-kit text stack is switched on by gpui-kit itself (its gpui_platform dependency).
+gpui-kit = "=0.7.0"
+
+# Menu-bar icon and the global hotkey (U1), the same jobs Tauri's tray + global-shortcut
+# plugin do in desktop/.
+tray-icon = "0.26"
+global-hotkey = "0.8"
+
+# Direct AppKit access for what GPUI does not wrap: accessory activation policy, the
+# frontmost app (NSWorkspace/NSRunningApplication), the clipboard (NSPasteboard), the
+# cursor's display (NSEvent/NSScreen) and the panel window (NSView/NSWindow). Default
+# features are off — the crate's default enables every AppKit class — so only the
+# classes the shell uses are compiled; NSResponder is the superclass of NSApplication,
+# NSView and NSWindow, and block2 is needed for the completion-handler and event-monitor
+# APIs.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "NSApplication",
+  "NSResponder",
+  "NSRunningApplication",
+  "NSWorkspace",
+  "NSPasteboard",
+  "NSEvent",
+  "NSScreen",
+  "NSView",
+  "NSWindow",
+] }
+# Forced by objc2-app-kit's API: it takes and returns Foundation types (NSString for
+# pasteboard text and app names, NSArray, NSRect/NSPoint) but does not re-export
+# objc2-foundation, so naming or constructing them needs the crate directly.
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSString",
+  "NSArray",
+  "NSGeometry",
+  "NSURL",
+  "NSError",
+] }
+# Launch at login via SMAppService (replaces the Tauri autostart path).
+objc2-service-management = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2",
+  "objc2-foundation",
+  "SMAppService",
+] }
+
+# Single-instance + the automation channel: a local socket between app instances.
+interprocess = "2.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Stripped, LTO'd release build: the shipped binary is what users download, and GPUI's
+# tree is large. codegen-units = 1 trades build time for size and speed.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
