@@ -5,10 +5,11 @@
 //!
 //! Threads and the event loop (TN4): GPUI owns the main thread's NSApp loop. tray-icon
 //! and global-hotkey are created on that thread inside `Application::run` (by `start`)
-//! and live in the `Shell` global for the app's lifetime. Their events arrive in
-//! crossbeam channels that nothing wakes GPUI for, so a GPUI foreground task polls them
-//! every `POLL` (`pump`). The only other thread is the single-instance listener, which
-//! feeds an mpsc channel the same pump drains. Spec D5's fallback (an objc2 NSStatusItem
+//! and live in the `Shell` global for the app's lifetime. Their event handlers (set in
+//! `start`), plus the single-instance listener thread (the only other thread), post
+//! `ShellEvent`s to one `Inbox`: an mpsc channel and a `wake::Signal`. A GPUI foreground
+//! task awaits the signal and then drains the channel (`pump`). Nothing runs while
+//! idle: no timer and no poll (Phase 1 O1 idle-CPU budget). Spec D5's fallback (an objc2 NSStatusItem
 //! and a Carbon RegisterEventHotKey shim) was not needed: both crates work in GPUI's
 //! loop — see the Task 4 report for the live evidence.
 
@@ -19,9 +20,9 @@ pub mod placement;
 pub mod single_instance;
 pub mod state;
 pub mod tray;
+pub mod wake;
 
-use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use gpui_kit::*;
@@ -31,10 +32,47 @@ use tray_icon::{TrayIcon, TrayIconEvent};
 
 pub use state::ShellState;
 
-/// Event-poll interval. 16 ms keeps a hotkey's poll delay under one 60 Hz frame (R5's
-/// p50 < 80 ms budget has room for it) at the price of ~60 wakeups a second while idle;
-/// the Task 4 report measures the resulting idle CPU.
-const POLL: Duration = Duration::from_millis(16);
+/// Everything that can ask the shell to act, from any thread.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShellEvent {
+    HotKey {
+        id: u32,
+        pressed: bool,
+    },
+    Menu(String),
+    /// A second instance (single-instance socket) asked for the panel.
+    Show,
+}
+
+/// The sending side of the shell's event channel: post an event, then wake the pump.
+/// `Sender` is Send + Sync, so tray-icon and global-hotkey's `Fn + Send + Sync`
+/// handlers can own one.
+#[derive(Clone)]
+pub struct Inbox {
+    tx: Sender<ShellEvent>,
+    signal: wake::Signal,
+}
+
+impl Inbox {
+    pub fn post(&self, event: ShellEvent) {
+        // A send error means the app is shutting down; there is nothing to wake.
+        if self.tx.send(event).is_ok() {
+            self.signal.notify();
+        }
+    }
+}
+
+/// Create the inbox before GPUI starts, so the single-instance listener can post to it.
+pub fn inbox() -> (Inbox, Receiver<ShellEvent>) {
+    let (tx, rx) = mpsc::channel();
+    (
+        Inbox {
+            tx,
+            signal: wake::Signal::default(),
+        },
+        rx,
+    )
+}
 
 /// What the panel shows. Task 13's router turns each into a real view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +135,7 @@ pub struct Shell {
     tray: Option<TrayIcon>,
     _hotkeys: Option<GlobalHotKeyManager>,
     hotkey_routes: Vec<(u32, Route)>,
-    instance_rx: Option<Receiver<()>>,
+    events: Receiver<ShellEvent>,
     panel: Option<Panel>,
 }
 
@@ -105,12 +143,26 @@ impl Global for Shell {}
 
 /// Create the tray and hotkeys and start the event pump. Call once, inside GPUI's run
 /// closure (main thread, NSApp loop running), after the accessory policy is set.
-pub fn start(cx: &mut App, instance_rx: Option<Receiver<()>>) {
-    let mut state = ShellState {
-        window_kind: panel::REQUESTED_KIND.into(),
-        background: panel::REQUESTED_BACKGROUND.into(),
-        ..ShellState::default()
-    };
+pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
+    // Event-driven, not polled: with a handler set, each crate calls it instead of
+    // queueing on its own channel. Both fire on the main thread (Carbon hotkey handler,
+    // NSMenu action); `post` wakes the pump through GPUI's waker either way.
+    let hk = inbox.clone();
+    GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {
+        hk.post(ShellEvent::HotKey {
+            id: e.id(),
+            pressed: e.state() == HotKeyState::Pressed,
+        })
+    }));
+    let menu = inbox.clone();
+    MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
+        menu.post(ShellEvent::Menu(e.id().as_ref().to_string()))
+    }));
+    // Clicks on the item itself open its menu natively. A no-op handler stops
+    // tray-icon queueing every click on a channel nobody reads.
+    TrayIconEvent::set_event_handler(Some(|_: TrayIconEvent| {}));
+
+    let mut state = startup_state();
 
     let tray = match tray::build() {
         Ok(t) => Some(t),
@@ -130,16 +182,24 @@ pub fn start(cx: &mut App, instance_rx: Option<Receiver<()>>) {
         tray,
         _hotkeys: reg.manager,
         hotkey_routes: reg.routes,
-        instance_rx,
+        events,
         panel: None,
     });
     log_state(cx);
 
+    let signal = inbox.signal.clone();
     cx.spawn(async move |cx| loop {
-        cx.background_executor().timer(POLL).await;
+        signal.wait().await;
         cx.update(pump);
     })
     .detach();
+}
+
+/// The state before anything is observed. `window_kind`/`background` stay "unknown"
+/// until a live panel is read back, so a shell that never opened a window cannot pass
+/// R4's popup/blurred check.
+fn startup_state() -> ShellState {
+    ShellState::default()
 }
 
 /// The shell's state with the live values re-read: tray visibility and the activation
@@ -171,26 +231,27 @@ fn pump(cx: &mut App) {
     let Some(shell) = cx.try_global::<Shell>() else {
         return;
     };
-    let mut cmds = Vec::new();
-    while let Ok(e) = GlobalHotKeyEvent::receiver().try_recv() {
-        if e.state() == HotKeyState::Pressed {
-            if let Some((_, r)) = shell.hotkey_routes.iter().find(|(id, _)| *id == e.id()) {
-                cmds.push(Command::Toggle(*r));
-            }
-        }
-    }
-    while let Ok(e) = MenuEvent::receiver().try_recv() {
-        cmds.extend(tray::command_for(e.id().as_ref()));
-    }
-    // Clicks on the item itself open its menu natively; drain so the channel can't grow.
-    while TrayIconEvent::receiver().try_recv().is_ok() {}
-    if let Some(rx) = &shell.instance_rx {
-        while rx.try_recv().is_ok() {
-            cmds.push(Command::Open(Route::Capture));
-        }
-    }
+    let cmds: Vec<Command> = shell
+        .events
+        .try_iter()
+        .filter_map(|e| command_for(&e, &shell.hotkey_routes))
+        .collect();
     for c in cmds {
         execute(c, cx);
+    }
+}
+
+/// Pure: what an event asks for. Only hotkey presses act (a release would toggle the
+/// panel straight back).
+fn command_for(event: &ShellEvent, hotkey_routes: &[(u32, Route)]) -> Option<Command> {
+    match event {
+        ShellEvent::HotKey { id, pressed: true } => hotkey_routes
+            .iter()
+            .find(|(hid, _)| hid == id)
+            .map(|(_, r)| Command::Toggle(*r)),
+        ShellEvent::HotKey { pressed: false, .. } => None,
+        ShellEvent::Menu(id) => tray::command_for(id),
+        ShellEvent::Show => Some(Command::Open(Route::Capture)),
     }
 }
 
@@ -239,9 +300,7 @@ fn open(route: Route, cx: &mut App) {
         s.route = Some(route.as_str().into());
         s.display_id = placement.map(|p| p.display_id);
         if let Some(f) = facts {
-            s.window_kind = if f.popup { "popup" } else { "other" }.into();
-            s.background = if f.blurred { "blurred" } else { "opaque" }.into();
-            s.window_verified = true;
+            s.record_panel(f);
         }
     });
     log_state(cx);
@@ -299,7 +358,44 @@ fn mark_hidden(cx: &mut App) {
 mod tests {
     // Not `super::*`: that glob carries gpui-kit's re-exported `test` macro, which
     // would shadow Rust's `#[test]`.
-    use super::Route;
+    use super::{command_for, startup_state, Command, Route, ShellEvent};
+
+    #[test]
+    fn startup_state_claims_no_window_kind_or_background() {
+        let s = startup_state();
+        assert_eq!(s.window_kind, "unknown");
+        assert_eq!(s.background, "unknown");
+        assert!(!s.window_verified);
+        assert!(!s.visible);
+    }
+
+    #[test]
+    fn events_map_to_commands_presses_only() {
+        let routes = [(7, Route::Capture), (8, Route::Settings)];
+        let press = |id| ShellEvent::HotKey { id, pressed: true };
+        assert_eq!(
+            command_for(&press(7), &routes),
+            Some(Command::Toggle(Route::Capture))
+        );
+        assert_eq!(
+            command_for(&press(8), &routes),
+            Some(Command::Toggle(Route::Settings))
+        );
+        assert_eq!(command_for(&press(9), &routes), None, "unknown id");
+        let release = ShellEvent::HotKey {
+            id: 7,
+            pressed: false,
+        };
+        assert_eq!(command_for(&release, &routes), None);
+        assert_eq!(
+            command_for(&ShellEvent::Menu("quit".into()), &routes),
+            Some(Command::Quit)
+        );
+        assert_eq!(
+            command_for(&ShellEvent::Show, &routes),
+            Some(Command::Open(Route::Capture))
+        );
+    }
 
     #[test]
     fn capture_and_browser_hide_on_deactivate_settings_and_onboarding_stay() {

@@ -3,15 +3,19 @@
 //! assert on it: tray_present, three hotkeys registered, window kind popup, background
 //! blurred, activation accessory.
 //!
-//! Every field is filled from the real objects, never asserted as a constant: the tray
-//! from tray-icon's live NSStatusItem, the hotkeys from each `register` result, the
-//! activation policy read back from `NSApp.activationPolicy`, and the window kind and
-//! background from the open panel's NSWindow (see `native::inspect_panel`). Before the
-//! first panel opens, `window_kind`/`background` hold what the shell REQUESTS of GPUI and
-//! `window_verified` stays false until a live panel has been inspected.
+//! Every field is filled from the real objects: the tray from tray-icon's live
+//! NSStatusItem, the hotkeys from each `register` result, the activation policy read
+//! back from `NSApp.activationPolicy`, and the window kind and background from a live
+//! panel's NSWindow (see `native::inspect_panel`). Until a panel has been opened and
+//! inspected, `window_kind` and `background` are "unknown" and `window_verified` is
+//! false: the shell never reports what it merely asked GPUI for. Once inspected, they
+//! keep the last observed values after the panel hides, and `window_verified` stays
+//! true.
 
 use objc2_app_kit::NSApplicationActivationPolicy;
 use serde::{Deserialize, Serialize};
+
+use super::native::PanelFacts;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ShellState {
@@ -78,6 +82,13 @@ impl ShellState {
     pub fn record_policy(&mut self, policy: NSApplicationActivationPolicy) {
         self.activation_policy = policy_name(policy).into();
     }
+
+    /// Record what AppKit reports for a live panel.
+    pub fn record_panel(&mut self, facts: PanelFacts) {
+        self.window_kind = if facts.popup { "popup" } else { "other" }.into();
+        self.background = if facts.blurred { "blurred" } else { "opaque" }.into();
+        self.window_verified = true;
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +110,34 @@ mod tests {
         assert_eq!(s.activation_policy, "prohibited");
         s.record_policy(NSApplicationActivationPolicy(42));
         assert_eq!(s.activation_policy, "unknown");
+    }
+
+    #[test]
+    fn window_fields_are_unknown_until_a_live_panel_is_recorded() {
+        let mut s = ShellState::default();
+        assert_eq!(
+            (s.window_kind.as_str(), s.background.as_str()),
+            ("unknown", "unknown")
+        );
+        assert!(!s.window_verified);
+        s.record_panel(PanelFacts {
+            popup: true,
+            blurred: true,
+        });
+        assert_eq!(
+            (s.window_kind.as_str(), s.background.as_str()),
+            ("popup", "blurred")
+        );
+        assert!(s.window_verified);
+        // A panel AppKit built differently must not pass for popup/blurred.
+        s.record_panel(PanelFacts {
+            popup: false,
+            blurred: false,
+        });
+        assert_eq!(
+            (s.window_kind.as_str(), s.background.as_str()),
+            ("other", "opaque")
+        );
     }
 
     #[test]

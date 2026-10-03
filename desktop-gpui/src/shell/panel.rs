@@ -22,11 +22,6 @@ use crate::theme::tokens::{font_size, radius, spacing};
 /// Panel size in points: the Tauri panel's (desktop/tauri.conf.json, 640x140).
 pub const PANEL_SIZE: (f64, f64) = (640.0, 140.0);
 
-/// The window kind and background the shell asks GPUI for. `ShellState` reports these
-/// names until a live panel has been read back (see `native::inspect_panel`).
-pub const REQUESTED_KIND: &str = "popup";
-pub const REQUESTED_BACKGROUND: &str = "blurred";
-
 pub fn options(placement: Option<Placement>) -> WindowOptions {
     let (x, y) = placement.map_or((0.0, 0.0), |p| p.local);
     let (w, h) = PANEL_SIZE;

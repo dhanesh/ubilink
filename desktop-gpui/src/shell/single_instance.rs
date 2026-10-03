@@ -13,7 +13,6 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 
 use interprocess::local_socket::{prelude::*, GenericFilePath, ListenerOptions, Stream};
 
@@ -30,7 +29,7 @@ pub fn socket_path() -> PathBuf {
 pub enum Claim {
     /// Another instance is running and was told to show its panel: exit now.
     Signalled,
-    /// This is the only instance; the listener thread forwards "show" requests to `tx`.
+    /// This is the only instance; the listener thread calls `on_show` per "show" request.
     Primary,
     /// The socket could not be created; run anyway (one instance is more important than
     /// a perfect guard) and say so.
@@ -38,8 +37,9 @@ pub enum Claim {
 }
 
 /// Try to signal a running instance; if none answers, become the primary and start a
-/// listener thread that sends `()` on `tx` for each "show" request.
-pub fn claim(tx: Sender<()>) -> Claim {
+/// listener thread that calls `on_show` for each "show" request (main.rs posts
+/// `ShellEvent::Show` to the shell's inbox, which wakes the pump).
+pub fn claim(on_show: impl Fn() + Send + 'static) -> Claim {
     let path = socket_path();
     if let Ok(name) = path.as_os_str().to_fs_name::<GenericFilePath>() {
         if let Ok(mut conn) = Stream::connect(name) {
@@ -68,11 +68,7 @@ pub fn claim(tx: Sender<()>) -> Claim {
             for conn in listener.incoming().filter_map(Result::ok) {
                 let mut line = String::new();
                 if BufReader::new(conn).read_line(&mut line).is_ok() && line.trim() == SHOW {
-                    // The receiver is drained by the GPUI pump; if the app is gone,
-                    // stop listening.
-                    if tx.send(()).is_err() {
-                        break;
-                    }
+                    on_show();
                 }
             }
         })
@@ -96,9 +92,12 @@ mod tests {
         // The only test that sets SOCKET_ENV, and the only reader is `claim` below.
         std::env::set_var(SOCKET_ENV, &path);
         let (tx, rx) = mpsc::channel();
-        assert!(matches!(claim(tx), Claim::Primary));
-        let (tx2, _rx2) = mpsc::channel();
-        assert!(matches!(claim(tx2), Claim::Signalled));
+        let tx = std::sync::Mutex::new(tx);
+        let on_show = move || {
+            let _ = tx.lock().unwrap().send(());
+        };
+        assert!(matches!(claim(on_show), Claim::Primary));
+        assert!(matches!(claim(|| {}), Claim::Signalled));
         assert!(
             rx.recv_timeout(Duration::from_secs(5)).is_ok(),
             "first got show"
