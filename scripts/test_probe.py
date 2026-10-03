@@ -505,6 +505,212 @@ class Graph(unittest.TestCase):
             self.assertEqual((links, n), ({frozenset(("a:1", "b:2"))}, 2))
 
 
+class Subsequence(unittest.TestCase):
+    """`is_subsequence` (Task 10): the match rule ranking-golden.json's `expect_top3`
+    and `decoys` both lean on, and R5's "rank in-order subsequence matches above
+    other matches" wire-level contract."""
+
+    def test_in_order_characters_match_with_gaps(self):
+        self.assertTrue(probe.is_subsequence("gthb", "github.com"))
+        self.assertTrue(probe.is_subsequence("GTHB", "https://github.com/ubilink"), "case-insensitive")
+        self.assertTrue(probe.is_subsequence("abc", "abc"), "exact match is a subsequence of itself")
+
+    def test_out_of_order_or_missing_characters_do_not_match(self):
+        self.assertFalse(probe.is_subsequence("bthg", "github.com"), "right letters, wrong order")
+        self.assertFalse(probe.is_subsequence("gthbz", "github.com"), "a letter github.com lacks")
+
+    def test_empty_query_never_matches(self):
+        self.assertFalse(probe.is_subsequence("", "anything"))
+        self.assertFalse(probe.is_subsequence("", ""))
+
+
+class FixturesGenerator(unittest.TestCase):
+    """`generate_graph_5000` (Task 10, R4/R5): must be exactly reproducible from its
+    seed, since `--check` compares the committed file against a fresh run."""
+
+    def test_deterministic_from_seed(self):
+        a = probe.generate_graph_5000(seed=1, count=50)
+        b = probe.generate_graph_5000(seed=1, count=50)
+        self.assertEqual(a, b)
+
+    def test_different_seed_reshuffles_capture_order(self):
+        a = probe.generate_graph_5000(seed=1, count=50)
+        b = probe.generate_graph_5000(seed=2, count=50)
+        self.assertNotEqual(
+            [r["created_at"] for r in a["resources"]],
+            [r["created_at"] for r in b["resources"]],
+        )
+
+    def test_shape(self):
+        doc = probe.generate_graph_5000(seed=1, count=200)
+        self.assertEqual(doc["schema"], "ubilink.graph.v3")
+        self.assertEqual(doc["links"], [])
+        self.assertEqual(len(doc["resources"]), 200)
+        uris = {r["uri"] for r in doc["resources"]}
+        guids = {r["guid"] for r in doc["resources"]}
+        self.assertEqual(len(uris), 200, "every uri must be unique")
+        self.assertEqual(len(guids), 200, "every guid must be unique")
+
+
+class FixturesValidators(unittest.TestCase):
+    """Unit tests for the fixture validators (Task 10) against constructed
+    documents — independent of whatever is currently committed, so a validator
+    regression is caught even if the fixture it checks happens to still pass."""
+
+    def test_graph_shape_catches_bad_schema_dangling_link_self_link_and_dup_uri(self):
+        self.assertIn("schema", probe._validate_graph_shape({"schema": "nope"})[0])
+        doc = {
+            "schema": "ubilink.graph.v3",
+            "resources": [{"guid": "a", "name": "A", "uri": "x://a"}],
+            "links": [{"a": "a", "b": "ghost"}],
+        }
+        issues = probe._validate_graph_shape(doc)
+        self.assertTrue(any("ghost" in i for i in issues))
+
+        self_link = {
+            "schema": "ubilink.graph.v3",
+            "resources": [{"guid": "a", "name": "A", "uri": "x://a"}],
+            "links": [{"a": "a", "b": "a"}],
+        }
+        self.assertTrue(any("self-link" in i for i in probe._validate_graph_shape(self_link)))
+
+        dup_uri = {
+            "schema": "ubilink.graph.v3",
+            "resources": [
+                {"guid": "a", "name": "A", "uri": "x://same"},
+                {"guid": "b", "name": "B", "uri": "x://same"},
+            ],
+            "links": [],
+        }
+        self.assertTrue(any("not unique" in i for i in probe._validate_graph_shape(dup_uri)))
+
+        clean = {
+            "schema": "ubilink.graph.v3",
+            "resources": [
+                {"guid": "a", "name": "A", "uri": "x://a"},
+                {"guid": "b", "name": "B", "uri": "x://b"},
+            ],
+            "links": [{"a": "a", "b": "b", "created_at": 1}],
+        }
+        self.assertEqual(probe._validate_graph_shape(clean), [])
+
+    def test_capture_delayed_requires_exactly_300ms(self):
+        ok = {"name": "N", "uri": "u", "app": "A", "delay_ms": 300}
+        self.assertEqual(probe._validate_capture_delayed(ok), [])
+        wrong = {**ok, "delay_ms": 301}
+        self.assertTrue(any("300" in i for i in probe._validate_capture_delayed(wrong)))
+
+    def test_capture_failed_rejects_a_terse_or_mixed_shape(self):
+        self.assertTrue(probe._validate_capture_failed({"error": "nope"}), "too terse for U3")
+        self.assertEqual(
+            probe._validate_capture_failed({"error": "Safari returned nothing, try again."}), []
+        )
+        mixed = {"error": "Safari returned nothing, try again.", "uri": "https://x"}
+        self.assertTrue(any("uri" in i for i in probe._validate_capture_failed(mixed)))
+
+    def test_permissions_two_missing_rejects_a_granted_permission(self):
+        self.assertEqual(
+            probe._validate_permissions_two_missing({"accessibility": False, "automation": "denied"}), []
+        )
+        self.assertTrue(
+            probe._validate_permissions_two_missing({"accessibility": True, "automation": "denied"})
+        )
+
+    def test_backlinks_doc_catches_wrong_order_and_a_linked_decoy(self):
+        def doc(order_ok=True, decoy_linked=False):
+            links = [
+                {"a": "subj", "b": "bl-a", "created_at": 1},
+                {"a": "subj", "b": "bl-b", "created_at": 2},
+                {"a": "subj", "b": "bl-c", "created_at": 3},
+            ]
+            if not order_ok:
+                links[0]["created_at"], links[2]["created_at"] = links[2]["created_at"], links[0]["created_at"]
+            if decoy_linked:
+                links.append({"a": "subj", "b": "decoy", "created_at": 4})
+            return {
+                "schema": "ubilink.graph.v3",
+                "resources": [
+                    {"guid": "subj", "name": "S", "uri": probe._BACKLINKS_SUBJECT_URI, "created_at": 0},
+                    {"guid": "bl-a", "name": "A", "uri": "https://alpha.example/one", "created_at": 0},
+                    {"guid": "bl-b", "name": "B", "uri": "https://beta.example/two", "created_at": 0},
+                    {"guid": "bl-c", "name": "C", "uri": "https://gamma.example/three", "created_at": 0},
+                    {"guid": "decoy", "name": "D", "uri": probe._BACKLINKS_DECOY_URI, "created_at": 0},
+                ],
+                "links": links,
+            }
+
+        self.assertEqual(probe._validate_backlinks_doc(doc(), probe._BACKLINKS_ORDER_NEWEST_FIRST), [])
+        self.assertTrue(
+            probe._validate_backlinks_doc(doc(order_ok=False), probe._BACKLINKS_ORDER_NEWEST_FIRST)
+        )
+        issues = probe._validate_backlinks_doc(doc(decoy_linked=True), probe._BACKLINKS_ORDER_NEWEST_FIRST)
+        self.assertTrue(any("decoy" in i for i in issues))
+
+    def test_ranking_golden_catches_a_non_matching_expectation_and_a_matching_decoy(self):
+        # A forward-ordered "uri" (every increasing-length prefix is trivially an
+        # in-order subsequence of it) paired with its exact reverse (no forward pair
+        # of two-or-more letters can be an in-order subsequence of it), so 20
+        # distinct, genuinely valid {query, expect_top3, decoys} entries fall out of
+        # one loop instead of 20 hand-picked ones.
+        forward = "abcdefghijklmnopqrstuvwxyz"
+        backward = forward[::-1]
+        corpus = {forward, backward}
+        good = [
+            {"query": forward[:n], "expect_top3": [forward], "decoys": [backward]}
+            for n in range(2, 22)  # 20 distinct, increasing-length queries
+        ]
+        self.assertEqual(probe._validate_ranking_golden(good, corpus), [])
+
+        bad_expect = [dict(good[0], expect_top3=[backward])] + good[1:]
+        issues = probe._validate_ranking_golden(bad_expect, corpus)
+        self.assertTrue(any("not an in-order subsequence match" in i for i in issues))
+
+        bad_decoy = [dict(good[0], decoys=[forward])] + good[1:]
+        issues = probe._validate_ranking_golden(bad_decoy, corpus)
+        self.assertTrue(any("IS a subsequence match" in i for i in issues))
+
+    def test_adapters_catches_an_unsorted_or_mismatched_list(self):
+        rows = json.loads(probe._ADAPTER_DEFAULTS_JSON.read_text(encoding="utf-8"))
+        good = sorted(
+            (
+                {
+                    "app": r["app"],
+                    "builtin": bool(r.get("builtin", False)),
+                    "user_defined": False,
+                    "enabled": True,
+                    "scheme": (r.get("schemes") or [None])[0],
+                }
+                for r in rows
+            ),
+            key=lambda r: r["app"].lower(),
+        )
+        self.assertEqual(probe._validate_adapters(good), [])
+
+        unsorted_rows = list(reversed(good))
+        self.assertTrue(any("sorted" in i for i in probe._validate_adapters(unsorted_rows)))
+
+        wrong_builtin = [dict(good[0], builtin=not good[0]["builtin"])] + good[1:]
+        self.assertTrue(any("must match" in i for i in probe._validate_adapters(wrong_builtin)))
+
+
+class FixturesCommand(unittest.TestCase):
+    """End-to-end: `fixtures --check` must pass against the fixtures actually
+    committed under desktop-gpui/probes/fixtures/, and `--generate` must reproduce
+    graph-5000.json exactly (Task 10's own verify step)."""
+
+    def test_check_passes_against_the_committed_fixtures(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = probe.cmd_fixtures(argparse.Namespace(check=True, generate=False))
+        self.assertEqual(code, 0, buf.getvalue())
+        for name in probe.FIXTURE_FILES:
+            self.assertIn(f"PASS: fixtures — {name}", buf.getvalue())
+
+    def test_generate_reproduces_the_committed_graph_5000(self):
+        committed = json.loads((probe.FIXTURES_DIR / "graph-5000.json").read_text(encoding="utf-8"))
+        self.assertEqual(committed, probe.generate_graph_5000())
+
+
 class EnvBlockedIsNotAFail(unittest.TestCase):
     def test_missing_screen_recording_blocks(self):
         saved = probe.quartz

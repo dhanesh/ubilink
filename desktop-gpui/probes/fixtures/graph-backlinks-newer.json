@@ -1,0 +1,17 @@
+{
+  "schema": "ubilink.graph.v3",
+  "resources": [
+    { "guid": "subj", "name": "Subject Note", "uri": "ubilink-fixture://subject", "created_at": 1700000000000 },
+    { "guid": "bl-a", "name": "Alpha Paper", "uri": "https://alpha.example/one", "created_at": 1700000000000 },
+    { "guid": "bl-b", "name": "Beta Post", "uri": "https://beta.example/two", "created_at": 1700000000000 },
+    { "guid": "bl-c", "name": "Gamma Doc", "uri": "https://gamma.example/three", "created_at": 1700000000000 },
+    { "guid": "bl-d", "name": "Delta Memo", "uri": "https://delta.example/four", "created_at": 1700000300000 },
+    { "guid": "decoy", "name": "Decoy Unrelated", "uri": "https://decoy.example/unrelated", "created_at": 1700000000000 }
+  ],
+  "links": [
+    { "a": "subj", "b": "bl-a", "created_at": 1700000000000 },
+    { "a": "subj", "b": "bl-b", "created_at": 1700000100000 },
+    { "a": "subj", "b": "bl-c", "created_at": 1700000200000 },
+    { "a": "subj", "b": "bl-d", "created_at": 1700000300000 }
+  ]
+}

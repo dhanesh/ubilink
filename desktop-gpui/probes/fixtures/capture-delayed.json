@@ -1,0 +1,6 @@
+{
+  "name": "Delayed Capture Target",
+  "uri": "https://example.com/delayed",
+  "app": "Safari",
+  "delay_ms": 300
+}

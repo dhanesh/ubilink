@@ -25,6 +25,7 @@ import fcntl
 import hashlib
 import json
 import os
+import random
 import re
 import shutil
 import signal
@@ -299,6 +300,458 @@ def cmd_release_clean(args: argparse.Namespace) -> int:
         return 1
     print("PASS: release-clean — release binary has no automation socket, marker or verb names")
     return 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `fixtures`: Task 10 (Phase 0 R10) — the data Phase 1's probes load
+# ══════════════════════════════════════════════════════════════════════════
+#
+# desktop-gpui/probes/fixtures/*.json is committed test data, not code: capture
+# results, permission states, link-graph JSON in ubilink-core's own export/import
+# schema (src-tauri/src/graph.rs's `export_json`/`import_json`, schema
+# "ubilink.graph.v3") and a settings adapter list. Phase 1's views (R1, R3, R4,
+# R5, R9, R10, R11) build their consuming code against
+# desktop-gpui/probes/fixtures/README.md's documented shapes, so `--check`
+# validates every fixture against that doc — a typo or a hand edit that drifts
+# from the schema is caught here, not discovered mid-Phase-1. `--generate`
+# reproduces the one generated fixture (the 5,000-resource graph) byte-for-byte
+# from its seed, so the committed file can never silently diverge from what the
+# generator would produce.
+
+FIXTURES_DIR = REPO_ROOT / "desktop-gpui" / "probes" / "fixtures"
+
+# The 5,000-resource graph fixture's seed (Phase 1 R4/R5): fixed so `--generate`
+# reproduces the committed file exactly on every machine. Changing it is a
+# deliberate fixture update (re-run `--generate` and commit the result), not
+# routine maintenance.
+GRAPH_5000_SEED = 20261003
+GRAPH_5000_COUNT = 5000
+GRAPH_5000_BASE_MS = 1_700_000_000_000
+
+
+def generate_graph_5000(seed: int = GRAPH_5000_SEED, count: int = GRAPH_5000_COUNT) -> dict:
+    """The 5,000-resource graph fixture (R4: a virtualised list at 5,000 "links";
+    R5: the fuzzy filter re-filtering 5,000 of them), reproducible from `seed` alone.
+
+    Resources are named/URI'd in plain index order (`Resource 00001`, ...) so the
+    file reads the same every time, but CAPTURE order (`created_at`) is a seeded
+    shuffle of that index order — the same way a real graph's alphabetical order
+    and its recency order disagree. No links: R4/R5 exercise the resource list and
+    the filter, not graph edges (graph-backlinks*.json covers the edge case). Pure
+    and deterministic, so `--check` can tell a hand-edited file from a freshly
+    generated one by exact structural equality.
+    """
+    rng = random.Random(seed)
+    order = list(range(1, count + 1))
+    rng.shuffle(order)
+    capture_order = {idx: pos for pos, idx in enumerate(order)}
+    resources = [
+        {
+            "guid": f"g{idx:05d}",
+            "name": f"Resource {idx:05d}",
+            "uri": f"https://fixture-{idx:05d}.example.test/resource",
+            "created_at": GRAPH_5000_BASE_MS + capture_order[idx] * 1000,
+        }
+        for idx in range(1, count + 1)
+    ]
+    return {"schema": "ubilink.graph.v3", "resources": resources, "links": []}
+
+
+def is_subsequence(query: str, text: str) -> bool:
+    """Whether every character of `query` appears in `text`, in order (not
+    necessarily contiguous), case-insensitively — the match rule R5's fuzzy filter
+    must rank above any other kind of match. An empty query never matches (the same
+    "no vacuous checks" rule the rest of the harness follows): ranking-golden.json's
+    queries and decoys both lean on that to mean something.
+    """
+    if not query:
+        return False
+    q = query.lower()
+    i = 0
+    for ch in text.lower():
+        if i < len(q) and ch == q[i]:
+            i += 1
+            if i == len(q):
+                return True
+    return False
+
+
+def _load_fixture_json(path: Path):
+    if not path.is_file():
+        raise ValueError(f"missing file: {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"bad JSON: {e}")
+
+
+def _validate_graph_shape(doc) -> list:
+    """Generic ubilink.graph.v3 checks shared by every graph-*.json fixture: the
+    schema tag, that every link's endpoints resolve to a declared resource guid
+    (what `LinkGraph::import_json` requires to write the link at all), no self-links,
+    and that resource guids/uris are each unique. Specific fixtures layer their own
+    checks (exact counts, documented order, ...) on top of this.
+    """
+    issues = []
+    if doc.get("schema") != "ubilink.graph.v3":
+        issues.append(f"schema must be 'ubilink.graph.v3', got {doc.get('schema')!r}")
+        return issues
+    resources, links = doc.get("resources"), doc.get("links")
+    if not isinstance(resources, list):
+        issues.append("resources must be a list")
+        resources = []
+    if not isinstance(links, list):
+        issues.append("links must be a list")
+        links = []
+    guids, uris = set(), set()
+    for i, r in enumerate(resources):
+        if not isinstance(r, dict):
+            issues.append(f"resources[{i}] must be an object")
+            continue
+        for k in ("guid", "name", "uri"):
+            if not isinstance(r.get(k), str) or not r[k]:
+                issues.append(f"resources[{i}].{k} must be a non-empty string")
+        g, u = r.get("guid"), r.get("uri")
+        if isinstance(g, str):
+            if g in guids:
+                issues.append(f"resources[{i}].guid {g!r} is not unique")
+            guids.add(g)
+        if isinstance(u, str):
+            if u in uris:
+                issues.append(f"resources[{i}].uri {u!r} is not unique")
+            uris.add(u)
+        if r.get("created_at") is not None and not isinstance(r.get("created_at"), int):
+            issues.append(f"resources[{i}].created_at must be an integer or null")
+    for i, l in enumerate(links):
+        if not isinstance(l, dict):
+            issues.append(f"links[{i}] must be an object")
+            continue
+        a, b = l.get("a"), l.get("b")
+        if a not in guids:
+            issues.append(f"links[{i}].a {a!r} is not a declared resource guid")
+        if b not in guids:
+            issues.append(f"links[{i}].b {b!r} is not a declared resource guid")
+        if a == b:
+            issues.append(f"links[{i}] is a self-link ({a!r})")
+        if l.get("created_at") is not None and not isinstance(l.get("created_at"), int):
+            issues.append(f"links[{i}].created_at must be an integer or null")
+    return issues
+
+
+def _validate_graph_empty(doc) -> list:
+    issues = _validate_graph_shape(doc)
+    if doc.get("resources") != []:
+        issues.append("must have no resources")
+    if doc.get("links") != []:
+        issues.append("must have no links")
+    return issues
+
+
+def _validate_graph_5000(doc) -> list:
+    issues = _validate_graph_shape(doc)
+    resources = doc.get("resources") if isinstance(doc.get("resources"), list) else []
+    if len(resources) != GRAPH_5000_COUNT:
+        issues.append(f"must have exactly {GRAPH_5000_COUNT} resources, got {len(resources)}")
+    uris = {r["uri"] for r in resources if isinstance(r, dict) and isinstance(r.get("uri"), str)}
+    if len(uris) != len(resources):
+        issues.append("every resource's uri must be unique")
+    if doc.get("links"):
+        issues.append("carries no links (R4/R5 exercise the resource list, not edges)")
+    if doc != generate_graph_5000():
+        issues.append(
+            f"differs from `probe.py fixtures --generate` (seed {GRAPH_5000_SEED}); "
+            "run --generate and commit the result"
+        )
+    return issues
+
+
+# Backlinks fixtures (R3): the subject's newest-first backlink order, by uri, and
+# the decoy that must never appear. Hardcoded (not derived from the file) so a hand
+# edit that reorders the JSON or nudges a timestamp is caught instead of the check
+# silently re-deriving a new "documented" order from whatever is there.
+_BACKLINKS_SUBJECT_URI = "ubilink-fixture://subject"
+_BACKLINKS_DECOY_URI = "https://decoy.example/unrelated"
+_BACKLINKS_ORDER_NEWEST_FIRST = [
+    "https://gamma.example/three",
+    "https://beta.example/two",
+    "https://alpha.example/one",
+]
+_BACKLINKS_NEWER_ORDER_NEWEST_FIRST = [
+    "https://delta.example/four",
+    "https://gamma.example/three",
+    "https://beta.example/two",
+    "https://alpha.example/one",
+]
+
+
+def _validate_backlinks_doc(doc, expected_order: list) -> list:
+    issues = _validate_graph_shape(doc)
+    if issues:
+        return issues
+    resources = doc["resources"]
+    uri_of = {r["guid"]: r["uri"] for r in resources}
+    subj = next((r for r in resources if r["uri"] == _BACKLINKS_SUBJECT_URI), None)
+    if subj is None:
+        return issues + [f"missing the subject resource {_BACKLINKS_SUBJECT_URI!r}"]
+    if not any(r["uri"] == _BACKLINKS_DECOY_URI for r in resources):
+        issues.append(f"missing the decoy resource {_BACKLINKS_DECOY_URI!r}")
+    touching = []
+    for l in doc["links"]:
+        if subj["guid"] not in (l["a"], l["b"]):
+            continue
+        other = l["b"] if l["a"] == subj["guid"] else l["a"]
+        touching.append((uri_of.get(other), l.get("created_at")))
+    if any(u == _BACKLINKS_DECOY_URI for u, _ in touching):
+        issues.append("the decoy must not be linked to the subject")
+    if any(t is None for _, t in touching):
+        issues.append("every backlink's link must have an explicit created_at")
+        return issues
+    times = [t for _, t in touching]
+    if len(set(times)) != len(times):
+        issues.append("backlink timestamps must be distinct")
+    got_order = [u for u, _ in sorted(touching, key=lambda t: t[1], reverse=True)]
+    if got_order != expected_order:
+        issues.append(f"newest-first order must be {expected_order}, got {got_order}")
+    return issues
+
+
+def _validate_capture_ok(doc) -> list:
+    issues = []
+    if "error" in doc:
+        issues.append("must not carry an error (that is capture-failed.json's job)")
+    if "delay_ms" in doc:
+        issues.append("must not carry delay_ms (that is capture-delayed.json's job)")
+    for k in ("name", "uri", "app"):
+        if not isinstance(doc.get(k), str) or not doc[k].strip():
+            issues.append(f"{k} must be a non-empty string")
+    return issues
+
+
+def _validate_capture_delayed(doc) -> list:
+    issues = _validate_capture_ok({k: v for k, v in doc.items() if k != "delay_ms"})
+    delay = doc.get("delay_ms")
+    if not isinstance(delay, int) or isinstance(delay, bool):
+        issues.append("delay_ms must be an integer")
+    elif delay != 300:
+        issues.append(f"delay_ms must be 300 (R1's proof fixture), got {delay}")
+    return issues
+
+
+def _validate_capture_failed(doc) -> list:
+    issues = []
+    for k in ("name", "uri", "app", "delay_ms"):
+        if k in doc:
+            issues.append(f"must not carry {k} (this is the failure shape)")
+    err = doc.get("error")
+    if not isinstance(err, str) or not err.strip():
+        issues.append("error must be a non-empty string")
+    elif len(err.split()) < 4:
+        issues.append("error must explain what failed and what to do (U3), not a terse code")
+    return issues
+
+
+_PERMISSION_STATES = {"granted", "denied", "not_determined"}
+
+
+def _validate_permission_doc(doc) -> list:
+    issues = []
+    if set(doc) != {"accessibility", "automation"}:
+        issues.append(f"must have exactly accessibility+automation, got {sorted(doc)}")
+    if not isinstance(doc.get("accessibility"), bool):
+        issues.append("accessibility must be a boolean")
+    if doc.get("automation") not in _PERMISSION_STATES:
+        issues.append(f"automation must be one of {sorted(_PERMISSION_STATES)}")
+    return issues
+
+
+def _validate_permissions_two_missing(doc) -> list:
+    issues = _validate_permission_doc(doc)
+    if not issues and (doc["accessibility"] or doc["automation"] == "granted"):
+        issues.append("both permissions must be missing (onboarding shows two steps)")
+    return issues
+
+
+def _validate_permissions_all_granted(doc) -> list:
+    issues = _validate_permission_doc(doc)
+    if not issues and not (doc["accessibility"] and doc["automation"] == "granted"):
+        issues.append("both permissions must be granted (the flipped Re-check state)")
+    return issues
+
+
+_ADAPTER_DEFAULTS_JSON = REPO_ROOT / "src-tauri" / "src" / "adapters.default.json"
+
+
+def _validate_adapters(doc) -> list:
+    issues = []
+    seen = set()
+    for i, row in enumerate(doc):
+        where = f"[{i}]"
+        if not isinstance(row, dict) or set(row) != {"app", "builtin", "user_defined", "enabled", "scheme"}:
+            issues.append(f"{where}: must be {{app, builtin, user_defined, enabled, scheme}}")
+            continue
+        app = row["app"]
+        if not isinstance(app, str) or not app:
+            issues.append(f"{where}: app must be a non-empty string")
+        elif app.lower() in seen:
+            issues.append(f"{where}: duplicate app {app!r}")
+        seen.add(str(app).lower())
+        for k in ("builtin", "user_defined", "enabled"):
+            if not isinstance(row.get(k), bool):
+                issues.append(f"{where} ({app!r}): {k} must be a boolean")
+        if row.get("scheme") is not None and not isinstance(row.get("scheme"), str):
+            issues.append(f"{where} ({app!r}): scheme must be a string or null")
+    names = [row.get("app") for row in doc if isinstance(row, dict)]
+    if names != sorted(names, key=lambda n: str(n).lower()):
+        issues.append("apps must be sorted case-insensitively (matches list_plugins' order)")
+    # Cross-check against the real embedded defaults (app/src/plugins.rs's
+    # list_plugins reads ubilink_core::AdapterRegistry::defaults(), which embeds
+    # this file), so the fixture can't silently drift from what settings-adapters
+    # actually sees.
+    try:
+        defaults = json.loads(_ADAPTER_DEFAULTS_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        issues.append(f"could not read {_ADAPTER_DEFAULTS_JSON} to cross-check: {e}")
+        return issues
+    want = sorted(
+        ((d.get("app"), bool(d.get("builtin", False))) for d in defaults),
+        key=lambda t: str(t[0]).lower(),
+    )
+    got = sorted(
+        ((row.get("app"), row.get("builtin")) for row in doc if isinstance(row, dict)),
+        key=lambda t: str(t[0]).lower(),
+    )
+    if got != want:
+        issues.append(f"must match {_ADAPTER_DEFAULTS_JSON}'s app+builtin set exactly: want {want}, got {got}")
+    return issues
+
+
+def _validate_ranking_golden(doc, corpus_uris: set) -> list:
+    issues = []
+    if len(doc) != 20:
+        issues.append(f"must have exactly 20 queries (the golden table), got {len(doc)}")
+    seen = set()
+    for i, entry in enumerate(doc):
+        where = f"[{i}]"
+        if not isinstance(entry, dict) or set(entry) != {"query", "expect_top3", "decoys"}:
+            issues.append(f"{where}: must be {{query, expect_top3, decoys}}")
+            continue
+        q = entry["query"]
+        if not isinstance(q, str) or not q:
+            issues.append(f"{where}: query must be a non-empty string")
+            continue
+        if q in seen:
+            issues.append(f"{where} ({q!r}): duplicate query")
+        seen.add(q)
+        top3 = entry["expect_top3"] if isinstance(entry.get("expect_top3"), list) else None
+        if not top3 or not (1 <= len(top3) <= 3):
+            issues.append(f"{where} ({q!r}): expect_top3 must be a list of 1-3 uris")
+            top3 = []
+        decoys = entry["decoys"] if isinstance(entry.get("decoys"), list) else None
+        if not decoys:
+            issues.append(f"{where} ({q!r}): decoys must be a non-empty list")
+            decoys = []
+        for uri in top3:
+            if uri not in corpus_uris:
+                issues.append(f"{where} ({q!r}): expected uri {uri!r} is not in graph-ranking.json")
+            elif not is_subsequence(q, uri):
+                issues.append(f"{where} ({q!r}): expected uri {uri!r} is not an in-order subsequence match")
+        for uri in decoys:
+            if uri not in corpus_uris:
+                issues.append(f"{where} ({q!r}): decoy {uri!r} is not in graph-ranking.json")
+            elif is_subsequence(q, uri):
+                issues.append(f"{where} ({q!r}): decoy {uri!r} IS a subsequence match, not a valid decoy")
+    return issues
+
+
+# Fixtures whose top level is a JSON list rather than an object.
+_LIST_FIXTURES = {"adapters.json", "ranking-golden.json"}
+
+_FIXTURE_VALIDATORS = {
+    "capture-ok.json": _validate_capture_ok,
+    "capture-delayed.json": _validate_capture_delayed,
+    "capture-failed.json": _validate_capture_failed,
+    "graph-backlinks.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_ORDER_NEWEST_FIRST),
+    "graph-backlinks-newer.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_NEWER_ORDER_NEWEST_FIRST),
+    "graph-5000.json": _validate_graph_5000,
+    "graph-ranking.json": _validate_graph_shape,
+    "permissions-two-missing.json": _validate_permissions_two_missing,
+    "permissions-all-granted.json": _validate_permissions_all_granted,
+    "adapters.json": _validate_adapters,
+    "graph-empty.json": _validate_graph_empty,
+}
+
+# Every fixture `--check` walks, in the order desktop-gpui/probes/fixtures/README.md
+# documents them. ranking-golden.json is cross-checked against graph-ranking.json
+# below rather than through `_FIXTURE_VALIDATORS`, since it needs that file's corpus.
+FIXTURE_FILES = [
+    "capture-ok.json",
+    "capture-delayed.json",
+    "capture-failed.json",
+    "graph-backlinks.json",
+    "graph-backlinks-newer.json",
+    "graph-5000.json",
+    "graph-ranking.json",
+    "ranking-golden.json",
+    "permissions-two-missing.json",
+    "permissions-all-granted.json",
+    "adapters.json",
+    "graph-empty.json",
+]
+
+
+def _validate_fixture_file(name: str, path: Path) -> list:
+    doc = _load_fixture_json(path)
+    expect_list = name in _LIST_FIXTURES
+    if expect_list != isinstance(doc, list):
+        return [f"must be a JSON {'list' if expect_list else 'object'}"]
+    if name == "ranking-golden.json":
+        try:
+            corpus = _load_fixture_json(FIXTURES_DIR / "graph-ranking.json")
+        except ValueError as e:
+            return [f"could not read graph-ranking.json to cross-check: {e}"]
+        corpus_issues = _validate_graph_shape(corpus)
+        corpus_uris = {
+            r["uri"] for r in corpus.get("resources", []) if isinstance(r, dict) and isinstance(r.get("uri"), str)
+        }
+        return _validate_ranking_golden(doc, corpus_uris) + [f"graph-ranking.json: {i}" for i in corpus_issues]
+    validator = _FIXTURE_VALIDATORS.get(name)
+    if validator is None:
+        return [f"no validator registered for {name}"]
+    return validator(doc)
+
+
+def _fixtures_check() -> int:
+    ok = True
+    for name in FIXTURE_FILES:
+        try:
+            issues = _validate_fixture_file(name, FIXTURES_DIR / name)
+        except ValueError as e:
+            issues = [str(e)]
+        if issues:
+            ok = False
+            print(f"FAIL: fixtures — {name}: {issues[0]}")
+            for extra in issues[1:]:
+                print(f"  - {extra}")
+        else:
+            print(f"PASS: fixtures — {name}")
+    return 0 if ok else 1
+
+
+def _fixtures_generate() -> int:
+    doc = generate_graph_5000()
+    path = FIXTURES_DIR / "graph-5000.json"
+    path.write_text(json.dumps(doc, separators=(",", ":")) + "\n", encoding="utf-8")
+    print(f"probe: wrote {path} ({len(doc['resources'])} resources, seed={GRAPH_5000_SEED})")
+    return 0
+
+
+def cmd_fixtures(args: argparse.Namespace) -> int:
+    """`--check` validates every desktop-gpui/probes/fixtures/*.json against its
+    documented schema; `--generate` regenerates graph-5000.json from its seed (R10).
+    """
+    if args.generate:
+        return _fixtures_generate()
+    return _fixtures_check()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2757,6 +3210,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run each scenario against N simultaneous instances and check they stay isolated.",
     )
     p_run.set_defaults(func=cmd_run)
+
+    # ── fixtures ───────────────────────────────────────────────────────
+    p_fixtures = subparsers.add_parser(
+        "fixtures",
+        help="Validate or (re)generate desktop-gpui/probes/fixtures/*.json (Task 10, Phase 1 R1-R11).",
+    )
+    fx_group = p_fixtures.add_mutually_exclusive_group(required=True)
+    fx_group.add_argument(
+        "--check", action="store_true",
+        help="Validate every fixture against its documented schema (desktop-gpui/probes/fixtures/README.md).",
+    )
+    fx_group.add_argument(
+        "--generate", action="store_true",
+        help="Regenerate graph-5000.json deterministically from its seed.",
+    )
+    p_fixtures.set_defaults(func=cmd_fixtures)
 
     # ── doctor ─────────────────────────────────────────────────────────
     p_doctor = subparsers.add_parser(

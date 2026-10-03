@@ -1,0 +1,26 @@
+{
+  "schema": "ubilink.graph.v3",
+  "resources": [
+    { "guid": "r1", "name": "GitHub - ubilink", "uri": "https://github.com/ubilink/ubilink", "created_at": 1700000001000 },
+    { "guid": "r2", "name": "GitLab - ubilink mirror", "uri": "https://gitlab.com/ubilink/ubilink-mirror", "created_at": 1700000002000 },
+    { "guid": "r3", "name": "Bitbucket repo", "uri": "https://bitbucket.org/ubilink/ubilink", "created_at": 1700000003000 },
+    { "guid": "r4", "name": "Stack Overflow question", "uri": "https://stackoverflow.com/questions/12345/rust-borrow-checker", "created_at": 1700000004000 },
+    { "guid": "r5", "name": "Hacker News thread", "uri": "https://news.ycombinator.com/item?id=987654", "created_at": 1700000005000 },
+    { "guid": "r6", "name": "Reddit r/rust", "uri": "https://reddit.com/r/rust/comments/abc123", "created_at": 1700000006000 },
+    { "guid": "r7", "name": "X post", "uri": "https://x.com/ubilink/status/42", "created_at": 1700000007000 },
+    { "guid": "r8", "name": "YouTube talk", "uri": "https://youtube.com/watch?v=dQw4w9WgXcQ", "created_at": 1700000008000 },
+    { "guid": "r9", "name": "Wikipedia: Linking", "uri": "https://en.wikipedia.org/wiki/Hyperlink", "created_at": 1700000009000 },
+    { "guid": "r10", "name": "Notion doc", "uri": "https://notion.so/ubilink/Design-Doc-abc123", "created_at": 1700000010000 },
+    { "guid": "r11", "name": "Linear issue", "uri": "https://linear.app/ubilink/issue/UB-42", "created_at": 1700000011000 },
+    { "guid": "r12", "name": "Figma file", "uri": "https://figma.com/file/abc123/ubilink-ui", "created_at": 1700000012000 },
+    { "guid": "r13", "name": "Slack message", "uri": "https://ubilink.slack.com/archives/C123/p456", "created_at": 1700000013000 },
+    { "guid": "r14", "name": "Discord invite", "uri": "https://discord.com/invite/ubilink", "created_at": 1700000014000 },
+    { "guid": "r15", "name": "Amazon order", "uri": "https://amazon.com/gp/css/order-history", "created_at": 1700000015000 },
+    { "guid": "r16", "name": "Google search", "uri": "https://google.com/search?q=ubiquitous+linking", "created_at": 1700000016000 },
+    { "guid": "r17", "name": "Apple support", "uri": "https://support.apple.com/guide/mac-help", "created_at": 1700000017000 },
+    { "guid": "r18", "name": "Microsoft docs", "uri": "https://learn.microsoft.com/dotnet/csharp", "created_at": 1700000018000 },
+    { "guid": "r19", "name": "Obsidian note", "uri": "obsidian://open?vault=Notes&file=Linking", "created_at": 1700000019000 },
+    { "guid": "r20", "name": "Bear note", "uri": "bear://x-callback-url/open-note?id=abc-123", "created_at": 1700000020000 }
+  ],
+  "links": []
+}

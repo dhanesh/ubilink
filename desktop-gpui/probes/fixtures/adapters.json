@@ -1,0 +1,12 @@
+[
+  { "app": "Arc", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Bear", "builtin": false, "user_defined": false, "enabled": true, "scheme": "bear" },
+  { "app": "Brave Browser", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Finder", "builtin": true, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Google Chrome", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Microsoft Edge", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Opera", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Safari", "builtin": true, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Things3", "builtin": false, "user_defined": false, "enabled": true, "scheme": null },
+  { "app": "Vivaldi", "builtin": false, "user_defined": false, "enabled": true, "scheme": null }
+]
