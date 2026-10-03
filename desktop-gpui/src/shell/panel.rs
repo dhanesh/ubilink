@@ -4,7 +4,10 @@
 //! "render-first" reason for accessory + overlay) — over a `Blurred` background (a real
 //! NSVisualEffectView, the Tauri shell's HUD vibrancy).
 //!
-//! The view is a placeholder named after the route; Task 13's router replaces it.
+//! The view hosted inside is built by Task 13's router (`crate::views::build_for`):
+//! `PanelView` itself only owns the translucent card and the type-erased child view,
+//! and asks `Route::hides_on_deactivate` (which reads the router table) for the
+//! click-away rule below, rather than deciding it itself.
 //!
 //! Hiding closes the window (`remove_window`) and showing opens a fresh one at the
 //! cursor's display: GPUI 0.3.7 has no per-window hide/show or move API, and reaching
@@ -17,7 +20,8 @@ use gpui_kit::*;
 
 use super::placement::Placement;
 use super::Route;
-use crate::theme::tokens::{font_size, radius, spacing};
+use crate::theme::tokens::radius;
+use crate::views;
 
 /// Panel size in points: the Tauri panel's (desktop/tauri.conf.json, 640x140).
 pub const PANEL_SIZE: (f64, f64) = (640.0, 140.0);
@@ -47,6 +51,10 @@ pub fn options(placement: Option<Placement>) -> WindowOptions {
 
 pub struct PanelView {
     route: Route,
+    /// The current route's view, built by the router (`views::build_for`) and swapped
+    /// on every `set_route`. Type-erased so this struct doesn't grow a variant per
+    /// route as Phase 1 adds real views.
+    child: AnyView,
     /// Only a true→false transition hides: the panel can report inactive before it
     /// first becomes key, and that must not close it.
     was_active: bool,
@@ -56,7 +64,8 @@ pub struct PanelView {
 impl PanelView {
     pub fn new(route: Route, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Click-away (R5, proven in Task 5): capture and browser get out of the way when
-        // the panel loses key status; settings and onboarding stay open.
+        // the panel loses key status; settings and onboarding stay open. The rule itself
+        // now lives in the router table (views::TABLE), not here.
         let activation = cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active();
             if this.was_active && !active && this.route.hides_on_deactivate() {
@@ -66,8 +75,10 @@ impl PanelView {
             }
             this.was_active = active;
         });
+        let child = views::build_for(route, cx);
         PanelView {
             route,
+            child,
             was_active: window.is_window_active(),
             _activation: activation,
         }
@@ -75,6 +86,7 @@ impl PanelView {
 
     pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
         self.route = route;
+        self.child = views::build_for(route, cx);
         cx.notify();
     }
 }
@@ -84,28 +96,9 @@ impl Render for PanelView {
         let theme = cx.theme();
         div()
             .size_full()
-            .flex()
-            .flex_col()
-            .justify_center()
-            .gap(spacing::S1)
-            .p(spacing::S5)
             .rounded(radius::CARD)
             // Translucent so the NSVisualEffectView's blur shows through.
             .bg(theme.background.opacity(0.55))
-            .child(
-                div()
-                    .text_size(font_size::TITLE)
-                    .text_color(theme.foreground)
-                    .child(self.route.title()),
-            )
-            .child(
-                div()
-                    .text_size(font_size::META)
-                    .text_color(theme.muted_foreground)
-                    .child(format!(
-                        "route: {} — placeholder until the router lands (Task 13)",
-                        self.route.as_str()
-                    )),
-            )
+            .child(self.child.clone())
     }
 }

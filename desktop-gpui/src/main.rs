@@ -11,6 +11,7 @@
 
 mod shell;
 mod theme;
+mod views;
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
