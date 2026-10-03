@@ -24,9 +24,20 @@ impl CommandRunner for SpawnRunner {
 /// stored row may predate validation) and builds the command so the URI can't be
 /// read as an option or reach a shell (macOS: `open -- <uri>`).
 pub fn open_link(state: &AppState, uri: &str) -> Result<(), String> {
+    open_link_with(state, &SpawnRunner, uri)
+}
+
+/// `open_link` with the launcher injected (GPUI Phase 0 R6/O4): the GPUI shell passes
+/// a runner that records the open in its automation sink instead of launching it in
+/// probe builds. The URI still goes through core's re-validation either way.
+pub fn open_link_with<R: CommandRunner>(
+    state: &AppState,
+    runner: &R,
+    uri: &str,
+) -> Result<(), String> {
     let backend = state
         .backend
         .lock()
         .map_err(|_| "internal state was poisoned".to_string())?;
-    backend.open_link(&SpawnRunner, uri)
+    backend.open_link(runner, uri)
 }

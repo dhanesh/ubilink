@@ -31,10 +31,10 @@ pub use browse::{link_resources, links_of, list_links};
 pub use capture::{capture_from, capture_now, detect_frontmost};
 pub use clipboard::copy_to_clipboard;
 pub use hotkeys::{build_hotkey_report, hotkey_status, HotkeyReport};
-pub use open_link::{open_link, SpawnRunner};
+pub use open_link::{open_link, open_link_with, SpawnRunner};
 pub use permissions::{
-    accessibility_trusted, open_settings, permission_status, prompt_accessibility,
-    request_accessibility, PermissionReport,
+    accessibility_trusted, open_settings, open_settings_with, permission_status,
+    prompt_accessibility, request_accessibility, settings_pane_url, PermissionReport,
 };
 pub use plugins::{list_plugins, set_plugin_enabled, PluginView};
 pub use settings::{capabilities, export_graph, graph_stats, import_graph, reset_graph};
