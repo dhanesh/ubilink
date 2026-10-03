@@ -1,13 +1,17 @@
 {
-  "description": "R13: the launch-at-login switch shows SMAppService.mainApp's real status: on shows Enabled, or Requires approval with an explanation, the same after a restart; off shows Not registered after a restart",
+  "description": "R13: with the login_item fixture driving the automation seam, toggling launch-at-login on records a register call and a11y shows the resulting status (Enabled; Requires approval and Not found with their explanations), the shown status survives a restart, and toggling off records an unregister call and shows Not registered",
   "requirement": "R13 (GPUI Phase 1), D6",
   "notes": [
-    "D6: requires-approval is a valid state to show with an explanation, not a failure, so 'on' accepts either alternative (an `any` query). The explanation must point to System Settings' Login Items.",
-    "The status label's text is one of exactly: Enabled, Requires approval, Not registered, Not found (SMAppService.Status), README contract.",
-    "The starting state is not part of R13, so it accepts Not registered or Not found; after toggling off and restarting, R13 requires Not registered.",
-    "This drives the real SMAppService for the instance's app (it is system state, which is why it survives a restart). The scenario ends with the switch off and checks Not registered after a restart, so a passing run leaves nothing registered.",
-    "Reached with Tab (key_until) and toggled with Space."
+    "Ruling R-o / D6: in automation builds the view's SMAppService status/register/unregister go through crate::login_item (status(), register(), unregister()), fed by the login_item fixture, so no real login item is ever registered on the host (O4). The real SMAppService round trip is an attended Phase 2 check.",
+    "The fixture copy is the instance's login-item store: the seam rewrites its status and appends each call to its `calls` list, so the status survives a restart (fixtures are replayed with the same path) and the `file` steps read back exactly which calls the view made.",
+    "The status label's text is exactly one of Enabled, Requires approval, Not registered, Not found; requires-approval and not-found also show the seam's explanation verbatim. The switch is on for Enabled and Requires approval (registered), off for Not registered and Not found (README contract).",
+    "Reached with Tab (key_until) and toggled with Space. Settings re-reads the status each time it is shown."
   ],
+  "setup": {
+    "fixtures": {
+      "login_item": "login-item-enabled.json"
+    }
+  },
   "steps": [
     {
       "name": "open settings",
@@ -21,203 +25,7 @@
       }
     },
     {
-      "name": "starts off, showing a real status (Not registered, or Not found for an app SMAppService cannot see)",
-      "see": {
-        "any": [
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": false
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Not registered",
-              "exact": true
-            }
-          ],
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": false
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Not found",
-              "exact": true
-            }
-          ]
-        ]
-      },
-      "route": "settings",
-      "timeout_ms": 3000
-    },
-    {
-      "name": "Tab to Launch at login",
-      "key_until": {
-        "role": "Switch",
-        "text": "Launch at login",
-        "state": {
-          "focused": true
-        }
-      },
-      "route": "settings"
-    },
-    {
-      "name": "toggle on",
-      "call": "key",
-      "args": {
-        "keys": "space"
-      }
-    },
-    {
-      "name": "Enabled, or Requires approval with an explanation",
-      "see": {
-        "any": [
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": true
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Enabled",
-              "exact": true
-            }
-          ],
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": true
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Requires approval",
-              "exact": true
-            },
-            {
-              "role": "Label",
-              "text": "Login Items"
-            }
-          ]
-        ]
-      },
-      "route": "settings",
-      "timeout_ms": 3000
-    },
-    {
-      "name": "restart",
-      "restart": true
-    },
-    {
-      "name": "open settings after restart",
-      "call": "trigger_hotkey",
-      "args": {
-        "action": "settings"
-      },
-      "expect": {
-        "shell.visible": true,
-        "route": "settings"
-      }
-    },
-    {
-      "name": "the same status after the restart",
-      "see": {
-        "any": [
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": true
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Enabled",
-              "exact": true
-            }
-          ],
-          [
-            {
-              "role": "Switch",
-              "text": "Launch at login",
-              "state": {
-                "toggled": true
-              }
-            },
-            {
-              "role": "Label",
-              "text": "Requires approval",
-              "exact": true
-            },
-            {
-              "role": "Label",
-              "text": "Login Items"
-            }
-          ]
-        ]
-      },
-      "route": "settings",
-      "timeout_ms": 3000
-    },
-    {
-      "name": "Tab to Launch at login again",
-      "key_until": {
-        "role": "Switch",
-        "text": "Launch at login",
-        "state": {
-          "focused": true
-        }
-      },
-      "route": "settings"
-    },
-    {
-      "name": "toggle off",
-      "call": "key",
-      "args": {
-        "keys": "space"
-      }
-    },
-    {
-      "see": {
-        "role": "Switch",
-        "text": "Launch at login",
-        "state": {
-          "toggled": false
-        }
-      },
-      "route": "settings",
-      "timeout_ms": 3000
-    },
-    {
-      "name": "restart again",
-      "restart": true
-    },
-    {
-      "name": "open settings after the second restart",
-      "call": "trigger_hotkey",
-      "args": {
-        "action": "settings"
-      },
-      "expect": {
-        "shell.visible": true,
-        "route": "settings"
-      }
-    },
-    {
-      "name": "off: Not registered after the restart",
+      "name": "enabled: starts off, Not registered (from the seam)",
       "see": [
         {
           "role": "Switch",
@@ -234,6 +42,488 @@
       ],
       "route": "settings",
       "timeout_ms": 3000
+    },
+    {
+      "name": "enabled: no seam call yet",
+      "file": "{fixtures}/login-item-enabled.json",
+      "expect": {
+        "calls": {
+          "exists": false
+        }
+      }
+    },
+    {
+      "name": "enabled: Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "enabled: toggle on",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "enabled: shows Enabled",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Enabled",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{fixtures}/login-item-enabled.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register"
+          ]
+        },
+        "status": "enabled"
+      },
+      "timeout_ms": 2000,
+      "name": "enabled: one register call recorded"
+    },
+    {
+      "name": "enabled: restart",
+      "restart": true
+    },
+    {
+      "name": "enabled: open settings after restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "enabled: still Enabled after the restart",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Enabled",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "enabled off: Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "enabled: toggle off",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "enabled: shows Not registered",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not registered",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{fixtures}/login-item-enabled.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register",
+            "unregister"
+          ]
+        },
+        "status": "not_registered"
+      },
+      "timeout_ms": 2000,
+      "name": "enabled: unregister call recorded"
+    },
+    {
+      "name": "requires approval: load its fixture",
+      "call": "load_fixture",
+      "args": {
+        "kind": "login_item",
+        "path": "{fixtures}/login-item-requires-approval.json"
+      }
+    },
+    {
+      "name": "requires approval: close settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "requires approval: reopen settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "requires approval: starts Not registered",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not registered",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "requires approval: Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "requires approval: toggle on",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "requires approval: shows the status with its explanation",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Requires approval",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "macOS needs your approval: turn on Ubilink in System Settings > General > Login Items.",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{fixtures}/login-item-requires-approval.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register"
+          ]
+        },
+        "status": "requires_approval"
+      },
+      "timeout_ms": 2000,
+      "name": "requires approval: register call recorded"
+    },
+    {
+      "name": "requires approval: restart",
+      "restart": true
+    },
+    {
+      "name": "requires approval: open settings after restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "requires approval: same status and explanation after the restart",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": true
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Requires approval",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "macOS needs your approval: turn on Ubilink in System Settings > General > Login Items.",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "requires approval off: Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "requires approval: toggle off",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "requires approval: shows Not registered, explanation gone",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not registered",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "see": {
+        "text": "macOS needs your approval: turn on Ubilink in System Settings > General > Login Items."
+      },
+      "absent": true,
+      "route": "settings"
+    },
+    {
+      "file": "{fixtures}/login-item-requires-approval.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register",
+            "unregister"
+          ]
+        },
+        "status": "not_registered"
+      },
+      "timeout_ms": 2000,
+      "name": "requires approval: unregister call recorded"
+    },
+    {
+      "name": "not found: load its fixture",
+      "call": "load_fixture",
+      "args": {
+        "kind": "login_item",
+        "path": "{fixtures}/login-item-not-found.json"
+      }
+    },
+    {
+      "name": "not found: close settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      }
+    },
+    {
+      "name": "not found: reopen settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "not found: Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "not found: toggle on",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "not found: shows the status with its explanation, switch back off",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not found",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "macOS cannot find this copy of Ubilink as a login item. Move Ubilink to Applications, open it from there and try again.",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{fixtures}/login-item-not-found.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register"
+          ]
+        },
+        "status": "not_found"
+      },
+      "timeout_ms": 2000,
+      "name": "not found: register call recorded"
+    },
+    {
+      "name": "not found: restart",
+      "restart": true
+    },
+    {
+      "name": "not found: open settings after restart",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "not found: same status and explanation after the restart",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": false
+          }
+        },
+        {
+          "role": "Label",
+          "text": "Not found",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "macOS cannot find this copy of Ubilink as a login item. Move Ubilink to Applications, open it from there and try again.",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "file": "{fixtures}/login-item-not-found.json",
+      "expect": {
+        "calls": {
+          "eq": [
+            "register"
+          ]
+        },
+        "status": "not_found"
+      },
+      "timeout_ms": 2000,
+      "name": "not found: no further seam call"
     },
     {
       "name": "nothing launched",

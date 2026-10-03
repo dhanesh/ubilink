@@ -3,7 +3,7 @@
   "requirement": "R8 (GPUI Phase 1)",
   "notes": [
     "graph-backlinks.json seeded; rows in list_links order (updated_at DESC, rowid DESC): row 1 Decoy Unrelated, row 2 Gamma Doc, row 3 Beta Post. A = row 1 (Decoy Unrelated), B = row 2 (Gamma Doc); they are not linked in the fixture.",
-    "The mark key is Cmd-L, as in the Tauri browser (B1): plain L must type into the always-focused filter (R5). This is the spec's 'pressing L' (README contract).",
+    "The mark key is ⌘L (spec R8, ruling R-n; key `cmd-l`), as in the Tauri browser (B1): plain L types into the always-focused filter (R5).",
     "ubilink-core stores one row per unordered pair and links_of reads either end, so the graph step's unordered pair is links_of(A) ∋ B and links_of(B) ∋ A; the restart + drill proves the B side through the app.",
     "Confirmation text follows the Tauri browser: Linked “A” ↔ “B” (README contract)."
   ],

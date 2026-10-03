@@ -185,3 +185,24 @@ tree):
    all (`exposes_accessibility_value` is gated on `window.is_a11y_active()`) — a
    proof that reads `Input`'s value through some other path than `a11y` would need to
    activate accessibility itself first.
+
+## Keyboard: typing and Tab focus (Task 11, proven live in a11y-spike.json)
+
+- GPUI dispatches a key from the **focused** element up its dispatch path; with
+  nothing focused it starts at the window's root node, which carries no key context,
+  so neither typed text nor gpui-base `Root`'s `tab`/`shift-tab` bindings (context
+  `Root`, `focus_next`/`focus_prev`) are reached and the automation `key` verb reports
+  `handled: false`. A view must focus something when it opens (Phase 1: the browser's
+  filter input, a settings/onboarding control).
+- With an `Input` focused, the `key` verb's keystrokes (`Window::dispatch_keystroke`,
+  which gives a printable key a simulated `key_char` and feeds it to the focused
+  element's input handler) insert text: the `TextInput` node's value changes, and
+  `backspace` deletes. No CGEvent, no Accessibility grant.
+- Tab moves focus and the newly focused `Switch` (or `Button`: Tab inside the open
+  dialog focuses its Close button) node carries the probe's `focused`
+  flag (the dump's `gpui_focus`). The focused `Input` itself is **not** reported as
+  `gpui_focus` in this gpui-pre version, so assert an Input's focus by typing into it,
+  not by its `focused` flag.
+- Escape closes a `Dialog` (gpui-component's own binding) and focus returns to what
+  was focused before it opened.
+
