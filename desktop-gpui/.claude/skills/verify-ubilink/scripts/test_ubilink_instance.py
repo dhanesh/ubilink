@@ -384,6 +384,15 @@ class RestartEndToEnd(unittest.TestCase):
             r.close()
         lease = json.loads(ui.LEASE.read_text())
         self.assertIsNone(lease["active_pid"], "restart cleared its heartbeat mark")
+        # I7: the relaunched process is recorded as harness-owned (judged by its claim),
+        # so probe.py's reaper never kills it once this command has exited.
+        owner = json.loads((Path(claim["root"]) / "owner.json").read_text())
+        self.assertEqual((owner["kind"], owner["pid"]), ("harness", claim["pid"]))
+        self.assertEqual(owner["claim"], str(self.run_root / "vr" / "instance.json"))
+        acted = ui.probe.reap_orphans(out=lambda m: None)
+        self.assertNotIn(Path(claim["root"]), [r for r, _, _ in acted],
+                         "an instance its claim accounts for is kept")
+        self.assertTrue(alive_not_zombie(claim))
 
     def test_other_verifier_cannot_restart(self):
         with self.assertRaises(ui.Blocked):
@@ -422,6 +431,17 @@ class RestartEndToEnd(unittest.TestCase):
         stop = type("A", (), {"instance": "vr", "verifier": "v1"})()
         self.assertEqual(ui.cmd_stop(stop), 0)
         self.assertFalse(Path(claim["root"]).exists())
+
+
+class WaitsFitTheConductorLimit(unittest.TestCase):
+    """I8: a second verifier gets a clear exit 3 well inside the conductor's 600 s per
+    command, and a crashed holder's lease is reclaimable within that wait."""
+
+    def test_lease_and_lock_waits(self):
+        self.assertLessEqual(ui.LEASE_TIMEOUT_S, 300)
+        self.assertLess(ui.LEASE_IDLE_S, ui.LEASE_TIMEOUT_S)
+        self.assertLessEqual(ui.probe._WAIT_DEADLINE_S, 480)
+        self.assertLess(ui.probe._WAIT_DEADLINE_S, 600)
 
 
 SCENARIOS = {

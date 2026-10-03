@@ -77,6 +77,10 @@ python3 "$H" list
 
 What `launch` does, in order:
 
+0. Reaps orphans (probe.py's `reap_orphans`, final review I7): an instance under
+   `$TMPDIR/ubprobe-*` whose owning `probe.py run` is dead (SIGKILLed by a timeout) is
+   terminated, after checking its pid still runs the recorded binary. Harness
+   instances are reaped only when no claim accounts for them.
 1. Claims `.verify-run/$INSTANCE/instance.json` with an O_EXCL create, naming you as
    the verifier. A live claim exits 3 ("already running"); a stale one (dead pid) is
    replaced.
@@ -84,11 +88,13 @@ What `launch` does, in order:
    (O_EXCL; it names one run directory, one verifier and that verifier's instances).
    Only one verifier at a time drives instances on this desktop, so two verifiers' GUI
    steps can never interleave between calls. If another verifier holds it, `launch`
-   waits up to 900 seconds (`--lease-timeout`) and then exits 3. Your last `stop`
-   releases it. How a waiting `launch` treats someone else's lease:
+   waits up to 300 seconds (`--lease-timeout`) and then exits 3: GUI proofs serialise on
+   one desktop, so a second verifier backs off well inside the conductor's 600 s per
+   command (final review I8); parallel verifiers overlap only their builds. Your last
+   `stop` releases it. How a waiting `launch` treats someone else's lease:
    - **Stale:** none of its instances is alive and none of its harness commands is
      running. The lease is replaced; there is nothing to stop.
-   - **Idle:** no harness command of the holder has run for 600 seconds, and none is
+   - **Idle:** no harness command of the holder has run for 240 seconds, and none is
      running now. This is how a crashed verifier's orphans get cleaned up. The waiting
      `launch` reclaims the lease:
      - it stops the holder's instances by their recorded pids, each only after checking
@@ -109,8 +115,9 @@ What `launch` does, in order:
    The decision rules are unit-tested: `python3 "$SKILL"/scripts/test_ubilink_instance.py`.
 3. Builds the automation binary with probe.py's `build_binary` and clones the produced
    executable to `.verify-run/$INSTANCE/ubilink-next-automation`. The build is
-   `cargo build --locked --features automation` in the warm shared target dir under
-   `~/Library/Caches/ubilink-probe/target`, held under its target lock. `launch` prints
+   `cargo build --locked --features automation` in the warm shared target dir
+   (`$CARGO_TARGET_DIR` when exported, else `~/Library/Caches/ubilink-probe/target`),
+   held under its target lock. `launch` prints
    the binary's sha256 and source commit on stderr. A warm build takes a few seconds; a
    cold one takes several minutes.
 4. Under probe.py's desktop lock, starts the instance with probe.py's `Instance`
