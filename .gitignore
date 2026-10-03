@@ -72,3 +72,8 @@ GEMINI.md
 
 # Python bytecode from running scripts/test_probe.py (unittest imports the module).
 __pycache__/
+
+# verify-ubilink evidence (.verify/) and per-instance run state (.verify-run/):
+# local records the evidence gate reads, never committed.
+.verify/
+.verify-run/
