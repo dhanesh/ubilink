@@ -18,9 +18,11 @@
 //   screen-access        {"granted": bool} from CGPreflightScreenCaptureAccess
 //   display-asleep       {"id", "asleep": bool} CGDisplayIsAsleep on the main display
 //                        (probe.py doctor, R9: an asleep main display is a FAIL)
-//   pixel <png> <x> <y> <w> <h> <points-width>
+//   pixel <png> <x> <y> <w> <h> <points-width> [all]
 //                        mean sRGB colour of a region given in window points; the
-//                        image's backing scale is its pixel width / <points-width>
+//                        image's backing scale is its pixel width / <points-width>.
+//                        With `all`, also every pixel's sRGB triple (for the probe's
+//                        "best pixel" match on a text run, Phase 1 R14)
 
 import AppKit
 import CoreGraphics
@@ -121,7 +123,9 @@ case "display-asleep":
     emit(["id": Int(id), "asleep": CGDisplayIsAsleep(id) != 0])
 
 case "pixel":
-    guard args.count == 7 else { fail("usage: quartz pixel <png> <x> <y> <w> <h> <points-width>") }
+    guard args.count == 7 || (args.count == 8 && args[7] == "all") else {
+        fail("usage: quartz pixel <png> <x> <y> <w> <h> <points-width> [all]")
+    }
     let url = URL(fileURLWithPath: args[1])
     guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
           let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
@@ -142,13 +146,18 @@ case "pixel":
     else { fail("cannot make an sRGB context") }
     ctx.draw(crop, in: CGRect(x: 0, y: 0, width: w, height: h))
     var sum = [0.0, 0.0, 0.0]
+    var all: [[Int]] = []
+    let wantAll = args.count == 8
     for i in stride(from: 0, to: buf.count, by: 4) {
         for c in 0..<3 { sum[c] += Double(buf[i + c]) }
+        if wantAll { all.append([Int(buf[i]), Int(buf[i + 1]), Int(buf[i + 2])]) }
     }
     let n = Double(w * h)
     let rgb = sum.map { Int(($0 / n).rounded()) }
-    emit(["rgb": rgb, "hex": String(format: "#%02x%02x%02x", rgb[0], rgb[1], rgb[2]),
-          "scale": scale, "pixels": w * h])
+    var out: [String: Any] = ["rgb": rgb, "hex": String(format: "#%02x%02x%02x", rgb[0], rgb[1], rgb[2]),
+                              "scale": scale, "pixels": w * h]
+    if wantAll { out["all"] = all }
+    emit(out)
 
 default:
     fail("unknown subcommand: \(cmd)")
