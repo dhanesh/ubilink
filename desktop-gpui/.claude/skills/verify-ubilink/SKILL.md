@@ -48,9 +48,15 @@ WT="${SKILL%/desktop-gpui/.claude/skills/verify-ubilink}"
 cd "$WT"
 H="$SKILL/scripts/ubilink_instance.py"
 VERIFIER=your-verifier-id
+TASK=R0   # the task id your brief names (e.g. R4); "" when working alone
 INSTANCE="$(python3 "$H" name --verifier "$VERIFIER" a)"
 INSTANCE_B="$(python3 "$H" name --verifier "$VERIFIER" b)"
 ```
+
+`TASK` picks the scenario set of the three features two Phase 1 tasks share
+(link-browser R4+R5, browser-navigation R6+R7, graph-data R11+R12; final review C1):
+at the first task's head only its own scenario exists in the product yet, so its
+recipe runs that one; at every other head (and when `TASK` is empty) all of them.
 
 `VERIFIER` is who records the proof. Under factory-conductor it is the verifier id the
 verifier brief gives you, and it MUST NOT be the owner that wrote the change. Working

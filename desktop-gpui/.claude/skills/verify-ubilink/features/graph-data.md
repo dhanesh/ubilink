@@ -29,10 +29,13 @@ confirmation before Reset), both run through the harness's `scenario` command.
 
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name graph-roundtrip
-echo "graph-roundtrip exit $?"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name graph-reset
-echo "graph-reset exit $?"
+# Final review C1: R12 ([after: R11]) lands `graph-reset`, so at task R11's head
+# only `graph-roundtrip` can pass; every other head (TASK empty included) needs both.
+case "$TASK" in R11) SCENARIOS="graph-roundtrip" ;; *) SCENARIOS="graph-roundtrip graph-reset" ;; esac
+for name in $SCENARIOS; do
+  python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
+  echo "$name exit $?"
+done
 ```
 
 Expected: both exit 0. `$OUT/graph-roundtrip/result.json`'s `verdict` is `"PASS"`;
@@ -75,15 +78,15 @@ feature-per-head shape) — recording each scenario in its own `record` call wou
 have the second call overwrite the first's `evidence.json` and same-named
 artifacts (`result.json`, `transcript.txt`, ...), silently losing the R11 proof
 behind the R12 one. Record **one** evidence set for both, with each scenario's
-artifacts renamed to a unique prefix first, and `--result` derived from **both**
-exit codes:
+artifacts renamed to a unique prefix first, and `--result` derived from **every**
+scenario's exit code (both, except at the first task's head: see Drive it):
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
 REC="$WT/.verify-run/$INSTANCE/record-graph-data"
 rm -rf "$REC"; mkdir -p "$REC"
 RESULT=pass
-for name in graph-roundtrip graph-reset; do
+for name in $SCENARIOS; do
   R="$OUT/$name"
   e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
   [ "$e" -eq 0 ] || RESULT=fail
@@ -91,9 +94,9 @@ for name in graph-roundtrip graph-reset; do
 done
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature graph-data \
   --verifier "$VERIFIER" --result "$RESULT" \
-  --action "scenario graph-roundtrip + graph-reset (desktop-gpui/probes/{graph-roundtrip,graph-reset}.json) on instance $INSTANCE" \
-  --observed "graph-roundtrip: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/graph-roundtrip/result.json"); graph-reset: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/graph-reset/result.json")" \
-  --side-effect "opened sink stayed [] in both scenarios; see each scenario's renamed result.json" \
+  --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
+  --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
+  --side-effect "opened sink stayed [] in every scenario run; see each scenario's renamed result.json" \
   $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
