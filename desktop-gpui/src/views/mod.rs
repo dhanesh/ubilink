@@ -274,6 +274,10 @@ mod tests {
 
         // Each view-state serialises to JSON carrying its own route name (every row
         // in `TABLE`, including Task 7's automation-only spike row when present).
+        // Not `phase` (final review C2): each view owns that value and Phase 1 R1
+        // changes capture's from "stub" while editing only views/capture.rs, so a
+        // router-level `phase == "stub"` check would first fail in R15's `make verify`,
+        // a task that may not edit this file. Each view's own test pins its phase.
         for entry in TABLE.iter() {
             let json = (entry.state)().to_json();
             assert_eq!(
@@ -281,7 +285,6 @@ mod tests {
                 entry.route.as_str(),
                 "view-state must name its own route"
             );
-            assert_eq!(json["phase"], "stub");
         }
 
         // Dismiss policy exactly as R5/Task 5 specifies, read back through the table.
@@ -305,7 +308,7 @@ mod tests {
         assert_eq!(entry.dismiss, Dismiss::StayOpen);
         assert_eq!(Route::A11ySpike.as_str(), "a11y_spike");
         let json = (entry.state)().to_json();
+        // `view` only, as `router_registers_four_views` (final review C2).
         assert_eq!(json["view"], "a11y_spike");
-        assert_eq!(json["phase"], "stub");
     }
 }

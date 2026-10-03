@@ -265,10 +265,11 @@ mod tests {
     // note).
     use super::state;
 
+    /// `view` only (final review C2): `phase` is free to change with the view, and
+    /// R14 (`[where: desktop-gpui/src/views/]`) may touch this file.
     #[test]
-    fn state_names_its_own_route_and_stub_phase() {
+    fn state_names_its_own_route() {
         let json = state().to_json();
         assert_eq!(json["view"], "a11y_spike");
-        assert_eq!(json["phase"], "stub");
     }
 }

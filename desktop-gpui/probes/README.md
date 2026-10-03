@@ -328,6 +328,24 @@ the proofs and kept minimal: most proofs read the rendered accessibility tree, s
 most of the contract is visible text. Where Phase 1 can choose, the Tauri panel's
 behaviour (spec B1, `dist/panel.js`) is the default.
 
+### Shared state: views get state via `app_state::get()`
+
+Views get state via `app_state::get()` (`desktop-gpui/src/app_state.rs`, final
+review I5): the one `ubilink_app::AppState` the shell builds at start-up from
+`paths::data_dir()` — the graph in `<data dir>/ubilink-graph.sqlite` (the file
+`seed_graph` writes), the adapter registry with `adapters.json`, the persisted
+`plugins-state.json` disabled set. Pass it to ubilink-app's functions
+(`list_links(app_state::get())`, `set_plugin_enabled(..)`, `export_graph(..)`, ...).
+A view MUST NOT build its own `AppState`, open its own `LinkGraph` or copy
+`desktop/src/main.rs`'s bootstrap: a settings toggle or a marked link must reach every
+view, and that bootstrap's `probe_automation_permission(&OsaScriptRunner)` would raise
+TCC prompts mid-probe. Automation builds start with the permission `NotDetermined`
+and never run that probe; the onboarding view reads the `permission` fixture
+(`crate::fixtures::path(Fixture::Permission)`) and the capture view the `capture`
+fixture instead. `app_state::startup_error()` is the message to show when the on-disk
+graph could not be opened (the state then runs on an in-memory graph). Unit tests
+build a state with a temp dir (`app_state.rs`'s tests), never through `get()`.
+
 ### `state.view` fields (the route's `ViewState`, `state` verb)
 
 `state.view` is the current route's own serialisable state (`views::state_for`). The
@@ -409,8 +427,9 @@ SMAppService call through `desktop-gpui/src/login_item.rs` (Phase 0 code, all bu
 | `login_item::register()` | same | call it when the switch is turned on, show the result; `None` → `SMAppService.mainApp.register()` |
 | `login_item::unregister()` | same | call it when the switch is turned off, show the result; `None` → `SMAppService.mainApp.unregister()` |
 
-`Some(..)` happens only in an automation build with a `login_item` fixture loaded; a
-release build always gets `None`. The seam treats the fixture file
+An automation build always gets `Some(..)`: the fixture's result with a `login_item`
+fixture loaded, else `Some(Err("no login_item fixture loaded"))` (final review I9: it
+never falls through to the real SMAppService, O4). A release build always gets `None`. The seam treats the fixture file
 (`login-item-*.json`, fixtures/README.md) as the instance's login-item store: register
 sets `status` to the file's `on_register`, unregister to `not_registered`, and both
 append their name to `calls`, which the scenario reads back with `file` steps. The
