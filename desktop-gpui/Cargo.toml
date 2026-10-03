@@ -28,6 +28,11 @@ automation = []
 
 [dependencies]
 ubilink-core = { path = "../src-tauri" }
+# The GUI-free command logic both shells call (R3/T4). Added in Phase 0 because
+# Phase 1 may not edit this file (spec O5) and its views call ubilink-app,
+# including the open_link_with / open_settings_with opener seam (R6, O4). A path
+# crate over ubilink-core + serde: no new external crates.
+ubilink-app = { path = "../app" }
 
 # GPUI through one pinned facade: gpui-kit re-exports gpui (gpui-pre =0.3.7, a zed
 # snapshot), gpui-base and gpui-component. Never add crates.io `gpui` 0.2.2 beside it —
