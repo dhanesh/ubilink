@@ -252,6 +252,10 @@ environment. Escalated, not faked. `satisfied_count` stays 8. 60 tests green.
 
 ## D8 — GUI panel: no-build vanilla frontend + Rust command contract (R9 / U1·U2·U4·U3·U5)
 
+**Superseded by D22 (2026-10-04):** the webview panel this decision built is replaced
+by a native GPUI panel; see D22 for why and what changed. Text below is kept as the
+historical record.
+
 **Date:** 2026-06-18 · **Constraints:** U1, U2, U3, U4, U5
 
 **Stack choice, forced by the project's own constraints (not preference):** a
@@ -342,6 +346,11 @@ ENV-blocked. Unlike B3 (a purely structural claim), O4 implies a running governe
 channel, so it stays PARTIAL. `satisfied_count` stays 9. 75 cargo + 8 node tests green.
 
 ## D11 — Tauri desktop shell as a separate crate; T1 wiring closed in code (R12)
+
+**Superseded by D22 (2026-10-04):** the Tauri shell this decision built is replaced
+by a native GPUI shell; see D22 for why and what changed. `desktop/` keeps shipping
+and keeps passing `make verify` until Phase 2 removes it. Text below is kept as the
+historical record.
 
 **Date:** 2026-06-19 · **Constraints:** T1, U1, U2, U3, U5, O2
 
@@ -629,3 +638,198 @@ a manual run → dry-run; a final tag without secrets → fail, so an un-notariz
 can't ship as a final release. `desktop/Cargo.toml` is the only version source
 (`make verify-version`). The pipeline only creates **draft** releases; a maintainer
 publishes after the RC checklist in `docs/RUNBOOK-release.md`.
+
+## D22 — Native GPUI shell supersedes the Tauri webview (D8, D11)
+
+**Date:** 2026-10-04 · **Constraints:** T2, T4, U1, S1, O1 · **Source:** GPUI Phase 0
+foundation spec (`docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md`), Tasks
+2, 4, 5, 7 (`.superpowers/sdd/2026-10-03-gpui-phase0-plan/`)
+
+D8 and D11 chose a webview (Tauri + a no-build vanilla frontend) because the
+toolchain of the time (Rust 1.92) could not build GPUI and no component kit existed
+to prove a tray, global hotkeys and a native pop-up panel could share one macOS
+event loop. Both are now superseded: `desktop-gpui/` builds `ubilink-next.app`, a
+single native process with no second WebKit process and no bundler step, which
+replaces the Tauri app in Phase 2 (it ships beside `desktop/` until then, which
+keeps shipping and keeps passing `make verify`).
+
+- **Why, measured, not assumed.** The stripped release binary is 11.8 MB
+  (`Contents/MacOS/ubilink-next`, Mach-O arm64, `opt-level = 3`, `lto = "thin"`,
+  `codegen-units = 1`), under half of Tauri's 26 MB (D11). Idle CPU with the panel
+  hidden is 0.0% over 60 s (`top -l 2 -s 60`: `%CPU 0.0, IDLEW 0, POWER 0.0`) once
+  the hotkey/tray/menu pump moved from a 16 ms timer poll to an event-driven wake
+  (the poll measured 0.1–0.7% and 13 idle wakeups/s). Hotkey-to-first-frame on the
+  debug automation build (pessimistic; Phase 1 re-measures the release build) is
+  p50 ≈ 19–21 ms and p99 ≈ 25–66 ms over 50 triggers with the prewarm below — well
+  inside U1's p99 < 200 ms / p50 < 80 ms budget, with margin for Phase 1's real
+  views.
+- **Stack and exact pins** (T2; `desktop-gpui/Cargo.toml` + committed
+  `Cargo.lock`): `gpui-kit =0.7.0`, which re-exports `gpui-pre =0.3.7` — a
+  crates.io snapshot of `zed-industries/zed` at revision `1a28cff` — plus
+  `gpui-base 0.7.0` and `gpui-component 0.7.0`; `tray-icon 0.26` (resolves to
+  0.26.0, muda 0.21.0) for the menu-bar item; `global-hotkey 0.8` (0.8.0) for the
+  three hotkeys; `objc2 0.6` (0.6.4), `objc2-app-kit 0.3` (0.3.2),
+  `objc2-foundation 0.3` (0.3.2 — pulled in because objc2-app-kit's API takes and
+  returns Foundation types but does not re-export the crate) and
+  `objc2-service-management 0.3` (0.3.2, for `SMAppService` launch-at-login) for
+  direct AppKit access GPUI does not wrap; `interprocess 2.4` (2.4.4) for the
+  single-instance and automation sockets. The toolchain is Rust 1.98.1
+  (`rust-toolchain.toml`), bumped here because 1.92 cannot build GPUI.
+- **Bus-factor and churn risk, and the mitigation.** `gpui-pre` tracks an unstable
+  internal UI engine published only as point-in-time crates.io snapshots of one
+  vendor's (Zed's) source tree, not a maintained public API; `gpui-kit`/
+  `gpui-component`/`gpui-base` are a third party's wrapper around that snapshot.
+  Either half can go stale or vanish faster than a typical crates.io dependency,
+  and a caret range on `gpui-pre` was rejected outright because `gpui-kit` moves
+  in lockstep with its exact version — a mismatched pair would not build. The
+  mitigation is exact pins (`=0.7.0` / `=0.3.7`, the rest unbumped from what Task 2
+  resolved) with `Cargo.lock` committed and every build run `--locked`, so nothing
+  moves silently; Phase 1's own D3 forbids it from touching
+  `desktop-gpui/Cargo.toml` or the lockfile at all, so the pinned set is frozen for
+  the whole port.
+- **The separate-crate rule, reused.** `desktop-gpui/` is its own crate, not a
+  module of `ubilink-core` or `desktop/` — D11's reasoning for `desktop/` and D10's
+  for `registry/`, applied a fourth time: GPUI, tray-icon, global-hotkey and the
+  objc2 AppKit bindings are a large native-GUI dependency tree, and the core stays
+  GUI-free (D1/D8) so its `no_network_deps` guard stays physically true. It builds
+  a separately identified app (`ubilink-next`, bundle id `org.ubilink.next`) beside
+  `desktop/` rather than replacing it, so the two shells never share a bundle id or
+  a macOS permission grant.
+- **Command logic moved to a GUI-free crate.** The 21 `#[tauri::command]` bodies in
+  `desktop/src/main.rs` moved into `app/` (`ubilink-app`), which depends on neither
+  `tauri` nor any `gpui` crate — checked by a dependency guard
+  (`probe.py deps-clean`). Both shells now call the same tested command logic;
+  `desktop-gpui`'s views take it as a path dependency (added in Phase 0 because
+  Phase 1 may not edit `Cargo.toml`), including the `open_link_with` /
+  `open_settings_with` opener seam D23 describes. This is what lets Phase 1 port UI
+  only, never logic.
+- **Accessory policy, reasserted.** GPUI's own `applicationDidFinishLaunching`
+  forces `NSApplicationActivationPolicyRegular` immediately before running the
+  app's closure, overriding `LSUIElement`; `main.rs` sets `.Accessory` again right
+  after `Application::run` starts, and `shell::state` reads the live
+  `NSApp.activationPolicy` back rather than trusting the Info.plist alone.
+- **Event-driven pump, not a poll.** Hotkey, menu, tray and single-instance events
+  were first drained on a 16 ms GPUI timer; they are now posted by native handlers
+  to a `std::mpsc` inbox woken by a signal, so the foreground task blocks until
+  something exists. That is what took idle CPU to 0.0% and removed the poll
+  interval as a latency floor.
+- **Launch prewarm.** `shell::prewarm` opens one throwaway, unfocused panel placed
+  off every display's bounds at startup, hosting a neutral static child view, so
+  GPUI's text system and window machinery pay their first-use cost before the
+  first real hotkey press instead of on it. Window reuse (keep one hidden window,
+  reposition it) was measured and rejected: the cost is process-wide, not
+  per-window, so reuse would not remove it, and a reused window risks fighting
+  GPUI's own window-visibility state (`orderOut:` behind GPUI's back).
+- **Honest residuals.** Three checks need the maintainer's own Mac and are not
+  simulated: a real hotkey press through the OS event path (a synthetic CGEvent
+  from this environment did not trigger it, most likely for lack of Accessibility
+  permission, though Carbon did accept all three registrations), the panel opening
+  on a second physical display, and hotkey re-registration surviving a sleep/wake
+  cycle. VoiceOver parity is explicitly deferred to an attended Phase 2 check
+  (Phase 1 spec D7) — the accessibility tree the probes read is a proof surface
+  for agents, not a screen-reader audit. `gpui-base 0.7.0`'s `Dialog` (and anything
+  else calling `.focus_trap(..)`) carries a confirmed upstream bug:
+  `FocusTrapContainer::prepaint` calls its wrapped element's raw `prepaint`
+  directly instead of going through `gpui-pre`'s `Drawable` wrapper, so the
+  dialog's own surface never gets an accessibility role even though its title and
+  buttons do; the a11y-spike probe pins this as an asserted-absent check so a
+  future gpui-pre/gpui-component upgrade that fixes it is noticed, not silently
+  relied on.
+
+## D23 — Automation channel and probe harness
+
+**Date:** 2026-10-04 · **Constraints:** S1, S2, O3, O4, TN5 · **Source:** GPUI Phase 0
+foundation spec, Tasks 5–8 and 11 (`.superpowers/sdd/2026-10-03-gpui-phase0-plan/`),
+progress ledger rulings R-i and R-o
+
+Phase 1 must be driven and judged unattended, by an agent, over a channel that never
+ships in the product a user downloads. D23 records the mechanism and the rules that
+keep it that way.
+
+- **Compile-time only.** The whole `automation` module tree is behind
+  `#[cfg(feature = "automation")]`, an off-by-default Cargo feature
+  (`desktop-gpui/Cargo.toml`). `probe.py release-clean` proves this is not just a
+  source-level claim: it builds the release profile without the feature and greps
+  the binary with `strings` for a fixed token list (the socket path element,
+  the `UBILINK_AUTOMATION_MARKER` env var and every verb name) — zero hits, every
+  time, including after later tasks added more surface (e.g. the a11y-spike view's
+  strings were independently confirmed absent from the release binary).
+- **Socket rules.** The automation socket lives at
+  `$TMPDIR/ubilink-<uid>/<instance>/auto.sock`. Its directory is created (and any
+  existing one re-tightened) to 0700, refusing a symlink or a directory owned by
+  another uid; the socket itself is `chmod`'d 0600 after bind. Every accepted peer
+  is checked with `getpeereid` (a two-line `extern "C"` block, no `libc` crate):
+  `peer_allowed` requires the peer's uid to equal the listener's own, so even root
+  is rejected. This socket is wired independently of, and never shares a path
+  with, the pre-existing single-instance socket (S2).
+- **An allowlist of exactly 11 verbs, no eval.** `protocol::VERBS` is checked
+  before anything is parsed; anything else returns `unknown verb: X` rather than
+  being interpreted. The 11 verbs are `open_view`, `key`, `state`, `metrics`,
+  `trigger_hotkey`, `resign_key`, `set_appearance`, `load_fixture`, `window_id`,
+  `a11y` and `opened`. Each verb's arguments deserialise into a typed struct with
+  `deny_unknown_fields`; no verb carries code, a shell command or an expression —
+  there is no eval and no shell-out verb, by construction rather than by filtering.
+- **The in-process AccessKit tree is the on-screen proof surface, not
+  screenshots or a test harness.** `a11y` activates GPUI's AccessKit tree (posting
+  an accessibility-children request to the window's NSView, waiting one frame) and
+  returns `Window::debug_a11y_tree_json()` — the same tree a real screen reader
+  would see, read without a TCC-gated screen capture. The foundation spec's D6
+  rejected two alternatives: `render_to_image` and `VisualTestContext`, both of
+  which run off the real app process or pull test-support code into the shipped
+  build, exactly the "backdoor" RT4 forbids. Pixel sampling and OCR
+  (`screencapture` + Vision) exist only for colour and screenshot evidence, and
+  both degrade to `ENV-BLOCKED` (never a product `FAIL`) when Screen Recording
+  access is absent.
+- **Opener sink and fixture seams.** `opener::Opener<R>` wraps the real
+  `CommandRunner` every open/settings-pane call goes through (`ubilink-app`'s
+  `open_link_with` / `open_settings_with`, and core's own re-validated
+  `open_link`, D16): in a release build it is a no-op pass-through, in an
+  `automation` build it records the call in a sink the `opened` verb reads and
+  launches nothing, so a probe can never open a real browser tab or System
+  Settings pane on the host (O4). The same seam pattern covers launch-at-login:
+  ruling R-o routes `SMAppService` register/unregister calls through a
+  fixture-fed seam (`login_item.rs`, `Fixture::LoginItem`) driving the four real
+  statuses (not-registered, enabled, requires-approval, not-found), because an
+  unbundled probe binary cannot register a real login item and a real one would
+  be a host side effect; the genuine `SMAppService` round trip is deferred to an
+  attended Phase 2 check.
+- **`data_dir()` resolver (ruling R-i).** `desktop-gpui/src/paths.rs::data_dir()`
+  is the one place the data directory is resolved, in every build: an absolute
+  `UBILINK_DATA_DIR` wins (a relative one is ignored with a stderr note), otherwise
+  it falls back to `$HOME/Library/Application Support/org.ubilink.next` — Tauri's
+  `app_data_dir()` layout, under the GPUI bundle id so the two shells never share a
+  directory. `paths::instance_guard` runs first in `main` for automation builds and
+  refuses to start (exit 2) if `UBILINK_INSTANCE` is set without `UBILINK_DATA_DIR`,
+  so an automation instance can never fall through to the real data directory.
+  This is a storage-path override honoured in every build, not a control channel,
+  so it does not weaken S1; it is what lets Phase 1's release-build performance
+  probe (R15) run isolated from the maintainer's real data.
+- **`probe.py` harness properties.** Each instance gets its own data directory,
+  automation socket and fixture set under a per-run temp root, with real hotkey
+  registration skipped (`UBILINK_SKIP_HOTKEYS=1`) so automation instances never
+  register global hotkeys on the host. GUI probes serialise through an exclusive
+  `fcntl.flock` desktop lock (`~/Library/Caches/ubilink-probe/desktop.lock`, held
+  for the whole scenario run, released by the kernel if a probe dies, a second
+  probe polls and prints the holder's pid). The cargo target is a warm cache: a
+  locked build runs once outside the lock, and each run gets its own `cp -c`
+  (APFS clone) copy rather than sharing the built binary, so a long build never
+  blocks another probe's GUI work and instances never race over one binary. Exit
+  codes separate three different "not a pass": 1 is a real product or harness
+  `FAIL`; 2 is a scenario error (an unknown step, a typo'd option, or a harness
+  exception), caught before or during validation so a broken scenario can never
+  pass vacuously; 3 is `ENV-BLOCKED` only (a missing Screen Recording grant, a
+  missing display, a sleeping display), which the run reports honestly rather
+  than as a product failure. A focus-theft guard (`focus_thief`) detects another
+  app taking key status mid-step, not counting the probe's own processes:
+  the first theft retries the step once, a second theft reports `ENV-BLOCKED`
+  rather than `FAIL`. `probe.py doctor` is the preflight gate (Screen Recording
+  access, display awake, display count, a compiled OCR helper, an active
+  `caffeinate` assertion blocking display sleep) and must pass before a run is
+  trusted.
+- **Phase 1's acceptance scenarios are frozen.** `desktop-gpui/probes/`,
+  `desktop-gpui/src/automation/`, `scripts/probe.py`, `scripts/probe-helpers/`,
+  `scripts/ocr.swift` and `Makefile` are pinned to the Phase 0 baseline commit
+  (tagged `phase0-done`): Phase 1's own guard (`git diff --exit-code phase0-done
+  -- …`) fails if any of them changes, so no task can weaken the proof it is
+  judged against. The two sockets, the verb allowlist and the exit-code contract
+  this decision records are exactly what that frozen baseline fixes in place.
