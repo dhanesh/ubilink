@@ -1,0 +1,67 @@
+{
+ "description": "R4/R5 placement with two or more displays: the panel opens on the display under the cursor and follows it",
+ "requirement": "R5 (GPUI Phase 0), R4",
+ "notes": [
+  "ENV-BLOCKED (exit 3) on a one-display Mac: the display-1 steps cannot run. panel-hotkey.json covers the one-display case.",
+  "Displays never overlap, so a frame within both display n and 'state' means state.shell.display_id is display n's id."
+ ],
+ "steps": [
+  {
+   "name": "cursor on display 1",
+   "warp_cursor": 1
+  },
+  {
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "opened on display 1",
+   "winframe": 1
+  },
+  {
+   "name": "which is the cursor's",
+   "winframe": "cursor"
+  },
+  {
+   "name": "and the one state names",
+   "winframe": "state"
+  },
+  {
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "cursor back on display 0",
+   "warp_cursor": 0
+  },
+  {
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "follows the cursor to display 0",
+   "winframe": 0
+  },
+  {
+   "winframe": "cursor"
+  },
+  {
+   "winframe": "state"
+  }
+ ]
+}

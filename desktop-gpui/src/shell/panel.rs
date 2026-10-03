@@ -12,13 +12,15 @@
 //! Hiding closes the window (`remove_window`) and showing opens a fresh one at the
 //! cursor's display: GPUI 0.3.7 has no per-window hide/show or move API, and reaching
 //! behind it to `orderOut:` the NSWindow would leave GPUI's window state out of step.
-//! The cost is a window build per show; R5's latency probe (Task 7) measures whether
-//! that fits p50 < 80 ms, and reusing the window is the fallback if it does not.
+//! The cost is a window build per show; R5's latency probe (`probes/panel-hotkey.json`)
+//! measures it against U1 (p99 < 200 ms, p50 < 80 ms over 50 triggers). Steady-state
+//! shows take ~15–30 ms in a debug build; only the process's first one was slow, which
+//! `shell::prewarm` (with `prewarm_options` below) moves to launch.
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 
-use super::placement::Placement;
+use super::placement::{Display, Placement};
 use super::Route;
 use crate::theme::tokens::radius;
 use crate::views;
@@ -49,6 +51,21 @@ pub fn options(placement: Option<Placement>) -> WindowOptions {
     }
 }
 
+/// The launch prewarm's panel (see `shell::prewarm`): the real panel's options, not
+/// key, and placed a panel-width plus a margin left of the leftmost display, so it
+/// is on no screen. The origin is relative to the primary display, whose global x is
+/// 0, so the leftmost global x is directly usable.
+pub fn prewarm_options(displays: &[Display]) -> WindowOptions {
+    let (w, _) = PANEL_SIZE;
+    let left = displays.iter().map(|d| d.frame.x).fold(0.0, f64::min);
+    let mut o = options(None);
+    o.focus = false;
+    if let Some(WindowBounds::Windowed(b)) = o.window_bounds.as_mut() {
+        b.origin = point(px((left - w - 1000.0) as f32), px(0.0));
+    }
+    o
+}
+
 pub struct PanelView {
     route: Route,
     /// The current route's view, built by the router (`views::build_for`) and swapped
@@ -59,10 +76,31 @@ pub struct PanelView {
     /// first becomes key, and that must not close it.
     was_active: bool,
     _activation: Subscription,
+    /// R5 timing (automation builds): the hotkey's t0, until the first frame is timed.
+    #[cfg(feature = "automation")]
+    first_frame: FirstFrame,
+}
+
+/// Where the hotkey-to-first-frame sample stands (U1/R5). See `PanelView::new`.
+#[cfg(feature = "automation")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FirstFrame {
+    /// No hotkey asked for this show (open_view, tray, reopen) or already recorded.
+    Untimed,
+    /// Waiting for the first platform frame; t0 attached.
+    Pending(std::time::Instant),
+    /// The first platform frame has started: the render inside it records the sample
+    /// once that frame has been presented.
+    Armed(std::time::Instant),
 }
 
 impl PanelView {
-    pub fn new(route: Route, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        route: Route,
+        hotkey_at: Option<std::time::Instant>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // Click-away (R5, proven in Task 5): capture and browser get out of the way when
         // the panel loses key status; settings and onboarding stay open. The rule itself
         // now lives in the router table (views::TABLE), not here.
@@ -71,12 +109,54 @@ impl PanelView {
             this.activation_changed(active, window, cx);
         });
         let child = views::build_for(route, cx);
+        #[cfg(not(feature = "automation"))]
+        let _ = hotkey_at;
+        #[cfg(feature = "automation")]
+        let first_frame = match hotkey_at {
+            Some(t0) => {
+                Self::arm_first_frame(window, cx);
+                FirstFrame::Pending(t0)
+            }
+            None => FirstFrame::Untimed,
+        };
         PanelView {
             route,
             child,
             was_active: window.is_window_active(),
             _activation: activation,
+            #[cfg(feature = "automation")]
+            first_frame,
         }
+    }
+
+    /// U1/R5: when is the panel's first frame on screen? gpui-pre 0.3.7 exposes no
+    /// present or Metal-completion callback, so this takes the latest point it does
+    /// expose that is provably after the present:
+    ///
+    /// - `open_window` draws the first scene synchronously but does not present it;
+    ///   the present happens in the window's next platform frame (`on_request_frame`:
+    ///   next-frame callbacks, then `draw`, then `present`, i.e. Metal
+    ///   `present_drawable` + `commit`, all inside one `App::update`).
+    /// - `on_next_frame` runs at the start of that platform frame, before its present.
+    ///   It arms the sample and notifies, so the same frame draws again.
+    /// - That render `defer`s the record. Deferred effects flush when the frame's
+    ///   outermost `App::update` finishes, which is after `present` returned.
+    ///
+    /// So t1 is after the drawable was handed to Core Animation (the GPU and the
+    /// compositor take it from there; that tail is not observable in-process). The
+    /// forced redraw makes t1 slightly late, never early. A second `on_next_frame`
+    /// would also be after the present, but up to a whole vsync later.
+    #[cfg(feature = "automation")]
+    fn arm_first_frame(window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.weak_entity();
+        window.on_next_frame(move |_, cx| {
+            let _ = this.update(cx, |v, cx| {
+                if let FirstFrame::Pending(t0) = v.first_frame {
+                    v.first_frame = FirstFrame::Armed(t0);
+                    cx.notify();
+                }
+            });
+        });
     }
 
     /// The click-away rule, run on every key-status change. Returns whether it closed
@@ -118,6 +198,20 @@ impl PanelView {
 
 impl Render for PanelView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "automation")]
+        if let FirstFrame::Armed(t0) = self.first_frame {
+            self.first_frame = FirstFrame::Untimed;
+            let route = self.route.as_str().to_string();
+            // Runs after this frame's present (see `arm_first_frame`).
+            cx.defer(move |_| {
+                use crate::automation::store::{record_metric, MetricKind, Sample};
+                record_metric(Sample {
+                    kind: MetricKind::HotkeyToFirstFrame,
+                    route,
+                    ms: t0.elapsed().as_secs_f64() * 1000.0,
+                });
+            });
+        }
         let theme = cx.theme();
         div()
             .size_full()
@@ -125,5 +219,53 @@ impl Render for PanelView {
             // Translucent so the NSVisualEffectView's blur shows through.
             .bg(theme.background.opacity(0.55))
             .child(self.child.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::placement::{Display, Rect};
+    use super::{prewarm_options, PANEL_SIZE};
+    use gpui_kit::WindowBounds;
+
+    fn display(id: u32, x: f64, y: f64, w: f64, h: f64) -> Display {
+        let frame = Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        };
+        Display {
+            id,
+            frame,
+            work: frame,
+        }
+    }
+
+    #[test]
+    fn prewarm_panel_is_on_no_display_and_never_key() {
+        // A primary, a display to its left and one above: the panel must miss all.
+        let displays = [
+            display(1, 0.0, 0.0, 1440.0, 900.0),
+            display(2, -1920.0, 0.0, 1920.0, 1080.0),
+            display(3, 0.0, -1080.0, 1920.0, 1080.0),
+        ];
+        let o = prewarm_options(&displays);
+        assert!(
+            !o.focus,
+            "the prewarm must not take key status from the user's app"
+        );
+        let Some(WindowBounds::Windowed(b)) = o.window_bounds else {
+            panic!("windowed bounds expected");
+        };
+        let x = f64::from(f32::from(b.origin.x));
+        let right = x + PANEL_SIZE.0;
+        for d in &displays {
+            assert!(
+                right < d.frame.x,
+                "panel [{x}, {right}) overlaps display {}",
+                d.id
+            );
+        }
     }
 }

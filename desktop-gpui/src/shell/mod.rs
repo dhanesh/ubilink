@@ -159,6 +159,7 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
         panel: None,
     });
     log_state(cx);
+    prewarm(cx);
 
     let signal = inbox.signal.clone();
     cx.spawn(async move |cx| loop {
@@ -166,6 +167,42 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
         cx.update(pump);
     })
     .detach();
+}
+
+/// U1/R5: open one throwaway panel off-screen at launch, then close it a run-loop turn
+/// later, so the user's first hotkey is as fast as every later one.
+///
+/// Measured (Task 5, debug automation build, 50 triggers): without this the first
+/// show took 251–827 ms and every later one 11–50 ms. The first show pays one-off,
+/// process-wide costs — `open_window`'s first NSPanel + NSVisualEffectView + Metal
+/// layer build (~85 ms vs ~15 ms after) and the main thread's first Core Animation
+/// commit for a window (~130–350 ms before the next run-loop task runs) — not
+/// per-window ones, so keeping a window alive for reuse would not remove them; doing
+/// them once at launch does (first show then ~75 ms, p99 under U1's 200 ms).
+///
+/// The panel is placed left of every display, so nothing appears on screen, and is
+/// never key (`focus: false`), so no app loses focus. It is not the shell's panel:
+/// `Shell::panel` and `ShellState` never see it (visible, window_verified stay false),
+/// and `native::visible_panel` prefers the newest panel, so a real show while it is
+/// still closing is the one read back. One window, one task: no timer, idle stays 0%.
+fn prewarm(cx: &mut App) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let (displays, _) = native::displays(mtm);
+    let opened = gpui_kit::open_window(panel::prewarm_options(&displays), cx, |window, cx| {
+        cx.new(|cx| panel::PanelView::new(Route::Capture, None, window, cx))
+    });
+    match opened {
+        // The close runs as a foreground task, i.e. after this run-loop turn's Core
+        // Animation commit, which is the expensive part being warmed.
+        Ok((handle, _)) => cx
+            .spawn(async move |cx| {
+                let _ = cx.update(|cx| handle.update(cx, |_, window, _| window.remove_window()));
+            })
+            .detach(),
+        Err(e) => eprintln!("[ubilink-next] panel prewarm failed: {e}"),
+    }
 }
 
 /// The state before anything is observed. `window_kind`/`background` stay "unknown"
@@ -221,9 +258,17 @@ pub fn handle_event(event: ShellEvent, cx: &mut App) {
     let Some(shell) = cx.try_global::<Shell>() else {
         return;
     };
-    if let Some(c) = command_for(&event, &shell.hotkey_routes) {
-        execute(c, cx);
+    let Some(c) = command_for(&event, &shell.hotkey_routes) else {
+        return;
+    };
+    // U1/R5: t0 of hotkey-to-first-frame is when the shell receives the press — real
+    // Carbon events and `trigger_hotkey` both arrive here. `open` hands it to the new
+    // panel, which records the sample at its first presented frame (panel.rs).
+    #[cfg(feature = "automation")]
+    if let (ShellEvent::HotKey { .. }, Command::Toggle(route)) = (&event, c) {
+        crate::automation::store::mark_hotkey(route, std::time::Instant::now());
     }
+    execute(c, cx);
 }
 
 /// The open panel's window, root view and route, for the automation verbs that act on
@@ -268,15 +313,23 @@ pub fn execute(cmd: Command, cx: &mut App) {
         return;
     };
     let current = shell.panel.as_ref().map(|p| p.route);
+    // Taken whatever the command does, so a hotkey that hid or switched the panel
+    // never leaves a stale t0 for a later, non-hotkey open to be timed against.
+    #[cfg(feature = "automation")]
+    let hotkey_at = crate::automation::store::take_hotkey_mark().map(|(_, at)| at);
+    #[cfg(not(feature = "automation"))]
+    let hotkey_at = None;
     match (cmd, current) {
         (Command::Quit, _) => cx.quit(),
         (Command::Toggle(r), Some(open)) if open == r => hide(cx),
         (Command::Open(r) | Command::Toggle(r), Some(_)) => switch_route(r, cx),
-        (Command::Open(r) | Command::Toggle(r), None) => open(r, cx),
+        (Command::Open(r) | Command::Toggle(r), None) => open(r, hotkey_at, cx),
     }
 }
 
-fn open(route: Route, cx: &mut App) {
+/// `hotkey_at`: when the hotkey that asked for this show was received (automation
+/// builds only; always `None` otherwise), for R5's latency sample.
+fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -284,7 +337,7 @@ fn open(route: Route, cx: &mut App) {
     let placement =
         placement::place_panel(&displays, native::cursor(primary_height), panel::PANEL_SIZE);
     let opened = gpui_kit::open_window(panel::options(placement), cx, |window, cx| {
-        cx.new(|cx| panel::PanelView::new(route, window, cx))
+        cx.new(|cx| panel::PanelView::new(route, hotkey_at, window, cx))
     });
     let (handle, view) = match opened {
         Ok(v) => v,

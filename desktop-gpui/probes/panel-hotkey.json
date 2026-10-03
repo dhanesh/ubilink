@@ -1,0 +1,1604 @@
+{
+ "description": "U1/R5: hotkey-to-first-frame p99 < 200 ms and p50 < 80 ms over 50 triggers (hidden between each), and the panel opens on the display under the cursor",
+ "requirement": "R5 (GPUI Phase 0), U1",
+ "notes": [
+  "Generated: 50 x (trigger_hotkey open, wait for the sample, trigger_hotkey again to toggle it hidden), cycling capture/browser/settings. Each show is a fresh window.",
+  "t0 = the shell receives the hotkey (shell::handle_event, where trigger_hotkey and a real Carbon event both enter); t1 = after the first platform frame's present returned (shell/panel.rs arm_first_frame explains the hook).",
+  "No a11y call before the loop: activating a window's AccessKit tree makes GPUI build it on every frame for that window's life.",
+  "summary.* uses nearest-rank percentiles: p99 of 50 samples is the slowest one.",
+  "Single-display placement only; panel-multidisplay.json holds the >= 2 display assertions (ENV-BLOCKED on one display), kept apart so this scenario exits 0 on a one-display Mac."
+ ],
+ "steps": [
+  {
+   "name": "nothing timed yet",
+   "call": "metrics",
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 0,
+    "capacity": {
+     "ge": 50
+    }
+   }
+  },
+  {
+   "name": "cursor on the main display",
+   "warp_cursor": 0
+  },
+  {
+   "name": "trigger 1/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 1/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 1
+   }
+  },
+  {
+   "name": "trigger 1/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 2/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 2/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 2
+   }
+  },
+  {
+   "name": "trigger 2/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 3/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 3/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 3
+   }
+  },
+  {
+   "name": "trigger 3/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 4/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 4/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 4
+   }
+  },
+  {
+   "name": "trigger 4/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 5/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 5/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 5
+   }
+  },
+  {
+   "name": "trigger 5/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 6/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 6/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 6
+   }
+  },
+  {
+   "name": "trigger 6/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 7/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 7/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 7
+   }
+  },
+  {
+   "name": "trigger 7/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 8/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 8/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 8
+   }
+  },
+  {
+   "name": "trigger 8/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 9/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 9/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 9
+   }
+  },
+  {
+   "name": "trigger 9/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 10/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 10/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 10
+   }
+  },
+  {
+   "name": "trigger 10/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 11/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 11/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 11
+   }
+  },
+  {
+   "name": "trigger 11/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 12/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 12/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 12
+   }
+  },
+  {
+   "name": "trigger 12/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 13/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 13/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 13
+   }
+  },
+  {
+   "name": "trigger 13/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 14/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 14/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 14
+   }
+  },
+  {
+   "name": "trigger 14/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 15/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 15/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 15
+   }
+  },
+  {
+   "name": "trigger 15/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 16/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 16/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 16
+   }
+  },
+  {
+   "name": "trigger 16/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 17/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 17/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 17
+   }
+  },
+  {
+   "name": "trigger 17/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 18/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 18/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 18
+   }
+  },
+  {
+   "name": "trigger 18/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 19/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 19/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 19
+   }
+  },
+  {
+   "name": "trigger 19/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 20/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 20/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 20
+   }
+  },
+  {
+   "name": "trigger 20/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 21/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 21/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 21
+   }
+  },
+  {
+   "name": "trigger 21/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 22/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 22/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 22
+   }
+  },
+  {
+   "name": "trigger 22/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 23/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 23/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 23
+   }
+  },
+  {
+   "name": "trigger 23/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 24/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 24/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 24
+   }
+  },
+  {
+   "name": "trigger 24/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 25/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 25/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 25
+   }
+  },
+  {
+   "name": "trigger 25/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 26/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 26/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 26
+   }
+  },
+  {
+   "name": "trigger 26/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 27/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 27/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 27
+   }
+  },
+  {
+   "name": "trigger 27/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 28/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 28/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 28
+   }
+  },
+  {
+   "name": "trigger 28/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 29/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 29/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 29
+   }
+  },
+  {
+   "name": "trigger 29/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 30/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 30/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 30
+   }
+  },
+  {
+   "name": "trigger 30/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 31/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 31/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 31
+   }
+  },
+  {
+   "name": "trigger 31/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 32/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 32/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 32
+   }
+  },
+  {
+   "name": "trigger 32/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 33/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 33/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 33
+   }
+  },
+  {
+   "name": "trigger 33/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 34/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 34/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 34
+   }
+  },
+  {
+   "name": "trigger 34/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 35/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 35/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 35
+   }
+  },
+  {
+   "name": "trigger 35/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 36/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 36/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 36
+   }
+  },
+  {
+   "name": "trigger 36/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 37/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 37/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 37
+   }
+  },
+  {
+   "name": "trigger 37/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 38/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 38/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 38
+   }
+  },
+  {
+   "name": "trigger 38/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 39/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 39/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 39
+   }
+  },
+  {
+   "name": "trigger 39/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 40/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 40/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 40
+   }
+  },
+  {
+   "name": "trigger 40/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 41/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 41/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 41
+   }
+  },
+  {
+   "name": "trigger 41/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 42/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 42/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 42
+   }
+  },
+  {
+   "name": "trigger 42/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 43/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 43/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 43
+   }
+  },
+  {
+   "name": "trigger 43/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 44/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 44/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 44
+   }
+  },
+  {
+   "name": "trigger 44/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 45/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 45/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 45
+   }
+  },
+  {
+   "name": "trigger 45/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 46/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 46/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 46
+   }
+  },
+  {
+   "name": "trigger 46/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 47/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 47/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 47
+   }
+  },
+  {
+   "name": "trigger 47/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 48/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": "settings",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 48/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 48
+   }
+  },
+  {
+   "name": "trigger 48/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "settings"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 49/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 49/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 49
+   }
+  },
+  {
+   "name": "trigger 49/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "trigger 50/50 opens",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": "browser",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "trigger 50/50 timed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 50
+   }
+  },
+  {
+   "name": "trigger 50/50 hides",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "browser"
+   },
+   "expect": {
+    "route": null,
+    "shell.visible": false
+   }
+  },
+  {
+   "name": "U1 budget over 50 triggers",
+   "call": "metrics",
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 50,
+    "summary.hotkey_to_first_frame.p50": {
+     "lt": 80
+    },
+    "summary.hotkey_to_first_frame.p99": {
+     "lt": 200
+    },
+    "samples": {
+     "len": 50
+    }
+   }
+  },
+  {
+   "name": "placement: open at the cursor",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "route": "capture",
+    "shell.visible": true,
+    "shell.display_id": {
+     "type": "number",
+     "gt": 0
+    }
+   }
+  },
+  {
+   "name": "placement: real popup",
+   "call": "state",
+   "retry_ms": 3000,
+   "expect": {
+    "window_verified": true,
+    "shell.window_kind": "popup",
+    "shell.background": "blurred",
+    "shell.visible": true
+   }
+  },
+  {
+   "name": "within the cursor's display",
+   "winframe": "cursor"
+  },
+  {
+   "name": "within the display state names",
+   "winframe": "state"
+  },
+  {
+   "name": "within the main display",
+   "winframe": 0
+  },
+  {
+   "name": "hotkey toggles it away",
+   "call": "trigger_hotkey",
+   "args": {
+    "action": "capture"
+   },
+   "expect": {
+    "shell.visible": false
+   }
+  },
+  {
+   "winframe": "gone"
+  },
+  {
+   "name": "51 timed shows, ring still typed",
+   "call": "metrics",
+   "retry_ms": 3000,
+   "expect": {
+    "summary.hotkey_to_first_frame.count": 51,
+    "samples.0.kind": "hotkey_to_first_frame",
+    "samples.0.route": "capture"
+   }
+  }
+ ]
+}
