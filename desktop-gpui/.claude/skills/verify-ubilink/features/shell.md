@@ -1,7 +1,7 @@
 # shell: Menu-bar app and its pop-up panel
 
 - id: shell
-- proven: no
+- proven: ad6121d4817214401fbc92124b6bc88e62c72da6
 - anchors: src/shell/mod.rs:handle_event, src/shell/panel.rs:PanelView, src/shell/state.rs:ShellState, src/shell/tray.rs:command_for, src/shell/hotkeys.rs:bindings, src/automation/mod.rs:state_json, src/paths.rs, probes/shell.json
 
 ## What it is
