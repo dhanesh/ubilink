@@ -63,6 +63,11 @@ const HEADER_H: Pixels = px(28.);
 const GAP: Pixels = spacing::S1;
 /// One row: name and URI on a single line.
 const ROW_H: Pixels = px(20.);
+/// Up to this many shown rows, the list is laid out at its full height inside a
+/// scrolling container, so every row is built and reaches the accessibility tree (a
+/// filtered result is read whole); past it, the list virtualises to its viewport.
+/// R4's bound: never more than sixty row elements.
+const ALL_ROWS_MAX: usize = 60;
 
 /// Shown in place of rows when links exist but none matches the filter.
 pub const NO_MATCH_TEXT: &str = "No links match the filter. Delete a character or two.";
@@ -400,6 +405,8 @@ pub struct BrowserView {
     pending: Option<Rows>,
     list: Option<Entity<ListState<BrowserRows>>>,
     filter: Option<Entity<InputState>>,
+    /// The container that scrolls a short (unvirtualised) list.
+    rows_scroll: ScrollHandle,
     /// The filter's change subscription; dropping it would stop the filtering.
     _filter_changes: Option<Subscription>,
     /// When the latest key went down, the start of a re-filter's timing.
@@ -430,6 +437,7 @@ impl BrowserView {
             pending: None,
             list: None,
             filter: None,
+            rows_scroll: ScrollHandle::new(),
             _filter_changes: None,
             key_at: None,
             _load: load,
@@ -446,6 +454,28 @@ impl BrowserView {
                 state.scroll_to_selected_item(window, cx);
             });
         }
+        self.reveal(ix, cx);
+    }
+
+    /// A short list is laid out whole and scrolled by its container: keep row `ix`
+    /// in that container's view. (A long list scrolls itself.)
+    fn reveal(&self, ix: usize, cx: &App) {
+        let count = self.row_count(cx);
+        if count == 0 || count > ALL_ROWS_MAX {
+            return;
+        }
+        let view_h = self.rows_scroll.bounds().size.height;
+        let top = ROW_H * ix as f32;
+        let bottom = top + ROW_H;
+        let current = -self.rows_scroll.offset().y;
+        let wanted = if top < current {
+            top
+        } else if bottom > current + view_h {
+            bottom - view_h
+        } else {
+            current
+        };
+        self.rows_scroll.set_offset(point(px(0.), -wanted));
     }
 
     fn row_count(&self, cx: &App) -> usize {
@@ -469,6 +499,7 @@ impl BrowserView {
             state.scroll_to_selected_item(window, cx);
             cx.notify();
         });
+        self.reveal(0, cx);
     }
 
     /// Time the first frame (see the module doc): arm on the first render, record
@@ -588,12 +619,20 @@ impl Render for BrowserView {
                     )
                     .child(div().flex_1().min_w_0().child(Input::new(&filter).small())),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(List::new(&list).scrollbar_visible(false)),
-            )
+            .child({
+                let shown = self.row_count(cx);
+                let list = List::new(&list).scrollbar_visible(false);
+                let area = div().flex_1().min_h_0();
+                if shown > 0 && shown <= ALL_ROWS_MAX {
+                    area.id("browser-rows")
+                        .overflow_y_scroll()
+                        .track_scroll(&self.rows_scroll)
+                        .child(div().h(ROW_H * shown as f32).child(list))
+                        .into_any_element()
+                } else {
+                    area.child(list).into_any_element()
+                }
+            })
             // The graph couldn't be opened at start-up: the list is an empty
             // in-memory graph, and the user should know why (U3).
             .when_some(app_state::startup_error(), |d, error| {
