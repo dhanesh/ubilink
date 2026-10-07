@@ -48,10 +48,12 @@ proves it:
 - `linking-manifesto-app:U5` → feature `backlinks`
 - `linking-manifesto-app:S4` → feature `onboarding` (resolved from "Undecided" below: the onboarding view's per-step rationale and pane links are exactly S4's "transparent rationale")
 
-None of these are `proven` yet — the features above all carry `proven: no` until
-Phase 1's views replace the stubs and a verifier drives the recipe live; `forge
-coverage` counts a constraint as covered once some feature names it in `- constraints:`,
-independent of whether that feature is itself proven.
+Each feature's `- proven:` line names the head it was last driven live on, or `no`.
+`shell` and `panel-dismiss` are proven against the Phase 0 stub views; every other
+feature stays `proven: no` until Phase 1's views replace the stubs and a verifier
+drives its recipe live. `forge coverage` counts a constraint as covered once some
+feature names it in `- constraints:`, independent of whether that feature is itself
+proven.
 
 Still undecided (no Phase 1 feature's scenario genuinely proves these; left
 uncovered):
