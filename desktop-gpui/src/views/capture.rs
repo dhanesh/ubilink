@@ -26,6 +26,7 @@
 //! it), and settled only by the newest view's capture, so a stale result from an
 //! earlier show can never overwrite a newer one.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use gpui_kit::component::ActiveTheme;
@@ -36,12 +37,16 @@ use serde::{Deserialize, Serialize};
 use super::Route;
 use crate::app_state;
 use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
+use ubilink_core::{LinkView, PanelBackend, PanelView};
 
 /// The capturing indicator's text (the Tauri panel's wording, `dist/panel.js`).
 pub const CAPTURING_TEXT: &str = "Capturing the active resource…";
 
 /// The copied confirmation's text (R2): shown once the URI is on the pasteboard.
 pub const COPIED_TEXT: &str = "Copied";
+
+/// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
+pub const BACKLINKS_HEADING: &str = "Linked to this";
 
 /// Is `keystroke` one of the copy keys (R2, U2)? Plain Enter, or ⌘C (Ctrl-C too, as
 /// the Tauri panel's handler accepts, `dist/panel.js`). Shift or Option make it some
@@ -80,8 +85,13 @@ pub fn state() -> super::ViewState {
 pub enum Phase {
     /// Shown, waiting for the core. No capture data yet.
     Capturing,
-    /// The core captured and stored the frontmost resource.
-    Captured { name: String, uri: String },
+    /// The core captured and stored the frontmost resource. `backlinks` are the
+    /// resources linked to it (R3), newest link first.
+    Captured {
+        name: String,
+        uri: String,
+        backlinks: Vec<LinkView>,
+    },
     /// The capture failed; `message` is the core's sentence, shown verbatim (U3).
     Failed { message: String },
 }
@@ -104,16 +114,98 @@ impl Phase {
         }
     }
 
-    /// The core's answer, as the phase it leads to.
-    pub fn from_core(result: Result<ubilink_core::PanelView, String>) -> Phase {
+    /// The core's answer, as the phase it leads to. The backlinks keep the order
+    /// they come in; [`settle_capture`] puts them in recency order first.
+    pub fn from_core(result: Result<PanelView, String>) -> Phase {
         match result {
             Ok(view) => Phase::Captured {
                 name: view.resource.name,
                 uri: view.resource.uri,
+                backlinks: view.backlinks,
             },
             Err(message) => Phase::Failed { message },
         }
     }
+}
+
+/// The core's capture answer, with its backlinks put newest link first (R3), as the
+/// phase it leads to. Runs on the background executor, after the capture has
+/// released the backend lock.
+///
+/// Which resources are backlinks is the core's answer (`PanelView::backlinks`), so the
+/// graph's own query decides membership. The core lists them by URI and exposes no
+/// link timestamps, so the order comes from the graph's export (`export_graph`, the
+/// one public read that carries each link's `created_at`). If that read fails the
+/// backlinks still show, in the core's order: a missing order is not worth hiding them.
+fn settle_capture(backend: &Mutex<PanelBackend>, result: Result<PanelView, String>) -> Phase {
+    let Ok(mut view) = result else {
+        return Phase::from_core(result);
+    };
+    if view.backlinks.len() > 1 {
+        let export = backend
+            .lock()
+            .map_err(|_| "internal state was poisoned".to_string())
+            .and_then(|b| b.export_graph());
+        match export {
+            Ok(json) => order_by_recency(&view.resource.uri, &mut view.backlinks, &json),
+            Err(e) => eprintln!("[ubilink-next] backlinks shown unordered: {e}"),
+        }
+    }
+    Phase::from_core(Ok(view))
+}
+
+/// Sort `backlinks` of `subject` newest link first, by the link `created_at` in
+/// `export` (the graph's `ubilink.graph.v3` export JSON). A link with no timestamp,
+/// or a backlink the export doesn't know, sorts last; ties keep their order.
+fn order_by_recency(subject: &str, backlinks: &mut [LinkView], export: &str) {
+    #[derive(Deserialize)]
+    struct Export {
+        resources: Vec<ExportResource>,
+        links: Vec<ExportLink>,
+    }
+    #[derive(Deserialize)]
+    struct ExportResource {
+        guid: String,
+        uri: String,
+    }
+    #[derive(Deserialize)]
+    struct ExportLink {
+        a: String,
+        b: String,
+        created_at: Option<i64>,
+    }
+    let export: Export = match serde_json::from_str(export) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[ubilink-next] backlinks shown unordered: unreadable export ({e})");
+            return;
+        }
+    };
+    let uri_of: HashMap<&str, &str> = export
+        .resources
+        .iter()
+        .map(|r| (r.guid.as_str(), r.uri.as_str()))
+        .collect();
+    let mut linked_at: HashMap<&str, i64> = HashMap::new();
+    for link in &export.links {
+        let (Some(&a), Some(&b)) = (uri_of.get(link.a.as_str()), uri_of.get(link.b.as_str()))
+        else {
+            continue;
+        };
+        let other = if a == subject {
+            b
+        } else if b == subject {
+            a
+        } else {
+            continue;
+        };
+        let at = link.created_at.unwrap_or(i64::MIN);
+        let slot = linked_at.entry(other).or_insert(i64::MIN);
+        *slot = (*slot).max(at);
+    }
+    backlinks.sort_by_key(|l| {
+        std::cmp::Reverse(linked_at.get(l.uri.as_str()).copied().unwrap_or(i64::MIN))
+    });
 }
 
 /// Which capture the reported phase belongs to: every new view starts a new
@@ -193,14 +285,18 @@ mod fixture {
         }
     }
 
-    /// Capture through the core with `outcome` standing in for the frontmost app.
+    /// Capture through the core with `outcome` standing in for the frontmost app,
+    /// then settle it as a live capture is (backlinks newest first).
     pub(super) fn capture_through_core(
         backend: &Mutex<PanelBackend>,
         outcome: Result<ResourceIdentity, String>,
         now: i64,
     ) -> Phase {
         let adapter = FixtureAdapter(outcome);
-        Phase::from_core(PanelBackend::capture_current(backend, &adapter, now))
+        super::settle_capture(
+            backend,
+            PanelBackend::capture_current(backend, &adapter, now),
+        )
     }
 
     #[cfg_attr(not(feature = "automation"), allow(dead_code))]
@@ -290,7 +386,10 @@ async fn run_capture(cx: &mut AsyncApp) -> Phase {
     #[cfg(not(feature = "automation"))]
     {
         executor
-            .spawn(async { Phase::from_core(ubilink_app::capture_now(app_state::get())) })
+            .spawn(async {
+                let state = app_state::get();
+                settle_capture(&state.backend, ubilink_app::capture_now(state))
+            })
             .await
     }
 }
@@ -345,6 +444,82 @@ impl CaptureView {
     }
 }
 
+/// The backlinks section (R3): a heading, then one `ListItem` row per backlink in
+/// the order given (newest link first), each row's name and URI as `text!` Labels
+/// (A11Y-NOTES.md). The panel is short, so the rows are one line each and scroll.
+/// They are the only `ListItem` nodes in the capture view (probes/README.md). The
+/// view only shows them; browsing to and opening links is the browser's (R6/R7).
+fn backlinks_section(backlinks: &[LinkView], cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let (foreground, muted) = (theme.foreground, theme.muted_foreground);
+    let count = backlinks.len();
+    let rows = backlinks.iter().enumerate().map(|(ix, link)| {
+        div()
+            .id(SharedString::from(format!("backlink-{ix}")))
+            .role(Role::ListItem)
+            .aria_position_in_set(ix + 1)
+            .aria_size_of_set(count)
+            .flex()
+            .flex_row()
+            .items_baseline()
+            .line_height(px(18.))
+            .gap(spacing::S3)
+            .w_full()
+            .min_w_0()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .max_w(relative(0.45))
+                    .text_size(font_size::ROW)
+                    .text_color(foreground)
+                    .truncate()
+                    .child(text!(
+                        id = SharedString::from(format!("backlink-{ix}-name")),
+                        link.name.clone()
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(font_size::META)
+                    .font_family(MONO_FONT_FAMILY)
+                    .text_color(muted)
+                    .truncate()
+                    .child(text!(
+                        id = SharedString::from(format!("backlink-{ix}-uri")),
+                        link.uri.clone()
+                    )),
+            )
+    });
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .gap(px(2.))
+        .child(
+            div()
+                .text_size(font_size::META)
+                .line_height(px(16.))
+                .text_color(muted)
+                .child(text!(BACKLINKS_HEADING)),
+        )
+        .child(
+            div()
+                .id("backlinks")
+                .role(Role::List)
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .children(rows),
+        )
+        .into_any_element()
+}
+
 impl Render for CaptureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.focused {
@@ -352,6 +527,12 @@ impl Render for CaptureView {
             window.focus(&self.focus, cx);
         }
         let copied = self.copied;
+        let backlinks = match &self.phase {
+            Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
+                Some(backlinks_section(backlinks, cx))
+            }
+            _ => None,
+        };
         let theme = cx.theme();
         let body = match &self.phase {
             Phase::Capturing => div()
@@ -359,7 +540,36 @@ impl Render for CaptureView {
                 .text_color(theme.muted_foreground)
                 .child(text!(CAPTURING_TEXT))
                 .into_any_element(),
-            Phase::Captured { name, uri } => div()
+            // With backlinks below, name and URI share one line so the rows fit
+            // the short panel.
+            Phase::Captured { name, uri, .. } if backlinks.is_some() => div()
+                .flex()
+                .flex_row()
+                .items_baseline()
+                .line_height(px(20.))
+                .gap(spacing::S3)
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .max_w(relative(0.5))
+                        .text_size(font_size::TITLE)
+                        .text_color(theme.foreground)
+                        .truncate()
+                        .child(text!(name.clone())),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(font_size::META)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_color(theme.muted_foreground)
+                        .truncate()
+                        .child(text!(uri.clone())),
+                )
+                .into_any_element(),
+            Phase::Captured { name, uri, .. } => div()
                 .flex()
                 .flex_col()
                 .gap(spacing::S1)
@@ -395,9 +605,12 @@ impl Render for CaptureView {
             .size_full()
             .flex()
             .flex_col()
-            .justify_center()
-            .gap(spacing::S2)
-            .p(spacing::S5)
+            .when(backlinks.is_none(), |d| {
+                d.justify_center().gap(spacing::S2).p(spacing::S5)
+            })
+            .when(backlinks.is_some(), |d| {
+                d.gap(spacing::S1).px(spacing::S5).py(spacing::S2)
+            })
             .rounded(radius::CARD)
             .child(
                 div()
@@ -406,6 +619,7 @@ impl Render for CaptureView {
                     .child(text!(Route::Capture.title())),
             )
             .child(body)
+            .when_some(backlinks, |d, section| d.child(section))
             .when(copied, |d| {
                 d.child(
                     div()
@@ -438,10 +652,10 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
-    use super::{is_copy_key, state, Phase, Tracker};
+    use super::{is_copy_key, order_by_recency, state, Phase, Tracker};
     use std::sync::Mutex;
     use ubilink_core::{
-        AdapterRegistry, LinkGraph, PanelBackend, ResourceIdentity, UbilinkService,
+        AdapterRegistry, LinkGraph, LinkView, PanelBackend, ResourceIdentity, UbilinkService,
     };
 
     fn fixture(name: &str) -> String {
@@ -487,6 +701,7 @@ mod tests {
             Phase::Captured {
                 name: "Delayed Capture Target".into(),
                 uri: "https://example.com/delayed".into(),
+                backlinks: vec![],
             }
         );
         assert!(t.settle(first, &captured));
@@ -571,6 +786,7 @@ mod tests {
         let captured = Phase::Captured {
             name: "Example".into(),
             uri: "https://example.com/".into(),
+            backlinks: vec![],
         };
         assert_eq!(captured.copy_payload(), Some("https://example.com/"));
         assert_eq!(Phase::Capturing.copy_payload(), None);
@@ -581,5 +797,89 @@ mod tests {
             .copy_payload(),
             None
         );
+    }
+
+    /// The backlinks of a captured `phase`, as (name, uri) pairs in display order.
+    fn listed(phase: &Phase) -> Vec<(String, String)> {
+        match phase {
+            Phase::Captured { backlinks, .. } => backlinks
+                .iter()
+                .map(|l| (l.name.clone(), l.uri.clone()))
+                .collect(),
+            other => panic!("expected a capture, got {other:?}"),
+        }
+    }
+
+    /// R3's view model, headless, on the probe's own fixtures: the subject's 3
+    /// backlinks newest link first and never the decoy; after the newer fixture is
+    /// merged, a re-capture (the view reopening) lists the fourth one first.
+    #[test]
+    fn backlinks_newest_first() {
+        let b = backend();
+        b.lock()
+            .unwrap()
+            .import_graph(&fixture("graph-backlinks.json"))
+            .unwrap();
+        let subject = || {
+            parse_fixture(&fixture("capture-subject.json"))
+                .unwrap()
+                .outcome
+        };
+        let pairs = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+            v.iter()
+                .map(|(n, u)| (n.to_string(), u.to_string()))
+                .collect()
+        };
+
+        let first = capture_through_core(&b, subject(), 1_800_000_000_000);
+        assert_eq!(
+            listed(&first),
+            pairs(&[
+                ("Gamma Doc", "https://gamma.example/three"),
+                ("Beta Post", "https://beta.example/two"),
+                ("Alpha Paper", "https://alpha.example/one"),
+            ])
+        );
+
+        b.lock()
+            .unwrap()
+            .import_graph(&fixture("graph-backlinks-newer.json"))
+            .unwrap();
+        let reopened = capture_through_core(&b, subject(), 1_800_000_001_000);
+        let listed = listed(&reopened);
+        assert_eq!(
+            listed,
+            pairs(&[
+                ("Delta Memo", "https://delta.example/four"),
+                ("Gamma Doc", "https://gamma.example/three"),
+                ("Beta Post", "https://beta.example/two"),
+                ("Alpha Paper", "https://alpha.example/one"),
+            ])
+        );
+        assert!(listed
+            .iter()
+            .all(|(_, u)| u != "https://decoy.example/unrelated"));
+    }
+
+    /// The ordering itself: links from either endpoint count, a missing timestamp
+    /// sorts last, unknown rows keep their place among equals, and an unreadable
+    /// export leaves the core's order alone.
+    #[test]
+    fn order_by_recency_rules() {
+        let link = |u: &str| LinkView {
+            name: u.into(),
+            uri: u.into(),
+        };
+        let export = r#"{"schema":"ubilink.graph.v3",
+            "resources":[{"guid":"s","uri":"s:"},{"guid":"x","uri":"x:"},{"guid":"y","uri":"y:"},{"guid":"z","uri":"z:"}],
+            "links":[{"a":"x","b":"s","created_at":5},{"a":"s","b":"y","created_at":9},{"a":"s","b":"z","created_at":null},{"a":"x","b":"y","created_at":99}]}"#;
+        let mut v = vec![link("z:"), link("x:"), link("w:"), link("y:")];
+        order_by_recency("s:", &mut v, export);
+        let uris: Vec<&str> = v.iter().map(|l| l.uri.as_str()).collect();
+        assert_eq!(uris, ["y:", "x:", "z:", "w:"]);
+
+        let mut v = vec![link("b:"), link("a:")];
+        order_by_recency("s:", &mut v, "not json");
+        assert_eq!(v, [link("b:"), link("a:")]);
     }
 }
