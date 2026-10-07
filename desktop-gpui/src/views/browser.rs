@@ -33,6 +33,17 @@
 //! re-filters synchronously and is timed into `filter_samples` / `filter_p99_ms`
 //! (the view-state contract), reset each time the view is built.
 //!
+//! Right drills into the selected link's connections (R7): ubilink-app's `links_of`,
+//! run on the shared state, replaces the rows, and the header's trail Label turns
+//! from `Your links` into `Linked to <names joined by " › ">` (the Tauri browser's
+//! `browse-state.mjs` `drill`, B1). Left goes back one level and restores the rows
+//! and the selection that were left behind. Both clear the filter, as Tauri does.
+//! The focused Input only lets Right/Left through at its text edges, so they are
+//! bubble-phase actions here (A11Y-NOTES.md): Right at the end of a typed filter
+//! drills, Left at its start does nothing while there is filter text (Tauri: ←
+//! edits a non-empty filter). A failed drill stays put and shows the core's message
+//! and what to do (U3).
+//!
 //! Automation builds record a `view_first_frame` metric (route `browser`): from the
 //! view's construction to just after its first frame's present, the same
 //! next-frame-then-defer timing `shell/panel.rs` uses for the hotkey.
@@ -41,7 +52,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use gpui_kit::component::input::{
-    Enter, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome, MoveUp,
+    Enter, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome, MoveLeft,
+    MoveRight, MoveUp,
 };
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme, IndexPath, Sizable};
@@ -92,6 +104,22 @@ pub fn step(current: Option<usize>, delta: isize, count: usize) -> Option<usize>
 /// What a failed open says: the core's reason and what to do (U3).
 pub fn open_failed_text(uri: &str, error: &str) -> String {
     format!("Couldn't open {uri}: {error}. Check that the app it belongs to is installed, or capture the link again.")
+}
+
+/// What a failed drill says: the core's reason and what to do (U3).
+pub fn drill_failed_text(name: &str, error: &str) -> String {
+    format!("Couldn't show what {name} is linked to: {error}. Press Right to try again.")
+}
+
+/// The trail Label: `Your links` at the top level, `Linked to <names joined by " › ">`
+/// when drilled (the Tauri browser's heading, B1).
+pub fn trail_text<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let names: Vec<&str> = names.into_iter().collect();
+    if names.is_empty() {
+        "Your links".to_string()
+    } else {
+        format!("Linked to {}", names.join(" › "))
+    }
 }
 
 /// Shown in place of rows when links exist but none matches the filter.
@@ -275,6 +303,17 @@ impl Rows {
     }
 }
 
+/// A level the browser drilled down from: what Left restores.
+#[derive(Debug, Clone, PartialEq)]
+struct Frame {
+    rows: Rows,
+    /// The drilled link, as an index into `rows.entries()` (the filter is cleared on
+    /// the way back, so it is also the shown row to select).
+    selected: usize,
+    /// The drilled link's name, for the trail.
+    name: String,
+}
+
 /// `List`'s delegate: a row count and one row element on demand. `List` asks only for
 /// the rows its virtual list has in view, so `render_item` runs a bounded number of
 /// times per frame however many links there are.
@@ -286,6 +325,8 @@ pub struct BrowserRows {
     query: String,
     /// The rows shown, as indices into `rows.entries()`, in ranked order.
     shown: Vec<usize>,
+    /// The levels drilled through, outermost first; empty at the top level.
+    trail: Vec<Frame>,
 }
 
 impl BrowserRows {
@@ -297,14 +338,53 @@ impl BrowserRows {
             keys,
             query: String::new(),
             shown,
+            trail: Vec::new(),
         }
     }
 
-    /// Replace the rows, keeping the current filter.
+    /// Replace the rows, keeping the current filter and trail.
     fn set_rows(&mut self, rows: Rows) {
         let query = std::mem::take(&mut self.query);
+        let trail = std::mem::take(&mut self.trail);
         *self = BrowserRows::new(rows);
+        self.trail = trail;
         self.set_query(&query);
+    }
+
+    /// Right: show `children`, the connections of shown row `selected`, with the
+    /// filter cleared, remembering this level for `back`. `false` (nothing changes)
+    /// when no such row is shown.
+    pub fn drill(&mut self, selected: usize, children: Vec<BrowseEntry>) -> bool {
+        let Some(&entry) = self.shown.get(selected) else {
+            return false;
+        };
+        let name = self.rows.entries()[entry].name.clone();
+        let rows = std::mem::replace(&mut self.rows, Rows::Loading);
+        let mut trail = std::mem::take(&mut self.trail);
+        trail.push(Frame {
+            rows,
+            selected: entry,
+            name,
+        });
+        *self = BrowserRows::new(Rows::Loaded(children));
+        self.trail = trail;
+        true
+    }
+
+    /// Left: return to the level drilled down from, filter cleared, and give the row
+    /// to select there (the one drilled into). `None` at the top level.
+    pub fn back(&mut self) -> Option<usize> {
+        // An empty trail is taken and dropped as is: nothing to restore.
+        let mut trail = std::mem::take(&mut self.trail);
+        let frame = trail.pop()?;
+        *self = BrowserRows::new(frame.rows);
+        self.trail = trail;
+        Some(frame.selected.min(self.shown_count().saturating_sub(1)))
+    }
+
+    /// The trail Label's text for the current level.
+    pub fn trail_text(&self) -> String {
+        trail_text(self.trail.iter().map(|f| f.name.as_str()))
     }
 
     /// Re-filter for `query`.
@@ -444,7 +524,7 @@ pub struct BrowserView {
     _filter_changes: Option<Subscription>,
     /// When the latest key went down, the start of a re-filter's timing.
     key_at: Option<Instant>,
-    /// Why the latest open failed (U3); cleared when the selection moves.
+    /// Why the latest open or drill failed (U3); cleared when the selection moves.
     open_error: Option<String>,
     /// The in-flight graph query; dropped (cancelled) with the view.
     _load: Task<()>,
@@ -523,6 +603,51 @@ impl BrowserView {
         let opened =
             ubilink_app::open_link_with(app_state::get(), &Opener(ubilink_app::SpawnRunner), &uri);
         self.open_error = opened.err().map(|e| open_failed_text(&uri, &e));
+        cx.notify();
+    }
+
+    /// Right: drill into the selected link's connections (module doc).
+    fn drill_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(list), Some(filter)) = (self.list.clone(), self.filter.clone()) else {
+            return;
+        };
+        let state = list.read(cx);
+        let Some((row, entry)) = state.selected_index().and_then(|ix| {
+            state
+                .delegate()
+                .shown_entry(ix.row)
+                .map(|e| (ix.row, e.clone()))
+        }) else {
+            return;
+        };
+        match ubilink_app::links_of(app_state::get(), &entry.uri) {
+            Ok(children) => {
+                self.open_error = None;
+                // `set_value` emits no change event, so no re-filter races this.
+                filter.update(cx, |input, cx| input.set_value("", window, cx));
+                list.update(cx, |state, _| state.delegate_mut().drill(row, children));
+                self.rows_scroll.set_offset(point(px(0.), px(0.)));
+                self.select_row(0, window, cx);
+            }
+            Err(e) => self.open_error = Some(drill_failed_text(&entry.name, &e)),
+        }
+        cx.notify();
+    }
+
+    /// Left: back out one level and restore the selection left there.
+    fn drill_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(list), Some(filter)) = (self.list.clone(), self.filter.clone()) else {
+            return;
+        };
+        // Left at the start of a typed filter is the user editing it (Tauri parity).
+        if !filter.read(cx).value().is_empty() {
+            return;
+        }
+        let Some(row) = list.update(cx, |state, _| state.delegate_mut().back()) else {
+            return;
+        };
+        self.open_error = None;
+        self.select_row(row, window, cx);
         cx.notify();
     }
 
@@ -645,6 +770,7 @@ impl Render for BrowserView {
             }
         };
 
+        let trail = list.read(cx).delegate().trail_text();
         let theme = cx.theme();
         div()
             // Stamp every key before the Input sees it: a re-filter is timed from here.
@@ -680,6 +806,14 @@ impl Render for BrowserView {
                 this.open_selected(cx);
                 cx.stop_propagation();
             }))
+            // Right/Left reach here only at the filter's text edges (bubble phase);
+            // inside the text they stay the Input's caret moves.
+            .on_action(cx.listener(|this, _: &MoveRight, window, cx| {
+                this.drill_selected(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &MoveLeft, window, cx| {
+                this.drill_back(window, cx);
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -701,6 +835,17 @@ impl Render for BrowserView {
                             .text_size(font_size::META)
                             .text_color(theme.muted_foreground)
                             .child(text!(Route::Browser.title())),
+                    )
+                    // The drill trail (R7): `Your links`, or `Linked to …`.
+                    .child(
+                        div()
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .max_w(relative(0.4))
+                            .text_size(font_size::META)
+                            .text_color(theme.foreground)
+                            .truncate()
+                            .child(text!(trail)),
                     )
                     .child(div().flex_1().min_w_0().child(Input::new(&filter).small())),
             )
@@ -754,8 +899,8 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        min_window_span, open_failed_text, p99, state, step, BrowserRows, Rows, GAP, HEADER_H,
-        PAD_Y, ROW_H,
+        drill_failed_text, min_window_span, open_failed_text, p99, state, step, trail_text,
+        BrowserRows, Rows, GAP, HEADER_H, PAD_Y, ROW_H,
     };
     use std::sync::Mutex;
     use ubilink_core::{AdapterRegistry, LinkGraph, PanelBackend, UbilinkService};
@@ -1014,6 +1159,57 @@ mod tests {
                 .iter()
                 .any(|o| o.target == uri));
         }
+    }
+
+    /// R7, headless: on browser-drill's fixture, drilling into row 2 (Gamma Doc)
+    /// shows exactly its connections (`links_of`) under a `Linked to Gamma Doc` trail
+    /// with the filter cleared; going back restores the top-level rows, the
+    /// `Your links` trail and row 2 as the selection. A failed drill says what to do.
+    #[test]
+    fn right_drills_in_and_left_restores_selection() {
+        assert_eq!(trail_text([]), "Your links");
+        assert_eq!(trail_text(["A", "B"]), "Linked to A › B");
+
+        let backend = backend_with("graph-backlinks.json");
+        let query = backend.lock().unwrap().list_links();
+        let mut rows = BrowserRows::new(Rows::from_query(query));
+        let top: Vec<String> = rows.shown().map(|e| e.uri.clone()).collect();
+        assert_eq!(rows.trail_text(), "Your links");
+        assert_eq!(rows.back(), None, "Left at the top level does nothing");
+
+        let parent = rows.shown_entry(1).unwrap().clone();
+        assert_eq!(parent.name, "Gamma Doc");
+        let children = backend.lock().unwrap().links_of(&parent.uri).unwrap();
+        rows.set_query("g");
+        let row = rows.shown().position(|e| e.uri == parent.uri).unwrap();
+        assert!(rows.drill(row, children));
+        assert_eq!(rows.trail_text(), "Linked to Gamma Doc");
+        let shown: Vec<(&str, &str)> = rows
+            .shown()
+            .map(|e| (e.name.as_str(), e.uri.as_str()))
+            .collect();
+        assert_eq!(shown, [("Subject Note", "https://subject.example/note")]);
+
+        // A second level extends the trail; back pops one level at a time.
+        assert!(rows.drill(0, Vec::new()));
+        assert_eq!(rows.trail_text(), "Linked to Gamma Doc › Subject Note");
+        assert_eq!(rows.back(), Some(0));
+        assert_eq!(rows.trail_text(), "Linked to Gamma Doc");
+
+        assert_eq!(rows.back(), Some(1), "row 2 is selected again");
+        assert_eq!(rows.trail_text(), "Your links");
+        let back: Vec<String> = rows.shown().map(|e| e.uri.clone()).collect();
+        assert_eq!(back, top, "every top-level row, filter cleared");
+        assert!(!rows.drill(99, Vec::new()), "no such row: nothing changes");
+        assert_eq!(rows.trail_text(), "Your links");
+
+        let failed = drill_failed_text("Gamma Doc", "the graph is locked");
+        assert!(
+            failed.contains("Gamma Doc")
+                && failed.contains("the graph is locked")
+                && failed.contains("try again"),
+            "{failed}"
+        );
     }
 
     #[test]
