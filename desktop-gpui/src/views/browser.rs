@@ -44,6 +44,16 @@
 //! edits a non-empty filter). A failed drill stays put and shows the core's message
 //! and what to do (U3).
 //!
+//! ⌘L links two links (R8), as the Tauri browser's `linkMarkedTo` (B1): the first
+//! press marks the selected link and a Label says `Linking from “<name>”`; ⌘L on a
+//! different link calls ubilink-app's `link_resources`, which the core stores as one
+//! unordered row (so `links_of` lists each from the other), then reloads the top
+//! level with a Label reading `Linked “<A>” ↔ “<B>”`. ⌘L on the marked link again
+//! unmarks it, and Escape cancels the mark. Plain L types into the filter. Drilling
+//! in or out drops the mark (Tauri). A failed link shows the core's message and what
+//! to do (U3). ⌘L is not a binding the focused Input consumes, so it reaches the
+//! root's `on_key_down` (A11Y-NOTES.md).
+//!
 //! Automation builds record a `view_first_frame` metric (route `browser`): from the
 //! view's construction to just after its first frame's present, the same
 //! next-frame-then-defer timing `shell/panel.rs` uses for the hotkey.
@@ -52,8 +62,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use gpui_kit::component::input::{
-    Enter, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome, MoveLeft,
-    MoveRight, MoveUp,
+    Enter, Escape, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome,
+    MoveLeft, MoveRight, MoveUp,
 };
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme, IndexPath, Sizable};
@@ -109,6 +119,71 @@ pub fn open_failed_text(uri: &str, error: &str) -> String {
 /// What a failed drill says: the core's reason and what to do (U3).
 pub fn drill_failed_text(name: &str, error: &str) -> String {
     format!("Couldn't show what {name} is linked to: {error}. Press Right to try again.")
+}
+
+/// Whether `keystroke` is ⌘L (or Ctrl-L, as the Tauri browser's `metaKey || ctrlKey`):
+/// the mark/link key. Plain or shifted L is not (⌘⇧L is the browser hotkey).
+pub fn is_mark_key(keystroke: &Keystroke) -> bool {
+    let m = &keystroke.modifiers;
+    keystroke.key.eq_ignore_ascii_case("l")
+        && m.platform != m.control
+        && !(m.alt || m.shift || m.function)
+}
+
+/// What ⌘L does given the marked link (if any) and the selected one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MarkStep {
+    /// Nothing marked yet: mark the selected link.
+    Mark(BrowseEntry),
+    /// The selected link is the marked one: unmark it.
+    Unmark,
+    /// A different link is marked: link it (`.0`) with the selected one (`.1`).
+    Link(BrowseEntry, BrowseEntry),
+}
+
+/// The Tauri browser's ⌘L decision (`panel.js`): link when another link is marked,
+/// otherwise toggle the mark on the selected link.
+pub fn mark_step(marked: Option<&BrowseEntry>, selected: &BrowseEntry) -> MarkStep {
+    match marked {
+        Some(m) if m.uri != selected.uri => MarkStep::Link(m.clone(), selected.clone()),
+        Some(_) => MarkStep::Unmark,
+        None => MarkStep::Mark(selected.clone()),
+    }
+}
+
+/// A link's display name: its name, or its URI when it has none (Tauri).
+fn display_name(entry: &BrowseEntry) -> &str {
+    if entry.name.is_empty() {
+        &entry.uri
+    } else {
+        &entry.name
+    }
+}
+
+/// The Label while a link is marked (the Tauri browser's status line).
+pub fn linking_text(marked: &BrowseEntry) -> String {
+    format!(
+        "Linking from “{}” — move to another and press ⌘L (Esc cancels)",
+        display_name(marked)
+    )
+}
+
+/// The Label confirming a new link (the Tauri browser's wording, README contract).
+pub fn linked_text(a: &BrowseEntry, b: &BrowseEntry) -> String {
+    format!(
+        "Linked “{}” ↔ “{}” — press → to see it",
+        display_name(a),
+        display_name(b)
+    )
+}
+
+/// What a failed link says: the core's reason and what to do (U3).
+pub fn link_failed_text(a: &BrowseEntry, b: &BrowseEntry, error: &str) -> String {
+    format!(
+        "Couldn't link “{}” and “{}”: {error}. Press ⌘L to try again.",
+        display_name(a),
+        display_name(b)
+    )
 }
 
 /// The trail Label: `Your links` at the top level, `Linked to <names joined by " › ">`
@@ -524,8 +599,13 @@ pub struct BrowserView {
     _filter_changes: Option<Subscription>,
     /// When the latest key went down, the start of a re-filter's timing.
     key_at: Option<Instant>,
-    /// Why the latest open or drill failed (U3); cleared when the selection moves.
+    /// Why the latest open, drill or link failed (U3); cleared when the selection
+    /// moves.
     open_error: Option<String>,
+    /// The link ⌘L marked, waiting for a second ⌘L on another link (R8).
+    marked: Option<BrowseEntry>,
+    /// The latest link's confirmation; cleared when the selection moves.
+    linked: Option<String>,
     /// The in-flight graph query; dropped (cancelled) with the view.
     _load: Task<()>,
     #[cfg(feature = "automation")]
@@ -556,6 +636,8 @@ impl BrowserView {
             _filter_changes: None,
             key_at: None,
             open_error: None,
+            marked: None,
+            linked: None,
             _load: load,
             #[cfg(feature = "automation")]
             first_frame: FirstFrame::Pending(built_at),
@@ -582,6 +664,7 @@ impl BrowserView {
             .map(|ix| ix.row);
         if let Some(ix) = step(current, delta, self.row_count(cx)) {
             self.open_error = None;
+            self.linked = None;
             self.select_row(ix, window, cx);
             cx.notify();
         }
@@ -623,6 +706,8 @@ impl BrowserView {
         match ubilink_app::links_of(app_state::get(), &entry.uri) {
             Ok(children) => {
                 self.open_error = None;
+                self.linked = None;
+                self.marked = None;
                 // `set_value` emits no change event, so no re-filter races this.
                 filter.update(cx, |input, cx| input.set_value("", window, cx));
                 list.update(cx, |state, _| state.delegate_mut().drill(row, children));
@@ -647,7 +732,49 @@ impl BrowserView {
             return;
         };
         self.open_error = None;
+        self.linked = None;
+        self.marked = None;
         self.select_row(row, window, cx);
+        cx.notify();
+    }
+
+    /// ⌘L: mark the selected link, or link the marked one with it (module doc).
+    fn mark_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(list), Some(filter)) = (self.list.clone(), self.filter.clone()) else {
+            return;
+        };
+        let state = list.read(cx);
+        let Some(selected) = state
+            .selected_index()
+            .and_then(|ix| state.delegate().shown_entry(ix.row))
+            .cloned()
+        else {
+            return;
+        };
+        self.linked = None;
+        self.open_error = None;
+        match mark_step(self.marked.as_ref(), &selected) {
+            MarkStep::Mark(entry) => self.marked = Some(entry),
+            MarkStep::Unmark => self.marked = None,
+            MarkStep::Link(a, b) => {
+                match ubilink_app::link_resources(app_state::get(), &a.uri, &b.uri) {
+                    Ok(()) => {
+                        self.marked = None;
+                        // Back to the top level with the fresh list (Tauri reloads it).
+                        let rows = Rows::from_query(ubilink_app::list_links(app_state::get()));
+                        filter.update(cx, |input, cx| input.set_value("", window, cx));
+                        list.update(cx, |state, _| {
+                            *state.delegate_mut() = BrowserRows::new(rows);
+                        });
+                        self.rows_scroll.set_offset(point(px(0.), px(0.)));
+                        self.select_row(0, window, cx);
+                        self.linked = Some(linked_text(&a, &b));
+                    }
+                    // The mark stays, so ⌘L again retries.
+                    Err(e) => self.open_error = Some(link_failed_text(&a, &b, &e)),
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -683,6 +810,7 @@ impl BrowserView {
     /// long it took from the key going down to the row model being ready.
     fn refilter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let started = self.key_at.take().unwrap_or_else(Instant::now);
+        self.linked = None;
         let (Some(filter), Some(list)) = (self.filter.clone(), self.list.clone()) else {
             return;
         };
@@ -806,6 +934,20 @@ impl Render for BrowserView {
                 this.open_selected(cx);
                 cx.stop_propagation();
             }))
+            // Escape cancels a pending mark first (Tauri); otherwise it goes on.
+            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+                if this.marked.take().is_some() {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            // ⌘L marks or links (R8); the Input binds nothing to it.
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if is_mark_key(&event.keystroke) {
+                    this.mark_selected(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             // Right/Left reach here only at the filter's text edges (bubble phase);
             // inside the text they stay the Input's caret moves.
             .on_action(cx.listener(|this, _: &MoveRight, window, cx| {
@@ -863,6 +1005,23 @@ impl Render for BrowserView {
                     area.child(list).into_any_element()
                 }
             })
+            // The mark, then the confirmation, as Labels (R8).
+            .when_some(
+                self.marked
+                    .as_ref()
+                    .map(linking_text)
+                    .or(self.linked.clone()),
+                |d, status| {
+                    d.child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(font_size::META)
+                            .text_color(theme.muted_foreground)
+                            .truncate()
+                            .child(text!(status)),
+                    )
+                },
+            )
             .when_some(self.open_error.clone(), |d, error| {
                 d.child(
                     div()
@@ -899,8 +1058,9 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        drill_failed_text, min_window_span, open_failed_text, p99, state, step, trail_text,
-        BrowserRows, Rows, GAP, HEADER_H, PAD_Y, ROW_H,
+        drill_failed_text, is_mark_key, link_failed_text, linked_text, linking_text, mark_step,
+        min_window_span, open_failed_text, p99, state, step, trail_text, BrowserRows, MarkStep,
+        Rows, GAP, HEADER_H, PAD_Y, ROW_H,
     };
     use std::sync::Mutex;
     use ubilink_core::{AdapterRegistry, LinkGraph, PanelBackend, UbilinkService};
@@ -1208,6 +1368,57 @@ mod tests {
             failed.contains("Gamma Doc")
                 && failed.contains("the graph is locked")
                 && failed.contains("try again"),
+            "{failed}"
+        );
+    }
+
+    /// R8, headless: ⌘L (not plain L) marks row 1 (Decoy Unrelated), ⌘L on row 2
+    /// (Gamma Doc) links them through ubilink-app's call path, the core then lists
+    /// each among the other's connections, and the confirmation reads as the README
+    /// contract; ⌘L on the marked link unmarks it; a failed link says what to do.
+    #[test]
+    fn cmd_l_marks_then_links_both_ways() {
+        use gpui_kit::Keystroke;
+        let key = |s: &str| Keystroke::parse(s).unwrap();
+        assert!(is_mark_key(&key("cmd-l")));
+        assert!(is_mark_key(&key("ctrl-l")));
+        assert!(!is_mark_key(&key("l")), "plain l types into the filter");
+        assert!(!is_mark_key(&key("cmd-shift-l")), "the browser hotkey");
+        assert!(!is_mark_key(&key("cmd-c")));
+
+        let backend = backend_with("graph-backlinks.json");
+        let query = backend.lock().unwrap().list_links();
+        let rows = BrowserRows::new(Rows::from_query(query));
+        let a = rows.shown_entry(0).unwrap().clone();
+        let b = rows.shown_entry(1).unwrap().clone();
+        assert_eq!(
+            (a.name.as_str(), b.name.as_str()),
+            ("Decoy Unrelated", "Gamma Doc")
+        );
+        let uris = |v: Vec<ubilink_core::BrowseEntry>| -> Vec<String> {
+            v.into_iter().map(|e| e.uri).collect()
+        };
+        assert!(!uris(backend.lock().unwrap().links_of(&a.uri).unwrap()).contains(&b.uri));
+
+        assert_eq!(mark_step(None, &a), MarkStep::Mark(a.clone()));
+        assert_eq!(mark_step(Some(&a), &a), MarkStep::Unmark);
+        let MarkStep::Link(from, to) = mark_step(Some(&a), &b) else {
+            panic!("a second link links");
+        };
+        backend
+            .lock()
+            .unwrap()
+            .link_resources(&from.uri, &to.uri, Some(1))
+            .unwrap();
+        let b_links = uris(backend.lock().unwrap().links_of(&b.uri).unwrap());
+        assert!(b_links.contains(&a.uri), "links_of(B) holds A: {b_links:?}");
+        assert!(uris(backend.lock().unwrap().links_of(&a.uri).unwrap()).contains(&b.uri));
+
+        assert!(linked_text(&from, &to).contains("Linked “Decoy Unrelated” ↔ “Gamma Doc”"));
+        assert!(linking_text(&a).contains("Linking from “Decoy Unrelated”"));
+        let failed = link_failed_text(&a, &b, "the graph is locked");
+        assert!(
+            failed.contains("the graph is locked") && failed.contains("try again"),
             "{failed}"
         );
     }
