@@ -17,7 +17,13 @@
 //! "Phase 1 view-state contract"). A focused single-line Input swallows Home and End,
 //! so this view takes them in the capture phase on its root and stops propagation
 //! (the a11y spike's proven pattern, A11Y-NOTES.md): End selects and shows the last
-//! row, Home the first.
+//! row, Home the first. Up and Down move the selection one row (clamped at the ends,
+//! as the Tauri browser's `move`), taken the same way; Enter, which the Input would
+//! otherwise turn into a `PressEnter` plus a typed newline, opens the selected link
+//! (R6) through ubilink-app's `open_link_with`, so the core re-validates the URI
+//! (D16) and the shell's `Opener` seam decides what runs: the real launcher in a
+//! release build, the `opened` sink in an automation build (S2). A failed open shows
+//! the core's message and what to do (U3).
 //!
 //! The filter (R5) ranks by the normative rule in `probes/fixtures/README.md`
 //! (`scripts/probe.py`'s `rank()`): a link matches when the typed text is an in-order
@@ -34,7 +40,9 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use gpui_kit::component::input::{Input, InputEvent as FilterEvent, InputState, MoveEnd, MoveHome};
+use gpui_kit::component::input::{
+    Enter, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome, MoveUp,
+};
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme, IndexPath, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -44,6 +52,7 @@ use ubilink_core::BrowseEntry;
 
 use super::Route;
 use crate::app_state;
+use crate::opener::Opener;
 use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
 
 /// The filter's placeholder (the Tauri browser's wording, `dist/index.html`).
@@ -68,6 +77,22 @@ const ROW_H: Pixels = px(20.);
 /// filtered result is read whole); past it, the list virtualises to its viewport.
 /// R4's bound: never more than sixty row elements.
 const ALL_ROWS_MAX: usize = 60;
+
+/// The row selected after moving `delta` rows from `current` in a list of `count`
+/// rows: clamped to the first and last row (the Tauri browser's `move`), `None` when
+/// the list is empty. No selection moves from the first row.
+pub fn step(current: Option<usize>, delta: isize, count: usize) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    let from = current.unwrap_or(0).min(count - 1);
+    Some(from.saturating_add_signed(delta).min(count - 1))
+}
+
+/// What a failed open says: the core's reason and what to do (U3).
+pub fn open_failed_text(uri: &str, error: &str) -> String {
+    format!("Couldn't open {uri}: {error}. Check that the app it belongs to is installed, or capture the link again.")
+}
 
 /// Shown in place of rows when links exist but none matches the filter.
 pub const NO_MATCH_TEXT: &str = "No links match the filter. Delete a character or two.";
@@ -289,9 +314,17 @@ impl BrowserRows {
     }
 
     /// The shown rows, in order.
+    #[cfg(test)]
     pub fn shown(&self) -> impl Iterator<Item = &BrowseEntry> {
         let entries = self.rows.entries();
         self.shown.iter().map(move |&ix| &entries[ix])
+    }
+
+    /// The `ix`-th shown row.
+    pub fn shown_entry(&self, ix: usize) -> Option<&BrowseEntry> {
+        self.shown
+            .get(ix)
+            .and_then(|&entry| self.rows.entries().get(entry))
     }
 
     fn shown_count(&self) -> usize {
@@ -312,7 +345,7 @@ impl ListDelegate for BrowserRows {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let entry = self.shown().nth(ix.row)?;
+        let entry = self.shown_entry(ix.row)?;
         let theme = cx.theme();
         Some(
             ListItem::new(SharedString::from(format!("browser-row-{}", ix.row)))
@@ -411,6 +444,8 @@ pub struct BrowserView {
     _filter_changes: Option<Subscription>,
     /// When the latest key went down, the start of a re-filter's timing.
     key_at: Option<Instant>,
+    /// Why the latest open failed (U3); cleared when the selection moves.
+    open_error: Option<String>,
     /// The in-flight graph query; dropped (cancelled) with the view.
     _load: Task<()>,
     #[cfg(feature = "automation")]
@@ -440,6 +475,7 @@ impl BrowserView {
             rows_scroll: ScrollHandle::new(),
             _filter_changes: None,
             key_at: None,
+            open_error: None,
             _load: load,
             #[cfg(feature = "automation")]
             first_frame: FirstFrame::Pending(built_at),
@@ -455,6 +491,39 @@ impl BrowserView {
             });
         }
         self.reveal(ix, cx);
+    }
+
+    /// Up/Down: move the selection `delta` rows, clamped at the ends.
+    fn move_selection(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self
+            .list
+            .as_ref()
+            .and_then(|l| l.read(cx).selected_index())
+            .map(|ix| ix.row);
+        if let Some(ix) = step(current, delta, self.row_count(cx)) {
+            self.open_error = None;
+            self.select_row(ix, window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Enter: open the selected link through the core opener (module doc).
+    fn open_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(list) = &self.list else {
+            return;
+        };
+        let state = list.read(cx);
+        let Some(uri) = state
+            .selected_index()
+            .and_then(|ix| state.delegate().shown_entry(ix.row))
+            .map(|entry| entry.uri.clone())
+        else {
+            return;
+        };
+        let opened =
+            ubilink_app::open_link_with(app_state::get(), &Opener(ubilink_app::SpawnRunner), &uri);
+        self.open_error = opened.err().map(|e| open_failed_text(&uri, &e));
+        cx.notify();
     }
 
     /// A short list is laid out whole and scrolled by its container: keep row `ix`
@@ -597,6 +666,20 @@ impl Render for BrowserView {
                 }
                 cx.stop_propagation();
             }))
+            // Up/Down are no-ops the single-line Input swallows; Enter would reach it
+            // as `PressEnter` and a typed newline. All three drive the list instead.
+            .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                this.move_selection(1, window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
+                this.move_selection(-1, window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &Enter, _, cx| {
+                this.open_selected(cx);
+                cx.stop_propagation();
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -635,6 +718,16 @@ impl Render for BrowserView {
                     area.child(list).into_any_element()
                 }
             })
+            .when_some(self.open_error.clone(), |d, error| {
+                d.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(font_size::META)
+                        .text_color(theme.danger)
+                        .truncate()
+                        .child(text!(error)),
+                )
+            })
             // The graph couldn't be opened at start-up: the list is an empty
             // in-memory graph, and the user should know why (U3).
             .when_some(app_state::startup_error(), |d, error| {
@@ -660,7 +753,10 @@ mod tests {
     // Not `super::*`: that would re-import gpui-kit's `test` macro (pulled in
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
-    use super::{min_window_span, p99, state, BrowserRows, Rows, GAP, HEADER_H, PAD_Y, ROW_H};
+    use super::{
+        min_window_span, open_failed_text, p99, state, step, BrowserRows, Rows, GAP, HEADER_H,
+        PAD_Y, ROW_H,
+    };
     use std::sync::Mutex;
     use ubilink_core::{AdapterRegistry, LinkGraph, PanelBackend, UbilinkService};
 
@@ -858,6 +954,66 @@ mod tests {
         let samples: Vec<f64> = (1..=50).map(f64::from).collect();
         assert_eq!(p99(&samples), Some(50.0));
         assert_eq!(p99(&[]), None);
+    }
+
+    /// R6, headless: Down/Up move one row and stop at the ends; the selected row's
+    /// URI follows the filtered order; a failed open says what failed and what to do.
+    #[test]
+    fn up_down_move_selection_and_enter_opens_it() {
+        assert_eq!(step(Some(0), 1, 3), Some(1));
+        assert_eq!(step(Some(1), 1, 3), Some(2));
+        assert_eq!(step(Some(2), 1, 3), Some(2), "Down stops at the last row");
+        assert_eq!(step(Some(2), -1, 3), Some(1));
+        assert_eq!(step(Some(0), -1, 3), Some(0), "Up stops at the first row");
+        assert_eq!(step(None, 1, 3), Some(1), "no selection moves from row 1");
+        assert_eq!(
+            step(Some(7), -1, 3),
+            Some(1),
+            "a stale index is clamped first"
+        );
+        assert_eq!(step(Some(0), 1, 0), None, "an empty list selects nothing");
+
+        // browser-select's fixture: Down, Down, Up lands on row 2, Gamma Doc.
+        let backend = backend_with("graph-backlinks.json");
+        let query = backend.lock().unwrap().list_links();
+        let mut rows = BrowserRows::new(Rows::from_query(query));
+        let count = rows.shown().count();
+        let mut sel = Some(0);
+        for delta in [1, 1, -1] {
+            sel = step(sel, delta, count);
+        }
+        let uri = rows.shown_entry(sel.unwrap()).unwrap().uri.clone();
+        assert_eq!(uri, "https://gamma.example/three");
+        assert!(rows.shown_entry(count).is_none());
+        // The selected index is into the shown (filtered) rows.
+        rows.set_query("beta");
+        assert_eq!(
+            rows.shown_entry(0).map(|e| e.uri.as_str()),
+            Some("https://beta.example/two")
+        );
+
+        let failed = open_failed_text("x-bad://y", "the scheme is not allowed");
+        assert!(
+            failed.contains("x-bad://y")
+                && failed.contains("the scheme is not allowed")
+                && failed.contains("capture the link again"),
+            "{failed}"
+        );
+
+        // Through the core opener and the shell's seam: an automation build records
+        // the validated open in the `opened` sink and launches nothing (S2).
+        #[cfg(feature = "automation")]
+        {
+            use crate::opener::Opener;
+            backend
+                .lock()
+                .unwrap()
+                .open_link(&Opener(ubilink_app::SpawnRunner), &uri)
+                .unwrap();
+            assert!(crate::automation::store::opened()
+                .iter()
+                .any(|o| o.target == uri));
+        }
     }
 
     #[test]
