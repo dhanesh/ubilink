@@ -53,6 +53,10 @@ INSTANCE="$(python3 "$H" name --verifier "$VERIFIER" a)"
 INSTANCE_B="$(python3 "$H" name --verifier "$VERIFIER" b)"
 ```
 
+The snippets in this skill are bash. Run them under `bash` (a zsh shell leaves
+`${PIPESTATUS[0]}` empty, for example); exit codes are always read with `$?` right
+after the command.
+
 `TASK` picks the scenario set of the three features two Phase 1 tasks share
 (link-browser R4+R5, browser-navigation R6+R7, graph-data R11+R12; final review C1):
 at the first task's head only its own scenario exists in the product yet, so its
@@ -463,6 +467,22 @@ It copies each artifact into `.verify/$INSTANCE/shell/<sha>/` and pins it by sha
   refused: keep each feature's captures in its own `--out` directory.
 - Run the doctor again right before recording if anything (a commit, a rebase) could
   have moved `HEAD` since launch.
+
+## Marking a feature proven
+
+After a passing record, set the feature file's `- proven:` line to the full sha the
+evidence is bound to (the `sha` in `evidence.json`, the head you drove), never the
+sha of the docs commit that sets it. Order matters, because the doctor's `build` check
+fails while `desktop-gpui/` is dirty and the feature files live under it:
+
+1. drive, record, then Cleanup (stop every instance), with the tree still clean
+2. only then edit `features/<feature>.md`
+3. commit that file alone (`git add` its path, never `-A`), in a commit that touches
+   only `features/`
+4. re-run `forge lint` on this skill
+
+How many instances: a feature's recipe says. One is enough unless the recipe asks for
+two (`shell` drives two to show their isolation; `scenario --instances N` adds its own).
 
 ## Cleanup
 

@@ -1411,7 +1411,8 @@ def cmd_stop(a):
 
 
 def cmd_list(a):
-    for claim in sorted(run_root().glob("*/instance.json")):
+    claims = sorted(run_root().glob("*/instance.json"))
+    for claim in claims:
         doc = read_json(claim) or {"status": "unreadable"}
         emit({"instance": claim.parent.name, "verifier": doc.get("verifier"),
               "status": doc.get("status"), "pid": doc.get("pid"), "alive": is_ours(doc),
@@ -1424,6 +1425,8 @@ def cmd_list(a):
               "reclaimable_after_idle_s": LEASE_IDLE_S,
               "decision_for_another_verifier": lease_decision(
                   lease, {"run_root": "", "verifier": ""}, _epoch(), alive, pid_alive)})
+    if not claims and not lease:
+        emit({"instances": [], "lease": None})
     return 0
 
 
