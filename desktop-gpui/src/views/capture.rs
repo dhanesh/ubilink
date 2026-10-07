@@ -403,8 +403,6 @@ pub struct CaptureView {
     /// The URI is on the pasteboard: the `Copied` confirmation shows. The panel stays
     /// open after a copy, so the confirmation stays until the panel next hides.
     copied: bool,
-    /// Why the last backlink open failed (U3), shown until the panel next hides.
-    open_error: Option<String>,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
     _capture: Task<()>,
 }
@@ -428,7 +426,6 @@ impl CaptureView {
             focus: cx.focus_handle(),
             focused: false,
             copied: false,
-            open_error: None,
             _capture: capture,
         }
     }
@@ -445,29 +442,18 @@ impl CaptureView {
         cx.notify();
         true
     }
-
-    /// A backlink row was clicked: open it as the Tauri panel does, through the
-    /// core's re-validation and the opener seam (S2; automation builds record it in
-    /// the sink instead of launching).
-    fn open_backlink(&mut self, uri: &str, cx: &mut Context<Self>) {
-        let opener = crate::opener::Opener(ubilink_app::SpawnRunner);
-        self.open_error = ubilink_app::open_link_with(app_state::get(), &opener, uri)
-            .err()
-            .map(|e| format!("Couldn't open {uri}: {e}. Check the link, then try again."));
-        cx.notify();
-    }
 }
 
 /// The backlinks section (R3): a heading, then one `ListItem` row per backlink in
 /// the order given (newest link first), each row's name and URI as `text!` Labels
-/// (A11Y-NOTES.md). The panel is short, so the rows scroll. They are the only
-/// `ListItem` nodes in the capture view (probes/README.md). Clicking a row opens it.
-fn backlinks_section(backlinks: &[LinkView], cx: &mut Context<CaptureView>) -> AnyElement {
+/// (A11Y-NOTES.md). The panel is short, so the rows are one line each and scroll.
+/// They are the only `ListItem` nodes in the capture view (probes/README.md). The
+/// view only shows them; browsing to and opening links is the browser's (R6/R7).
+fn backlinks_section(backlinks: &[LinkView], cx: &App) -> AnyElement {
     let theme = cx.theme();
     let (foreground, muted) = (theme.foreground, theme.muted_foreground);
     let count = backlinks.len();
     let rows = backlinks.iter().enumerate().map(|(ix, link)| {
-        let uri = link.uri.clone();
         div()
             .id(SharedString::from(format!("backlink-{ix}")))
             .role(Role::ListItem)
@@ -476,13 +462,10 @@ fn backlinks_section(backlinks: &[LinkView], cx: &mut Context<CaptureView>) -> A
             .flex()
             .flex_row()
             .items_baseline()
+            .line_height(px(18.))
             .gap(spacing::S3)
             .w_full()
             .min_w_0()
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                this.open_backlink(&uri, cx);
-            }))
             .child(
                 div()
                     .flex_shrink_0()
@@ -514,10 +497,11 @@ fn backlinks_section(backlinks: &[LinkView], cx: &mut Context<CaptureView>) -> A
         .flex_col()
         .flex_1()
         .min_h_0()
-        .gap(spacing::S1)
+        .gap(px(2.))
         .child(
             div()
                 .text_size(font_size::META)
+                .line_height(px(16.))
                 .text_color(muted)
                 .child(text!(BACKLINKS_HEADING)),
         )
@@ -527,7 +511,7 @@ fn backlinks_section(backlinks: &[LinkView], cx: &mut Context<CaptureView>) -> A
                 .role(Role::List)
                 .flex()
                 .flex_col()
-                .gap(spacing::S1)
+                .gap(px(2.))
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -543,7 +527,6 @@ impl Render for CaptureView {
             window.focus(&self.focus, cx);
         }
         let copied = self.copied;
-        let open_error = self.open_error.clone();
         let backlinks = match &self.phase {
             Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
                 Some(backlinks_section(backlinks, cx))
@@ -556,6 +539,35 @@ impl Render for CaptureView {
                 .text_size(font_size::TITLE)
                 .text_color(theme.muted_foreground)
                 .child(text!(CAPTURING_TEXT))
+                .into_any_element(),
+            // With backlinks below, name and URI share one line so the rows fit
+            // the short panel.
+            Phase::Captured { name, uri, .. } if backlinks.is_some() => div()
+                .flex()
+                .flex_row()
+                .items_baseline()
+                .line_height(px(20.))
+                .gap(spacing::S3)
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .max_w(relative(0.5))
+                        .text_size(font_size::TITLE)
+                        .text_color(theme.foreground)
+                        .truncate()
+                        .child(text!(name.clone())),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(font_size::META)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_color(theme.muted_foreground)
+                        .truncate()
+                        .child(text!(uri.clone())),
+                )
                 .into_any_element(),
             Phase::Captured { name, uri, .. } => div()
                 .flex()
@@ -593,9 +605,12 @@ impl Render for CaptureView {
             .size_full()
             .flex()
             .flex_col()
-            .when(backlinks.is_none(), |d| d.justify_center())
-            .gap(spacing::S2)
-            .p(spacing::S5)
+            .when(backlinks.is_none(), |d| {
+                d.justify_center().gap(spacing::S2).p(spacing::S5)
+            })
+            .when(backlinks.is_some(), |d| {
+                d.gap(spacing::S1).px(spacing::S5).py(spacing::S2)
+            })
             .rounded(radius::CARD)
             .child(
                 div()
@@ -605,14 +620,6 @@ impl Render for CaptureView {
             )
             .child(body)
             .when_some(backlinks, |d, section| d.child(section))
-            .when_some(open_error, |d, error| {
-                d.child(
-                    div()
-                        .text_size(font_size::META)
-                        .text_color(theme.danger)
-                        .child(text!(error)),
-                )
-            })
             .when(copied, |d| {
                 d.child(
                     div()
