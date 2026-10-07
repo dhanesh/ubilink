@@ -1,7 +1,7 @@
 # panel-dismiss: Capture and browser hide on loss of key status; settings and onboarding don't
 
 - id: panel-dismiss
-- proven: no
+- proven: eb327ab4bd706cdd335608d485ce0b232b5f527a
 - anchors: src/shell/panel.rs:PanelView, src/shell/panel.rs:activation_changed, probes/panel-dismiss.json
 
 ## What it is
@@ -71,6 +71,10 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
 
 ## Gotchas
 
+- Proven at `eb327ab` against the Phase 0 stub views (one instance, `scenario
+  panel-dismiss`, 45/45 PASS, evidence `.verify/<instance>/panel-dismiss/eb327ab.../`).
+  Phase 1 view edits do not touch this feature's anchors, so the gate will not flag
+  it as touched: re-run the scenario once the real views land, as "What it is" asks.
 - `probes/panel-dismiss.json` is a protected Phase 0 baseline file (spec T4): Phase
   1 may not edit it, and neither may this skill's harness — only this feature file
   changes for this fix round.
