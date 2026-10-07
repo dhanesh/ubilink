@@ -40,6 +40,24 @@ use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
 /// The capturing indicator's text (the Tauri panel's wording, `dist/panel.js`).
 pub const CAPTURING_TEXT: &str = "Capturing the active resource…";
 
+/// The copied confirmation's text (R2): shown once the URI is on the pasteboard.
+pub const COPIED_TEXT: &str = "Copied";
+
+/// Is `keystroke` one of the copy keys (R2, U2)? Plain Enter, or ⌘C (Ctrl-C too, as
+/// the Tauri panel's handler accepts, `dist/panel.js`). Shift or Option make it some
+/// other shortcut, so they don't count.
+pub fn is_copy_key(keystroke: &Keystroke) -> bool {
+    let m = &keystroke.modifiers;
+    if m.alt || m.shift || m.function {
+        return false;
+    }
+    match keystroke.key.as_str() {
+        "enter" => !m.platform && !m.control,
+        "c" => m.platform != m.control,
+        _ => false,
+    }
+}
+
 /// The capture route's view-state, for the automation `state` verb.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct State {
@@ -74,6 +92,15 @@ impl Phase {
             Phase::Capturing => "capturing",
             Phase::Captured { .. } => "captured",
             Phase::Failed { .. } => "failed",
+        }
+    }
+
+    /// What a copy puts on the pasteboard: the captured URI, and nothing before the
+    /// capture lands or after it fails (the Tauri panel's `canConfirm`).
+    pub fn copy_payload(&self) -> Option<&str> {
+        match self {
+            Phase::Captured { uri, .. } => Some(uri),
+            _ => None,
         }
     }
 
@@ -270,6 +297,13 @@ async fn run_capture(cx: &mut AsyncApp) -> Phase {
 
 pub struct CaptureView {
     phase: Phase,
+    /// Holds keyboard focus from the first frame, so Enter and ⌘C reach this view's
+    /// key handler: GPUI dispatches keys from the focused element up its path.
+    focus: FocusHandle,
+    focused: bool,
+    /// The URI is on the pasteboard: the `Copied` confirmation shows. The panel stays
+    /// open after a copy, so the confirmation stays until the panel next hides.
+    copied: bool,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
     _capture: Task<()>,
 }
@@ -290,13 +324,34 @@ impl CaptureView {
         });
         CaptureView {
             phase: Phase::Capturing,
+            focus: cx.focus_handle(),
+            focused: false,
+            copied: false,
             _capture: capture,
         }
+    }
+
+    /// Enter or ⌘C: put the captured URI on the macOS pasteboard (GPUI's platform
+    /// clipboard, i.e. `NSPasteboard.generalPasteboard`) and confirm. Returns whether
+    /// there was anything to copy.
+    fn copy(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(uri) = self.phase.copy_payload() else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()));
+        self.copied = true;
+        cx.notify();
+        true
     }
 }
 
 impl Render for CaptureView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focused {
+            self.focused = true;
+            window.focus(&self.focus, cx);
+        }
+        let copied = self.copied;
         let theme = cx.theme();
         let body = match &self.phase {
             Phase::Capturing => div()
@@ -331,6 +386,12 @@ impl Render for CaptureView {
                 .into_any_element(),
         };
         div()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if is_copy_key(&event.keystroke) && this.copy(cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -345,6 +406,14 @@ impl Render for CaptureView {
                     .child(text!(Route::Capture.title())),
             )
             .child(body)
+            .when(copied, |d| {
+                d.child(
+                    div()
+                        .text_size(font_size::META)
+                        .text_color(theme.foreground)
+                        .child(text!(COPIED_TEXT)),
+                )
+            })
             // The graph couldn't be opened at start-up: captures work but aren't
             // saved, and the user should know why (U3).
             .when_some(app_state::startup_error(), |d, error| {
@@ -369,7 +438,7 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
-    use super::{state, Phase, Tracker};
+    use super::{is_copy_key, state, Phase, Tracker};
     use std::sync::Mutex;
     use ubilink_core::{
         AdapterRegistry, LinkGraph, PanelBackend, ResourceIdentity, UbilinkService,
@@ -476,5 +545,41 @@ mod tests {
         // Malformed fixtures fail with a message, not a panic.
         assert!(parse_fixture("{}").is_err());
         assert!(parse_fixture("not json").is_err());
+    }
+
+    /// R2's key model, headless: Enter and ⌘C (and Ctrl-C, as Tauri) copy; other keys
+    /// and modified Enters don't; only a captured phase has anything to copy.
+    #[test]
+    fn copy_keys_and_payload() {
+        let key = |k: &str| gpui_kit::Keystroke::parse(k).unwrap();
+        for k in ["enter", "cmd-c", "ctrl-c"] {
+            assert!(is_copy_key(&key(k)), "{k} copies");
+        }
+        for k in [
+            "c",
+            "cmd-enter",
+            "shift-enter",
+            "cmd-shift-c",
+            "alt-c",
+            "cmd-ctrl-c",
+            "escape",
+            "cmd-v",
+        ] {
+            assert!(!is_copy_key(&key(k)), "{k} must not copy");
+        }
+
+        let captured = Phase::Captured {
+            name: "Example".into(),
+            uri: "https://example.com/".into(),
+        };
+        assert_eq!(captured.copy_payload(), Some("https://example.com/"));
+        assert_eq!(Phase::Capturing.copy_payload(), None);
+        assert_eq!(
+            Phase::Failed {
+                message: "x".into()
+            }
+            .copy_payload(),
+            None
+        );
     }
 }
