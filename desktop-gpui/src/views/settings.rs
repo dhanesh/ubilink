@@ -17,22 +17,44 @@
 //! toggle goes through `ubilink_app::set_plugin_enabled`, which updates the shared set
 //! and writes `plugins-state.json` through `paths::data_dir()` (the state's data dir).
 //!
+//! Graph data (Phase 1 R11, the Tauri panel's Settings › Graph, `dist/panel.js`
+//! `renderSettingsStats` / `settingsExport` / `settingsImportFile`):
+//! - a stats Label exactly `<resources> link(s) · <links> connection(s)`, read from
+//!   `ubilink_app::graph_stats` on every render, so it is re-read each time Settings is
+//!   shown and right after an import.
+//! - an `Export` Button: writes `PanelBackend::export_graph`'s JSON (core's
+//!   `ubilink.graph.v3`) to the `export_path` fixture when a probe loaded one (O4), else
+//!   to the path a save dialog returns (a release build; an automation build never
+//!   opens a dialog on the host and says the fixture is missing instead).
+//! - an `Import` Button: reads the `import_path` fixture (or an open dialog's file) and
+//!   hands it to `ubilink_app::import_graph`, which merges it through the core's own
+//!   validation policy (D16, S2): the shell adds no parsing or opener of its own.
+//! - the hint line reports where the export went, the import summary, or what failed
+//!   and what to do (U3).
+//!
 //! Keyboard: the view focuses itself when shown, so Tab (gpui-base `Root`'s
 //! `focus_next`) reaches the first switch. The automation `key` verb only sends
 //! key-down events, while GPUI's own Space/Enter-activates-a-focused-switch path fires
 //! on key *up*; so each switch sits in a wrapper whose `capture_key_down` toggles it on
 //! Space/Enter while the switch inside is focused, and calls `prevent_default` so the
 //! switch's own key-up activation does not toggle it straight back for a real keyboard
-//! user (the same pattern as `onboarding.rs`'s step buttons).
+//! user (the same pattern as `onboarding.rs`'s step buttons). The Export and Import
+//! buttons use the same wrapper for Enter/Space.
 
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use gpui_kit::component::button::Button;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
+use ubilink_core::GraphStats;
 
 use super::Route;
+use crate::fixtures::{self, Fixture};
 use crate::theme::tokens::{font_size, radius, spacing};
 
 /// The settings route's view-state, for Task 6's automation `state` verb.
@@ -77,6 +99,100 @@ pub fn toggle(state: &ubilink_app::AppState, app: &str, enabled: bool) -> (Strin
     (toggle_message(app, enabled, &result), result.is_err())
 }
 
+/// The stats Label, worded as the Tauri settings view does (B1):
+/// `5 links · 3 connections`, `1 link · 1 connection`, `0 links · 0 connections`.
+pub fn stats_text(stats: &GraphStats) -> String {
+    fn plural(n: i64) -> &'static str {
+        if n == 1 {
+            ""
+        } else {
+            "s"
+        }
+    }
+    format!(
+        "{} link{} · {} connection{}",
+        stats.resources,
+        plural(stats.resources),
+        stats.links,
+        plural(stats.links)
+    )
+}
+
+/// The stats Label when the counts cannot be read (U3).
+pub fn stats_error_message(e: &str) -> String {
+    format!("Couldn't read the graph: {e}. Reopen Settings to try again.")
+}
+
+/// Write the whole graph as JSON (core's `ubilink.graph.v3` export) to exactly `path`,
+/// returning the written path.
+pub fn export_to(state: &ubilink_app::AppState, path: &Path) -> Result<String, String> {
+    let json = {
+        let backend = state
+            .backend
+            .lock()
+            .map_err(|_| "internal state was poisoned".to_string())?;
+        backend.export_graph()?
+    };
+    std::fs::write(path, json).map_err(|e| format!("couldn't write the export: {e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Read a graph-export JSON file at `path` and merge it into the graph through the
+/// core's validation (`ubilink_app::import_graph`); returns its summary.
+pub fn import_from(state: &ubilink_app::AppState, path: &Path) -> Result<String, String> {
+    let json = std::fs::read_to_string(path)
+        .map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+    ubilink_app::import_graph(state, &json)
+}
+
+/// The line shown after an export: where it went, or what failed and what to do (U3).
+pub fn export_message(result: &Result<String, String>) -> (String, bool) {
+    match result {
+        Ok(path) => (format!("Exported to {path}"), false),
+        Err(e) => (
+            format!("Export failed: {e}. Check that the folder is writable, then try again."),
+            true,
+        ),
+    }
+}
+
+/// The line shown after an import: core's summary, or what failed and what to do (U3).
+pub fn import_message(result: &Result<String, String>) -> (String, bool) {
+    match result {
+        Ok(summary) => (summary.clone(), false),
+        Err(e) => (
+            format!("Import failed: {e}. Choose a ubilink export (.json) file, then try again."),
+            true,
+        ),
+    }
+}
+
+/// Where a release build's save dialog starts: Downloads (the Tauri app's export
+/// folder), else home.
+fn export_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let downloads = home.join("Downloads");
+    if downloads.is_dir() {
+        downloads
+    } else {
+        home
+    }
+}
+
+/// The save dialog's suggested name, stamped like the Tauri app's export file.
+fn export_file_name() -> String {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("ubilink-export-{stamp}.json")
+}
+
+/// An automation build never opens a real file dialog on the host (O4).
+const NO_FIXTURE: &str = "no {kind} fixture loaded";
+
 /// Space or Enter with no modifiers: the keys that activate a focused switch.
 fn is_activation_key(keystroke: &Keystroke) -> bool {
     (keystroke.key == "space" || keystroke.key == "enter") && !keystroke.modifiers.modified()
@@ -94,6 +210,8 @@ pub struct SettingsView {
     /// the focused element up, and with nothing focused Tab never arrives.
     focus: FocusHandle,
     focused: bool,
+    /// The open save/open dialog, if any; dropped (cancelled) with the view.
+    _dialog: Task<()>,
 }
 
 impl SettingsView {
@@ -102,7 +220,92 @@ impl SettingsView {
             message: None,
             focus: cx.focus_handle(),
             focused: false,
+            _dialog: Task::ready(()),
         }
+    }
+
+    fn show(&mut self, message: (String, bool), cx: &mut Context<Self>) {
+        self.message = Some(message);
+        cx.notify();
+    }
+
+    /// Export: to the `export_path` fixture if set, else where a save dialog says.
+    fn export(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = fixtures::path(Fixture::ExportPath) {
+            let result = export_to(crate::app_state::get(), &path);
+            return self.show(export_message(&result), cx);
+        }
+        if cfg!(feature = "automation") {
+            let e = NO_FIXTURE.replace("{kind}", "export_path");
+            return self.show(export_message(&Err(e)), cx);
+        }
+        let chosen = cx.prompt_for_new_path(&export_dir(), Some(&export_file_name()));
+        self._dialog = cx.spawn(async move |this, cx| {
+            let result = match chosen.await {
+                Ok(Ok(Some(path))) => export_to(crate::app_state::get(), &path),
+                Ok(Ok(None)) => return,
+                Ok(Err(e)) => Err(format!("couldn't open the save dialog: {e}")),
+                Err(_) => return,
+            };
+            let _ = this.update(cx, |view, cx| view.show(export_message(&result), cx));
+        });
+    }
+
+    /// Import: from the `import_path` fixture if set, else the file an open dialog picks.
+    fn import(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = fixtures::path(Fixture::ImportPath) {
+            let result = import_from(crate::app_state::get(), &path);
+            return self.show(import_message(&result), cx);
+        }
+        if cfg!(feature = "automation") {
+            let e = NO_FIXTURE.replace("{kind}", "import_path");
+            return self.show(import_message(&Err(e)), cx);
+        }
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import".into()),
+        });
+        self._dialog = cx.spawn(async move |this, cx| {
+            let result = match chosen.await {
+                Ok(Ok(Some(paths))) => match paths.first() {
+                    Some(path) => import_from(crate::app_state::get(), path),
+                    None => return,
+                },
+                Ok(Ok(None)) => return,
+                Ok(Err(e)) => Err(format!("couldn't open the file dialog: {e}")),
+                Err(_) => return,
+            };
+            let _ = this.update(cx, |view, cx| view.show(import_message(&result), cx));
+        });
+    }
+
+    /// A Button that Tab reaches and Enter/Space (or a click) activates; see the
+    /// module doc for why the wrapper handles the keys.
+    fn action_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        action: fn(&mut Self, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex_shrink_0()
+            .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_activation_key(&event.keystroke) {
+                    action(this, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                Button::new(id)
+                    .small()
+                    .label(label)
+                    .on_click(cx.listener(move |this, _, _, cx| action(this, cx))),
+            )
+            .into_any_element()
     }
 
     fn set_enabled(&mut self, app: &str, enabled: bool, cx: &mut Context<Self>) {
@@ -161,6 +364,12 @@ impl Render for SettingsView {
             ),
             Err(e) => (Vec::new(), Some(list_error_message(&e))),
         };
+        let (stats, stats_failed) = match ubilink_app::graph_stats(crate::app_state::get()) {
+            Ok(stats) => (stats_text(&stats), false),
+            Err(e) => (stats_error_message(&e), true),
+        };
+        let export_button = self.action_button("settings-export", "Export", Self::export, cx);
+        let import_button = self.action_button("settings-import", "Import", Self::import, cx);
         let (hint, failed) = match (&list_error, &self.message) {
             (Some(e), _) => (e.clone(), true),
             (None, Some((m, failed))) => (m.clone(), *failed),
@@ -194,6 +403,28 @@ impl Render for SettingsView {
                             .text_color(theme.muted_foreground)
                             .child(text!(id = "settings-adapters-heading", "App adapters")),
                     ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S2)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(font_size::ROW)
+                            .text_color(if stats_failed {
+                                theme.danger
+                            } else {
+                                theme.foreground
+                            })
+                            .child(text!(id = "settings-stats", stats)),
+                    )
+                    .child(export_button)
+                    .child(import_button),
             )
             .child(
                 div()
@@ -233,11 +464,16 @@ mod tests {
     // Not `super::*`: that would re-import gpui-kit's `test` macro (pulled in
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
-    use super::{list_error_message, state, toggle, toggle_message};
+    use super::{
+        export_message, export_to, import_from, import_message, list_error_message, state,
+        stats_error_message, stats_text, toggle, toggle_message,
+    };
     use std::collections::HashSet;
     use std::sync::Mutex;
-    use ubilink_app::{list_plugins, load_disabled, AppState, HotkeyReport};
-    use ubilink_core::{AdapterRegistry, LinkGraph, PanelBackend, UbilinkService};
+    use ubilink_app::{
+        graph_stats, list_plugins, load_disabled, reset_graph, AppState, HotkeyReport,
+    };
+    use ubilink_core::{AdapterRegistry, GraphStats, LinkGraph, PanelBackend, UbilinkService};
 
     fn temp_state(tag: &str) -> AppState {
         let dir = std::env::temp_dir().join(format!(
@@ -318,6 +554,73 @@ mod tests {
 
         assert!(toggle_message("Arc", true, &Ok(())).contains("Arc is on"));
         assert!(list_error_message("poisoned").contains("Reopen Settings"));
+        std::fs::remove_dir_all(&state.data_dir).ok();
+    }
+
+    /// The graph-roundtrip probe's seed: 5 resources, 3 links.
+    fn seed(state: &AppState) {
+        let json = include_str!("../../probes/fixtures/graph-backlinks.json");
+        ubilink_app::import_graph(state, json).unwrap();
+    }
+
+    #[test]
+    fn settings_stats_label_matches_the_tauri_wording() {
+        let s = |resources, links| stats_text(&GraphStats { resources, links });
+        assert_eq!(s(5, 3), "5 links · 3 connections");
+        assert_eq!(s(0, 0), "0 links · 0 connections");
+        assert_eq!(s(1, 1), "1 link · 1 connection");
+        assert!(stats_error_message("poisoned").contains("Reopen Settings"));
+    }
+
+    /// R11: export to a path, empty the graph, import that file: the counts are back.
+    #[test]
+    fn settings_graph_export_then_import_round_trips() {
+        let state = temp_state("roundtrip");
+        seed(&state);
+        let before = graph_stats(&state).unwrap();
+        assert_eq!((before.resources, before.links), (5, 3));
+
+        let path = state.data_dir.join("roundtrip-export.json");
+        let exported = export_to(&state, &path);
+        let (msg, failed) = export_message(&exported);
+        assert!(!failed && msg.contains("roundtrip-export.json"), "{msg}");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["links"].as_array().unwrap().len(), 3);
+
+        reset_graph(&state).unwrap();
+        assert_eq!(graph_stats(&state).unwrap().links, 0);
+
+        let (msg, failed) = import_message(&import_from(&state, &path));
+        assert!(!failed, "{msg}");
+        let after = graph_stats(&state).unwrap();
+        assert_eq!(
+            (after.resources, after.links),
+            (before.resources, before.links)
+        );
+        std::fs::remove_dir_all(&state.data_dir).ok();
+    }
+
+    /// Failures say what failed and what to do (U3).
+    #[test]
+    fn settings_graph_failures_say_what_to_do() {
+        let state = temp_state("graphfail");
+        let missing = state.data_dir.join("nope.json");
+        let (msg, failed) = import_message(&import_from(&state, &missing));
+        assert!(
+            failed && msg.starts_with("Import failed") && msg.contains("try again"),
+            "{msg}"
+        );
+        let bad = state.data_dir.join("bad.json");
+        std::fs::write(&bad, "not json").unwrap();
+        let (msg, failed) = import_message(&import_from(&state, &bad));
+        assert!(failed && msg.contains("try again"), "{msg}");
+        let unwritable = state.data_dir.join("no-such-dir").join("x.json");
+        let (msg, failed) = export_message(&export_to(&state, &unwritable));
+        assert!(
+            failed && msg.starts_with("Export failed") && msg.contains("try again"),
+            "{msg}"
+        );
         std::fs::remove_dir_all(&state.data_dir).ok();
     }
 }
