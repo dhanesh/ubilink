@@ -468,7 +468,8 @@ impl BrowserView {
         let top = ROW_H * ix as f32;
         let bottom = top + ROW_H;
         let current = -self.rows_scroll.offset().y;
-        let wanted = if top < current {
+        // Not laid out yet (the list was long until now): put the row at the top.
+        let wanted = if view_h <= px(0.) || top < current {
             top
         } else if bottom > current + view_h {
             bottom - view_h
@@ -499,7 +500,8 @@ impl BrowserView {
             state.scroll_to_selected_item(window, cx);
             cx.notify();
         });
-        self.reveal(0, cx);
+        // A new result starts at its first row.
+        self.rows_scroll.set_offset(point(px(0.), px(0.)));
     }
 
     /// Time the first frame (see the module doc): arm on the first render, record
