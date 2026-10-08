@@ -30,12 +30,13 @@
 
 use std::path::Path;
 
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
+use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::opener::Opener;
 use crate::theme::tokens::{font_size, radius, spacing};
@@ -45,6 +46,10 @@ use crate::theme::tokens::{font_size, radius, spacing};
 pub struct State {
     pub view: String,
     pub phase: String,
+    /// Where the view's opaque surface, primary text and accent control are (R14,
+    /// `views::theming`).
+    #[serde(default)]
+    pub theme_samples: ThemeSamples,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -52,8 +57,12 @@ pub fn state() -> super::ViewState {
     super::ViewState::Onboarding(State {
         view: Route::Onboarding.as_str().into(),
         phase: "steps".into(),
+        theme_samples: SAMPLES.get(),
     })
 }
+
+/// The newest onboarding view's theme sample regions (R14), written at prepaint.
+static SAMPLES: Samples = Samples::new();
 
 /// The status Labels (README contract: `Granted` is matched exactly, so `Not granted`
 /// can never satisfy it).
@@ -237,6 +246,8 @@ pub struct OnboardingView {
     /// the focused element up, and with nothing focused neither Tab nor `R` arrive.
     focus: FocusHandle,
     focused: bool,
+    /// Repaints in the system's light or dark tokens while open (R14).
+    appearance: FollowAppearance,
     /// The in-flight check; dropped (cancelled) with the view.
     _check: Task<()>,
 }
@@ -249,6 +260,7 @@ impl OnboardingView {
             hint: None,
             focus: cx.focus_handle(),
             focused: false,
+            appearance: FollowAppearance::default(),
             _check: Task::ready(()),
         };
         view.start_check(false, cx);
@@ -284,17 +296,34 @@ impl OnboardingView {
         self.check = Some(check);
     }
 
+    /// Whether the latest check says `p` is granted (`false` before it answers).
+    fn granted(&self, p: Permission) -> bool {
+        self.check
+            .as_ref()
+            .is_some_and(|check| status_text(p, check) == GRANTED)
+    }
+
     fn open(&mut self, p: Permission, cx: &mut Context<Self>) {
         self.hint = Some(open_pane(p));
         cx.notify();
     }
 
-    fn step_row(&self, ix: usize, p: Permission, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let (status, granted) = match &self.check {
-            Some(check) => (status_text(p, check), status_text(p, check) == GRANTED),
-            None => (UNKNOWN, false),
+    /// One step. `sample` marks its button as the view's accent sample (R14): the
+    /// first step still to grant, whose button is the accent-filled one.
+    fn step_row(
+        &self,
+        ix: usize,
+        p: Permission,
+        sample: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let granted = self.granted(p);
+        let status = match &self.check {
+            Some(check) => status_text(p, check),
+            None => UNKNOWN,
         };
+        let foreground = theming::primary_text(cx);
+        let theme = cx.theme();
         let status_color = if granted { theme.success } else { theme.danger };
         div()
             .id(SharedString::from(format!("step-{}", p.pane())))
@@ -312,7 +341,7 @@ impl OnboardingView {
                     .flex_shrink_0()
                     .w(px(96.))
                     .text_size(font_size::ROW)
-                    .text_color(theme.foreground)
+                    .text_color(foreground)
                     .child(text!(
                         id = SharedString::from(format!("step-{}-name", p.pane())),
                         p.name()
@@ -353,13 +382,23 @@ impl OnboardingView {
                             cx.stop_propagation();
                         }
                     }))
-                    .child(
-                        Button::new(SharedString::from(format!("open-{}", p.pane())))
-                            .small()
-                            .when(!granted, |b| b.primary())
-                            .label(p.button_text())
-                            .on_click(cx.listener(move |this, _, _, cx| this.open(p, cx))),
-                    ),
+                    .map(|d| {
+                        let id = SharedString::from(format!("open-{}", p.pane()));
+                        // Still to grant: the accent (primary) button, the step's call
+                        // to action. Granted: a plain one, to look again.
+                        let button = if granted {
+                            Button::new(id).small()
+                        } else {
+                            theming::accent_button(id)
+                        }
+                        .label(p.button_text())
+                        .on_click(cx.listener(move |this, _, _, cx| this.open(p, cx)));
+                        if sample {
+                            d.child(SAMPLES.mark(Sample::Accent, button))
+                        } else {
+                            d.child(button)
+                        }
+                    }),
             )
             .into_any_element()
     }
@@ -371,14 +410,19 @@ impl Render for OnboardingView {
             self.focused = true;
             window.focus(&self.focus, cx);
         }
+        SAMPLES.clear();
+        self.appearance.ensure(window, cx);
         let steps = self.steps.clone();
+        let first_missing = steps.iter().position(|p| !self.granted(*p));
         let rows: Vec<AnyElement> = steps
             .iter()
             .enumerate()
-            .map(|(ix, p)| self.step_row(ix, *p, cx))
+            .map(|(ix, p)| self.step_row(ix, *p, first_missing == Some(ix), cx))
             .collect();
         let hint = self.hint.clone().unwrap_or_else(|| CHECKING.to_string());
         let failed = matches!(self.check, Some(Err(_)));
+        let surface = theming::surface(cx);
+        let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
@@ -397,11 +441,31 @@ impl Render for OnboardingView {
             .px(spacing::S5)
             .py(spacing::S2)
             .rounded(radius::CARD)
+            // The opaque token surface (R14): the panel's blur stays behind the card.
+            .bg(surface)
             .child(
                 div()
-                    .text_size(font_size::TITLE)
-                    .text_color(theme.foreground)
-                    .child(text!(Route::Onboarding.title())),
+                    .h(theming::ACCENT_H)
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .relative()
+                            .text_size(font_size::TITLE)
+                            .text_color(foreground)
+                            .child(text!(Route::Onboarding.title()))
+                            .child(SAMPLES.probe(Sample::Text)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .relative()
+                            .child(SAMPLES.probe(Sample::Surface)),
+                    ),
             )
             .child(
                 div()

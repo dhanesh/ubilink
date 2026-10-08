@@ -72,6 +72,7 @@ use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use ubilink_core::BrowseEntry;
 
+use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
 use crate::opener::Opener;
@@ -209,7 +210,21 @@ pub struct State {
     pub filter_samples: usize,
     /// Nearest-rank p99 of those re-filter times, in ms; `null` before the first.
     pub filter_p99_ms: Option<f64>,
+    /// Where the view's opaque surface, primary text and accent control are (R14,
+    /// `views::theming`).
+    #[serde(default)]
+    pub theme_samples: ThemeSamples,
 }
+
+/// The newest browser view's theme sample regions (R14), written at prepaint.
+static SAMPLES: Samples = Samples::new();
+
+/// The open button's label: opens the selected link, as Enter does (R6).
+pub const OPEN_BUTTON: &str = "Open";
+
+/// The filter field's width in the header; it gives way first when the header is
+/// tight (a long drill trail).
+const FILTER_W: Pixels = px(240.);
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
 pub fn state() -> super::ViewState {
@@ -219,6 +234,7 @@ pub fn state() -> super::ViewState {
         phase: "browsing".into(),
         filter_samples: timings.len(),
         filter_p99_ms: p99(&timings),
+        theme_samples: SAMPLES.get(),
     })
 }
 
@@ -522,7 +538,7 @@ impl ListDelegate for BrowserRows {
                                 .flex_shrink_0()
                                 .max_w(relative(0.45))
                                 .text_size(font_size::ROW)
-                                .text_color(theme.foreground)
+                                .text_color(theming::primary_text(cx))
                                 .truncate()
                                 .child(text!(entry.name.clone())),
                         )
@@ -606,6 +622,8 @@ pub struct BrowserView {
     marked: Option<BrowseEntry>,
     /// The latest link's confirmation; cleared when the selection moves.
     linked: Option<String>,
+    /// Repaints in the system's light or dark tokens while open (R14).
+    appearance: FollowAppearance,
     /// The in-flight graph query; dropped (cancelled) with the view.
     _load: Task<()>,
     #[cfg(feature = "automation")]
@@ -638,6 +656,7 @@ impl BrowserView {
             open_error: None,
             marked: None,
             linked: None,
+            appearance: FollowAppearance::default(),
             _load: load,
             #[cfg(feature = "automation")]
             first_frame: FirstFrame::Pending(built_at),
@@ -858,6 +877,8 @@ impl Render for BrowserView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "automation")]
         self.time_first_frame(window, cx);
+        SAMPLES.clear();
+        self.appearance.ensure(window, cx);
 
         let list = self
             .list
@@ -899,6 +920,8 @@ impl Render for BrowserView {
         };
 
         let trail = list.read(cx).delegate().trail_text();
+        let surface = theming::surface(cx);
+        let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         div()
             // Stamp every key before the Input sees it: a re-filter is timed from here.
@@ -963,6 +986,8 @@ impl Render for BrowserView {
             .px(spacing::S3)
             .py(PAD_Y)
             .rounded(radius::CARD)
+            // The opaque token surface (R14): the panel's blur stays behind the card.
+            .bg(surface)
             .child(
                 div()
                     .h(HEADER_H)
@@ -983,13 +1008,45 @@ impl Render for BrowserView {
                         div()
                             .flex_shrink(1.)
                             .min_w_0()
-                            .max_w(relative(0.4))
+                            .max_w(relative(0.3))
+                            .relative()
                             .text_size(font_size::META)
-                            .text_color(theme.foreground)
+                            .text_color(foreground)
                             .truncate()
-                            .child(text!(trail)),
+                            .child(text!(trail))
+                            .child(SAMPLES.probe(Sample::Text)),
                     )
-                    .child(div().flex_1().min_w_0().child(Input::new(&filter).small())),
+                    .child(
+                        div()
+                            .w(FILTER_W)
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .child(Input::new(&filter).small()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(theming::SAMPLE_MIN + 8.))
+                            .h_full()
+                            .relative()
+                            .child(SAMPLES.probe(Sample::Surface)),
+                    )
+                    // Opens the selected link, as Enter does (nothing while no row is
+                    // shown). Always there, so the header never shifts as rows load.
+                    .child(
+                        SAMPLES.mark(
+                            Sample::Accent,
+                            theming::accent_button("browser-open")
+                                .label(OPEN_BUTTON)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    // The filter keeps focus (README contract).
+                                    if let Some(filter) = &this.filter {
+                                        filter.update(cx, |s, cx| s.focus(window, cx));
+                                    }
+                                    this.open_selected(cx);
+                                })),
+                        ),
+                    ),
             )
             .child({
                 let shown = self.row_count(cx);

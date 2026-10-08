@@ -77,6 +77,7 @@ use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
 
+use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
 use crate::login_item::{self, Report, Status};
@@ -87,6 +88,10 @@ use crate::theme::tokens::{font_size, radius, spacing};
 pub struct State {
     pub view: String,
     pub phase: String,
+    /// Where the view's opaque surface, primary text and accent control are (R14,
+    /// `views::theming`).
+    #[serde(default)]
+    pub theme_samples: ThemeSamples,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -94,7 +99,20 @@ pub fn state() -> super::ViewState {
     super::ViewState::Settings(State {
         view: Route::Settings.as_str().into(),
         phase: "ready".into(),
+        theme_samples: SAMPLES.get(),
     })
+}
+
+/// The newest settings view's theme sample regions (R14), written at prepaint.
+static SAMPLES: Samples = Samples::new();
+
+/// How an action button looks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Plain,
+    /// The view's accent (primary) action, and its R14 accent sample.
+    Accent,
+    Danger,
 }
 
 const ADAPTERS_HINT: &str =
@@ -363,6 +381,8 @@ pub struct SettingsView {
     /// Launch at login: the status last read (on show) or reported by the last
     /// register/unregister, or the error line to show instead (U3).
     login: Result<Report, String>,
+    /// Repaints in the system's light or dark tokens while open (R14).
+    appearance: FollowAppearance,
 }
 
 impl SettingsView {
@@ -374,6 +394,7 @@ impl SettingsView {
             confirming_reset: false,
             _dialog: Task::ready(()),
             login: login_status().map_err(|e| login_status_error_message(&e)),
+            appearance: FollowAppearance::default(),
         }
     }
 
@@ -392,6 +413,7 @@ impl SettingsView {
     /// not-found, the explanation Label (or the error line).
     fn login_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let on = self.login_on();
+        let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         let (status, explanation, failed): (Option<&'static str>, Option<String>, bool) =
             match &self.login {
@@ -427,7 +449,7 @@ impl SettingsView {
                 this.child(
                     div()
                         .flex_shrink_0()
-                        .text_color(theme.foreground)
+                        .text_color(foreground)
                         .child(text!(id = "settings-login-status", status)),
                 )
             })
@@ -540,7 +562,7 @@ impl SettingsView {
         &self,
         id: &'static str,
         label: &'static str,
-        danger: bool,
+        look: Look,
         action: fn(&mut Self, &mut Window, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -553,13 +575,20 @@ impl SettingsView {
                     cx.stop_propagation();
                 }
             }))
-            .child(
-                Button::new(id)
-                    .small()
-                    .label(label)
-                    .when(danger, |b| b.danger())
-                    .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx))),
-            )
+            .map(|d| {
+                let button = match look {
+                    Look::Accent => theming::accent_button(id),
+                    Look::Plain => Button::new(id).small(),
+                    Look::Danger => Button::new(id).small().danger(),
+                }
+                .label(label)
+                .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)));
+                if look == Look::Accent {
+                    d.child(SAMPLES.mark(Sample::Accent, button))
+                } else {
+                    d.child(button)
+                }
+            })
             .into_any_element()
     }
 
@@ -609,6 +638,8 @@ impl Render for SettingsView {
             self.focused = true;
             window.focus(&self.focus, cx);
         }
+        SAMPLES.clear();
+        self.appearance.ensure(window, cx);
         let (switches, list_error) = match ubilink_app::list_plugins(crate::app_state::get()) {
             Ok(plugins) => (
                 plugins
@@ -626,31 +657,36 @@ impl Render for SettingsView {
         let export_button = self.action_button(
             "settings-export",
             "Export",
-            false,
+            Look::Accent,
             |v, _, cx| v.export(cx),
             cx,
         );
         let import_button = self.action_button(
             "settings-import",
             "Import",
-            false,
+            Look::Plain,
             |v, _, cx| v.import(cx),
             cx,
         );
-        let reset_button =
-            self.action_button("settings-reset", "Reset…", true, Self::ask_reset, cx);
+        let reset_button = self.action_button(
+            "settings-reset",
+            "Reset…",
+            Look::Danger,
+            Self::ask_reset,
+            cx,
+        );
         let confirmation = self.confirming_reset.then(|| {
             let confirm = self.action_button(
                 "settings-reset-confirm",
                 RESET_CONFIRM,
-                true,
+                Look::Danger,
                 Self::confirm_reset,
                 cx,
             );
             let cancel = self.action_button(
                 "settings-reset-cancel",
                 RESET_CANCEL,
-                false,
+                Look::Plain,
                 Self::cancel_reset,
                 cx,
             );
@@ -662,6 +698,8 @@ impl Render for SettingsView {
             (None, None) => (ADAPTERS_HINT.to_string(), false),
         };
         let login_row = self.login_row(cx);
+        let surface = theming::surface(cx);
+        let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
@@ -682,6 +720,8 @@ impl Render for SettingsView {
             .px(spacing::S5)
             .py(spacing::S2)
             .rounded(radius::CARD)
+            // The opaque token surface (R14): the panel's blur stays behind the card.
+            .bg(surface)
             .child(
                 div()
                     .flex()
@@ -690,9 +730,11 @@ impl Render for SettingsView {
                     .gap(spacing::S3)
                     .child(
                         div()
+                            .relative()
                             .text_size(font_size::TITLE)
-                            .text_color(theme.foreground)
-                            .child(text!(Route::Settings.title())),
+                            .text_color(foreground)
+                            .child(text!(Route::Settings.title()))
+                            .child(SAMPLES.probe(Sample::Text)),
                     )
                     .child(
                         div()
@@ -709,16 +751,24 @@ impl Render for SettingsView {
                     .gap(spacing::S2)
                     .child(
                         div()
-                            .flex_1()
+                            .flex_shrink(1.)
                             .min_w_0()
                             .truncate()
                             .text_size(font_size::ROW)
                             .text_color(if stats_failed {
                                 theme.danger
                             } else {
-                                theme.foreground
+                                foreground
                             })
                             .child(text!(id = "settings-stats", stats)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(theming::SAMPLE_MIN + 8.))
+                            .h(theming::ACCENT_H)
+                            .relative()
+                            .child(SAMPLES.probe(Sample::Surface)),
                     )
                     .child(export_button)
                     .child(import_button)
@@ -742,7 +792,7 @@ impl Render for SettingsView {
                                 .gap_x(spacing::S1)
                                 .text_size(font_size::ROW)
                                 .child(
-                                    div().text_color(theme.foreground).child(text!(
+                                    div().text_color(foreground).child(text!(
                                         id = "settings-reset-question",
                                         RESET_QUESTION
                                     )),

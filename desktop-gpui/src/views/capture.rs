@@ -29,11 +29,12 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::{ActiveTheme, Disableable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
+use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
 use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
@@ -70,6 +71,10 @@ pub struct State {
     /// `"capturing"` from the moment the view is built until the core answers, then
     /// `"captured"` or `"failed"` (probes/README.md, "Phase 1 view-state contract").
     pub phase: String,
+    /// Where the view's opaque surface, primary text and accent control are (R14,
+    /// `views::theming`).
+    #[serde(default)]
+    pub theme_samples: ThemeSamples,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -77,8 +82,15 @@ pub fn state() -> super::ViewState {
     super::ViewState::Capture(State {
         view: Route::Capture.as_str().into(),
         phase: lock().phase.into(),
+        theme_samples: SAMPLES.get(),
     })
 }
+
+/// The newest capture view's theme sample regions (R14), written at prepaint.
+static SAMPLES: Samples = Samples::new();
+
+/// The copy button's label (R2's click path; Enter and ⌘C are the keyboard path).
+pub const COPY_BUTTON: &str = "Copy link";
 
 /// Where the capture stands. The view renders from this alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -403,6 +415,8 @@ pub struct CaptureView {
     /// The URI is on the pasteboard: the `Copied` confirmation shows. The panel stays
     /// open after a copy, so the confirmation stays until the panel next hides.
     copied: bool,
+    /// Repaints in the system's light or dark tokens while open (R14).
+    appearance: FollowAppearance,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
     _capture: Task<()>,
 }
@@ -426,6 +440,7 @@ impl CaptureView {
             focus: cx.focus_handle(),
             focused: false,
             copied: false,
+            appearance: FollowAppearance::default(),
             _capture: capture,
         }
     }
@@ -450,8 +465,7 @@ impl CaptureView {
 /// They are the only `ListItem` nodes in the capture view (probes/README.md). The
 /// view only shows them; browsing to and opening links is the browser's (R6/R7).
 fn backlinks_section(backlinks: &[LinkView], cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let (foreground, muted) = (theme.foreground, theme.muted_foreground);
+    let (foreground, muted) = (theming::primary_text(cx), cx.theme().muted_foreground);
     let count = backlinks.len();
     let rows = backlinks.iter().enumerate().map(|(ix, link)| {
         div()
@@ -526,13 +540,18 @@ impl Render for CaptureView {
             self.focused = true;
             window.focus(&self.focus, cx);
         }
+        SAMPLES.clear();
+        self.appearance.ensure(window, cx);
         let copied = self.copied;
+        let captured = matches!(self.phase, Phase::Captured { .. });
         let backlinks = match &self.phase {
             Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
                 Some(backlinks_section(backlinks, cx))
             }
             _ => None,
         };
+        let surface = theming::surface(cx);
+        let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         let body = match &self.phase {
             Phase::Capturing => div()
@@ -553,10 +572,12 @@ impl Render for CaptureView {
                     div()
                         .flex_shrink_0()
                         .max_w(relative(0.5))
+                        .relative()
                         .text_size(font_size::TITLE)
-                        .text_color(theme.foreground)
+                        .text_color(foreground)
                         .truncate()
-                        .child(text!(name.clone())),
+                        .child(text!(name.clone()))
+                        .child(SAMPLES.probe(Sample::Text)),
                 )
                 .child(
                     div()
@@ -575,10 +596,12 @@ impl Render for CaptureView {
                 .gap(spacing::S1)
                 .child(
                     div()
+                        .relative()
                         .text_size(font_size::DISPLAY)
-                        .text_color(theme.foreground)
+                        .text_color(foreground)
                         .truncate()
-                        .child(text!(name.clone())),
+                        .child(text!(name.clone()))
+                        .child(SAMPLES.probe(Sample::Text)),
                 )
                 .child(
                     div()
@@ -612,11 +635,47 @@ impl Render for CaptureView {
                 d.gap(spacing::S1).px(spacing::S5).py(spacing::S2)
             })
             .rounded(radius::CARD)
+            // The opaque token surface (R14): the panel's blur stays behind the card.
+            .bg(surface)
+            // Header: the title, then the copy button.
+            // Fixed height, so the content doesn't jump when the capture lands.
             .child(
                 div()
-                    .text_size(font_size::META)
-                    .text_color(theme.muted_foreground)
-                    .child(text!(Route::Capture.title())),
+                    .h(theming::ACCENT_H)
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S3)
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(font_size::META)
+                            .text_color(theme.muted_foreground)
+                            .child(text!(Route::Capture.title())),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .relative()
+                            .child(SAMPLES.probe(Sample::Surface)),
+                    )
+                    // Always there (the header never shifts when the capture lands);
+                    // usable, and accent-filled, once there is a link to copy.
+                    .map(|d| {
+                        let button = theming::accent_button("capture-copy")
+                            .label(COPY_BUTTON)
+                            .disabled(!captured)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.copy(cx);
+                            }));
+                        if captured {
+                            d.child(SAMPLES.mark(Sample::Accent, button))
+                        } else {
+                            d.child(button)
+                        }
+                    }),
             )
             .child(body)
             .when_some(backlinks, |d, section| d.child(section))
@@ -624,7 +683,7 @@ impl Render for CaptureView {
                 d.child(
                     div()
                         .text_size(font_size::META)
-                        .text_color(theme.foreground)
+                        .text_color(foreground)
                         .child(text!(COPIED_TEXT)),
                 )
             })
