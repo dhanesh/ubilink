@@ -32,6 +32,16 @@
 //! - the hint line reports where the export went, the import summary, or what failed
 //!   and what to do (U3).
 //!
+//! Reset (Phase 1 R12, the Tauri panel's `set-reset` / `set-reset-confirm`): the
+//! `Reset…` Button deletes nothing by itself; it shows an inline confirmation — a Label
+//! `Delete all captured links and connections?`, `This cannot be undone.`, and the
+//! Buttons `Delete everything` and `Cancel` (Tauri wording, B1). Only `Delete
+//! everything` calls `ubilink_app::reset_graph`; Cancel or Escape hides the question
+//! and leaves the graph as it was. The confirmation is inline, not a gpui-component
+//! `Dialog`, as in the Tauri panel (no Dialog role reaches the tree anyway,
+//! A11Y-NOTES.md). When the confirmation closes, the button that had focus is gone, so
+//! the view takes focus back and Tab starts from the top again.
+//!
 //! Keyboard: the view focuses itself when shown, so Tab (gpui-base `Root`'s
 //! `focus_next`) reaches the first switch. The automation `key` verb only sends
 //! key-down events, while GPUI's own Space/Enter-activates-a-focused-switch path fires
@@ -44,7 +54,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -167,6 +177,32 @@ pub fn import_message(result: &Result<String, String>) -> (String, bool) {
     }
 }
 
+/// The reset confirmation's question, its warning and its two buttons (Tauri wording).
+pub const RESET_QUESTION: &str = "Delete all captured links and connections?";
+pub const RESET_WARNING: &str = "This cannot be undone.";
+pub const RESET_CONFIRM: &str = "Delete everything";
+pub const RESET_CANCEL: &str = "Cancel";
+
+/// Empty the graph (only ever called once the user confirmed); the line to show, and
+/// whether it failed.
+pub fn reset(state: &ubilink_app::AppState) -> (String, bool) {
+    reset_message(&ubilink_app::reset_graph(state))
+}
+
+/// The line shown after a reset: how many links went, or what failed and what to do (U3).
+pub fn reset_message(result: &Result<i64, String>) -> (String, bool) {
+    match result {
+        Ok(n) => (
+            format!("Deleted {n} link{}.", if *n == 1 { "" } else { "s" }),
+            false,
+        ),
+        Err(e) => (
+            format!("Reset failed: {e}. Reopen Settings, then try again."),
+            true,
+        ),
+    }
+}
+
 /// Where a release build's save dialog starts: Downloads (the Tauri app's export
 /// folder), else home.
 fn export_dir() -> PathBuf {
@@ -210,6 +246,8 @@ pub struct SettingsView {
     /// the focused element up, and with nothing focused Tab never arrives.
     focus: FocusHandle,
     focused: bool,
+    /// Reset was pressed and the confirmation is showing; nothing is deleted yet.
+    confirming_reset: bool,
     /// The open save/open dialog, if any; dropped (cancelled) with the view.
     _dialog: Task<()>,
 }
@@ -220,6 +258,7 @@ impl SettingsView {
             message: None,
             focus: cx.focus_handle(),
             focused: false,
+            confirming_reset: false,
             _dialog: Task::ready(()),
         }
     }
@@ -281,20 +320,50 @@ impl SettingsView {
         });
     }
 
+    /// Reset…: only asks; the graph is untouched until `confirm_reset`.
+    fn ask_reset(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.confirming_reset = true;
+        self.message = None;
+        cx.notify();
+    }
+
+    /// Hide the confirmation. Its focused button goes with it, so the view takes focus
+    /// back: Tab keeps working from the top.
+    fn close_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirming_reset = false;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Cancel: the graph stays exactly as it was.
+    fn cancel_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_reset(window, cx);
+    }
+
+    /// Delete everything: the user confirmed, so empty the graph.
+    fn confirm_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.confirming_reset {
+            return;
+        }
+        self.message = Some(reset(crate::app_state::get()));
+        self.close_reset(window, cx);
+    }
+
     /// A Button that Tab reaches and Enter/Space (or a click) activates; see the
     /// module doc for why the wrapper handles the keys.
     fn action_button(
         &self,
         id: &'static str,
         label: &'static str,
-        action: fn(&mut Self, &mut Context<Self>),
+        danger: bool,
+        action: fn(&mut Self, &mut Window, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .flex_shrink_0()
             .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if is_activation_key(&event.keystroke) {
-                    action(this, cx);
+                    action(this, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 }
@@ -303,7 +372,8 @@ impl SettingsView {
                 Button::new(id)
                     .small()
                     .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| action(this, cx))),
+                    .when(danger, |b| b.danger())
+                    .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx))),
             )
             .into_any_element()
     }
@@ -368,8 +438,39 @@ impl Render for SettingsView {
             Ok(stats) => (stats_text(&stats), false),
             Err(e) => (stats_error_message(&e), true),
         };
-        let export_button = self.action_button("settings-export", "Export", Self::export, cx);
-        let import_button = self.action_button("settings-import", "Import", Self::import, cx);
+        let export_button = self.action_button(
+            "settings-export",
+            "Export",
+            false,
+            |v, _, cx| v.export(cx),
+            cx,
+        );
+        let import_button = self.action_button(
+            "settings-import",
+            "Import",
+            false,
+            |v, _, cx| v.import(cx),
+            cx,
+        );
+        let reset_button =
+            self.action_button("settings-reset", "Reset…", true, Self::ask_reset, cx);
+        let confirmation = self.confirming_reset.then(|| {
+            let confirm = self.action_button(
+                "settings-reset-confirm",
+                RESET_CONFIRM,
+                true,
+                Self::confirm_reset,
+                cx,
+            );
+            let cancel = self.action_button(
+                "settings-reset-cancel",
+                RESET_CANCEL,
+                false,
+                Self::cancel_reset,
+                cx,
+            );
+            (confirm, cancel)
+        });
         let (hint, failed) = match (&list_error, &self.message) {
             (Some(e), _) => (e.clone(), true),
             (None, Some((m, failed))) => (m.clone(), *failed),
@@ -378,6 +479,16 @@ impl Render for SettingsView {
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
+            // Escape closes an open reset confirmation (Tauri) without deleting.
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.confirming_reset
+                    && event.keystroke.key == "escape"
+                    && !event.keystroke.modifiers.modified()
+                {
+                    this.cancel_reset(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -424,8 +535,42 @@ impl Render for SettingsView {
                             .child(text!(id = "settings-stats", stats)),
                     )
                     .child(export_button)
-                    .child(import_button),
+                    .child(import_button)
+                    .child(reset_button),
             )
+            .when_some(confirmation, |this, (confirm, cancel)| {
+                this.child(
+                    div()
+                        .id("settings-reset-confirmation")
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(spacing::S2)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_row()
+                                .flex_wrap()
+                                .gap_x(spacing::S1)
+                                .text_size(font_size::ROW)
+                                .child(
+                                    div().text_color(theme.foreground).child(text!(
+                                        id = "settings-reset-question",
+                                        RESET_QUESTION
+                                    )),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(theme.danger)
+                                        .child(text!(id = "settings-reset-warning", RESET_WARNING)),
+                                ),
+                        )
+                        .child(confirm)
+                        .child(cancel),
+                )
+            })
             .child(
                 div()
                     .id("settings-adapters")
@@ -465,8 +610,9 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        export_message, export_to, import_from, import_message, list_error_message, state,
-        stats_error_message, stats_text, toggle, toggle_message,
+        export_message, export_to, import_from, import_message, list_error_message, reset,
+        reset_message, state, stats_error_message, stats_text, toggle, toggle_message,
+        RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -622,5 +768,36 @@ mod tests {
             "{msg}"
         );
         std::fs::remove_dir_all(&state.data_dir).ok();
+    }
+
+    /// R12: confirming empties the graph, and the result line says how much went.
+    #[test]
+    fn settings_reset_empties_the_graph_once_confirmed() {
+        let state = temp_state("reset");
+        seed(&state);
+        let before = graph_stats(&state).unwrap();
+        assert_eq!((before.resources, before.links), (5, 3));
+
+        let (msg, failed) = reset(&state);
+        assert!(!failed && msg.starts_with("Deleted "), "{msg}");
+        let after = graph_stats(&state).unwrap();
+        assert_eq!((after.resources, after.links), (0, 0));
+        assert_eq!(stats_text(&after), "0 links · 0 connections");
+        std::fs::remove_dir_all(&state.data_dir).ok();
+    }
+
+    /// The confirmation's wording is the Tauri panel's, and failures say what to do (U3).
+    #[test]
+    fn settings_reset_wording_and_failures() {
+        assert_eq!(RESET_QUESTION, "Delete all captured links and connections?");
+        assert_eq!(RESET_CONFIRM, "Delete everything");
+        assert_eq!(RESET_CANCEL, "Cancel");
+        assert_eq!(reset_message(&Ok(1)).0, "Deleted 1 link.");
+        assert_eq!(reset_message(&Ok(5)).0, "Deleted 5 links.");
+        let (msg, failed) = reset_message(&Err("internal state was poisoned".into()));
+        assert!(
+            failed && msg.starts_with("Reset failed") && msg.contains("try again"),
+            "{msg}"
+        );
     }
 }
