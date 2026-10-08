@@ -42,6 +42,20 @@
 //! A11Y-NOTES.md). When the confirmation closes, the button that had focus is gone, so
 //! the view takes focus back and Tab starts from the top again.
 //!
+//! Launch at login (Phase 1 R13, spec D6): a `Switch` named `Launch at login` and a
+//! status Label whose text is exactly `login_item::Status::label` (`Enabled`,
+//! `Requires approval`, `Not registered`, `Not found`); requires-approval and
+//! not-found also show the report's explanation verbatim in their own Label. Those
+//! two are valid states, not failures (D6). The switch is on for Enabled and Requires
+//! approval. Every status read, register and unregister asks the
+//! [`crate::login_item`] seam first: an automation build always gets the
+//! `login_item` fixture's answer (or an error saying none is loaded), so a probe
+//! never touches the host's login items (O4); only a release build, where the seam
+//! answers `None`, calls `SMAppService.mainApp` itself ([`sm_app_service`]). The
+//! status is read each time Settings is shown (the panel builds a fresh view per
+//! show) and replaced by the result of each register/unregister; a failed call says
+//! what failed and what to do (U3).
+//!
 //! Keyboard: the view focuses itself when shown, so Tab (gpui-base `Root`'s
 //! `focus_next`) reaches the first switch. The automation `key` verb only sends
 //! key-down events, while GPUI's own Space/Enter-activates-a-focused-switch path fires
@@ -65,6 +79,7 @@ use ubilink_core::GraphStats;
 
 use super::Route;
 use crate::fixtures::{self, Fixture};
+use crate::login_item::{self, Report, Status};
 use crate::theme::tokens::{font_size, radius, spacing};
 
 /// The settings route's view-state, for Task 6's automation `state` verb.
@@ -203,6 +218,101 @@ pub fn reset_message(result: &Result<i64, String>) -> (String, bool) {
     }
 }
 
+/// The launch-at-login switch's accessible name.
+pub const LOGIN_SWITCH: &str = "Launch at login";
+
+/// Release builds' explanations for the two statuses that need the user (U3); the
+/// seam supplies its own (the fixture's) in automation builds.
+pub const REQUIRES_APPROVAL_EXPLANATION: &str =
+    "macOS needs your approval: turn on Ubilink in System Settings > General > Login Items.";
+pub const NOT_FOUND_EXPLANATION: &str = "macOS cannot find this copy of Ubilink as a login item. Move Ubilink to Applications, open it from there and try again.";
+
+/// The launch-at-login status: the seam's answer, else `SMAppService.mainApp`'s.
+pub fn login_status() -> Result<Report, String> {
+    login_item::status().unwrap_or_else(sm_app_service::status)
+}
+
+/// Turn launch at login on (register) or off (unregister) through the seam, else
+/// `SMAppService.mainApp`; the resulting status.
+pub fn set_launch_at_login(on: bool) -> Result<Report, String> {
+    if on {
+        login_item::register().unwrap_or_else(sm_app_service::register)
+    } else {
+        login_item::unregister().unwrap_or_else(sm_app_service::unregister)
+    }
+}
+
+/// The line shown when reading the status fails (U3).
+pub fn login_status_error_message(e: &str) -> String {
+    format!("Couldn't read the launch-at-login status: {e}. Reopen Settings to try again.")
+}
+
+/// The line shown when turning launch at login on or off fails (U3).
+pub fn login_toggle_error_message(on: bool, e: &str) -> String {
+    format!(
+        "Couldn't turn launch at login {}: {e}. Reopen Settings, then try again.",
+        if on { "on" } else { "off" }
+    )
+}
+
+/// `SMAppService.mainApp`, called only when the seam answers `None` (release builds).
+mod sm_app_service {
+    use super::{Report, Status, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION};
+    use objc2_service_management::{SMAppService, SMAppServiceStatus};
+
+    fn report(status: Status) -> Report {
+        let explanation = match status {
+            Status::RequiresApproval => Some(REQUIRES_APPROVAL_EXPLANATION.to_string()),
+            Status::NotFound => Some(NOT_FOUND_EXPLANATION.to_string()),
+            _ => None,
+        };
+        Report {
+            status,
+            explanation,
+        }
+    }
+
+    fn read() -> Status {
+        // SAFETY: `mainAppService` and `status` take no arguments and are callable
+        // from any thread on macOS 13+.
+        let raw = unsafe { SMAppService::mainAppService().status() };
+        match raw {
+            SMAppServiceStatus::Enabled => Status::Enabled,
+            SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
+            SMAppServiceStatus::NotFound => Status::NotFound,
+            _ => Status::NotRegistered,
+        }
+    }
+
+    pub fn status() -> Result<Report, String> {
+        Ok(report(read()))
+    }
+
+    /// After a call, the status macOS now reports. A register that macOS answers with
+    /// an error while the status is requires-approval or not-found is that state (D6),
+    /// shown with its explanation, not a failure.
+    fn after(result: Result<(), String>) -> Result<Report, String> {
+        let now = read();
+        match result {
+            Ok(()) => Ok(report(now)),
+            Err(_) if matches!(now, Status::RequiresApproval | Status::NotFound) => Ok(report(now)),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn register() -> Result<Report, String> {
+        // SAFETY: as above; the error is an owned NSError.
+        let result = unsafe { SMAppService::mainAppService().registerAndReturnError() };
+        after(result.map_err(|e| e.localizedDescription().to_string()))
+    }
+
+    pub fn unregister() -> Result<Report, String> {
+        // SAFETY: as above.
+        let result = unsafe { SMAppService::mainAppService().unregisterAndReturnError() };
+        after(result.map_err(|e| e.localizedDescription().to_string()))
+    }
+}
+
 /// Where a release build's save dialog starts: Downloads (the Tauri app's export
 /// folder), else home.
 fn export_dir() -> PathBuf {
@@ -250,6 +360,9 @@ pub struct SettingsView {
     confirming_reset: bool,
     /// The open save/open dialog, if any; dropped (cancelled) with the view.
     _dialog: Task<()>,
+    /// Launch at login: the status last read (on show) or reported by the last
+    /// register/unregister, or the error line to show instead (U3).
+    login: Result<Report, String>,
 }
 
 impl SettingsView {
@@ -260,7 +373,79 @@ impl SettingsView {
             focused: false,
             confirming_reset: false,
             _dialog: Task::ready(()),
+            login: login_status().map_err(|e| login_status_error_message(&e)),
         }
+    }
+
+    /// Whether the launch-at-login switch shows on (off while the status is unknown).
+    fn login_on(&self) -> bool {
+        self.login.as_ref().is_ok_and(|r| r.status.is_on())
+    }
+
+    /// Register (`on`) or unregister, and show what macOS (or the seam) now reports.
+    fn set_launch_at_login(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.login = set_launch_at_login(on).map_err(|e| login_toggle_error_message(on, &e));
+        cx.notify();
+    }
+
+    /// The `Launch at login` switch, its status Label and, for requires-approval and
+    /// not-found, the explanation Label (or the error line).
+    fn login_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.login_on();
+        let theme = cx.theme();
+        let (status, explanation, failed): (Option<&'static str>, Option<String>, bool) =
+            match &self.login {
+                Ok(r) => (Some(r.status.label()), r.explanation.clone(), false),
+                Err(e) => (None, Some(e.clone()), true),
+            };
+        let switch = div()
+            .flex_shrink_0()
+            .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_activation_key(&event.keystroke) {
+                    this.set_launch_at_login(!on, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                Switch::new("launch-at-login")
+                    .small()
+                    .label(LOGIN_SWITCH)
+                    .checked(on)
+                    .on_click(
+                        cx.listener(|this, next: &bool, _, cx| this.set_launch_at_login(*next, cx)),
+                    ),
+            );
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(spacing::S2)
+            .text_size(font_size::ROW)
+            .child(switch)
+            .when_some(status, |this, status| {
+                this.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(theme.foreground)
+                        .child(text!(id = "settings-login-status", status)),
+                )
+            })
+            .when_some(explanation, |this, explanation| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(font_size::META)
+                        .text_color(if failed {
+                            theme.danger
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(text!(id = "settings-login-explanation", explanation)),
+                )
+            })
+            .into_any_element()
     }
 
     fn show(&mut self, message: (String, bool), cx: &mut Context<Self>) {
@@ -476,6 +661,7 @@ impl Render for SettingsView {
             (None, Some((m, failed))) => (m.clone(), *failed),
             (None, None) => (ADAPTERS_HINT.to_string(), false),
         };
+        let login_row = self.login_row(cx);
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
@@ -571,6 +757,7 @@ impl Render for SettingsView {
                         .child(cancel),
                 )
             })
+            .child(login_row)
             .child(
                 div()
                     .id("settings-adapters")
@@ -610,9 +797,11 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        export_message, export_to, import_from, import_message, list_error_message, reset,
-        reset_message, state, stats_error_message, stats_text, toggle, toggle_message,
-        RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
+        export_message, export_to, import_from, import_message, list_error_message,
+        login_status_error_message, login_toggle_error_message, reset, reset_message, state,
+        stats_error_message, stats_text, toggle, toggle_message, LOGIN_SWITCH,
+        NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM,
+        RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -799,5 +988,37 @@ mod tests {
             failed && msg.starts_with("Reset failed") && msg.contains("try again"),
             "{msg}"
         );
+    }
+
+    /// R13: the switch's name, the release explanations (the fixtures' wording) and
+    /// the failure lines, which say what failed and what to do (U3).
+    #[test]
+    fn launch_at_login_wording() {
+        assert_eq!(LOGIN_SWITCH, "Launch at login");
+        let fixture = |name: &str| -> String {
+            let path = format!("{}/probes/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+            let doc: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            doc["explanation"].as_str().unwrap().to_string()
+        };
+        assert_eq!(
+            REQUIRES_APPROVAL_EXPLANATION,
+            fixture("login-item-requires-approval.json")
+        );
+        assert_eq!(NOT_FOUND_EXPLANATION, fixture("login-item-not-found.json"));
+        let msg = login_toggle_error_message(true, "denied");
+        assert!(msg.starts_with("Couldn't turn launch at login on") && msg.contains("try again"));
+        assert!(login_status_error_message("x").contains("Reopen Settings"));
+    }
+
+    /// I9/O4: an automation build with no `login_item` fixture reports an error the view
+    /// shows, never a status from the host's real SMAppService.
+    #[cfg(feature = "automation")]
+    #[test]
+    fn launch_at_login_without_a_fixture_is_an_error() {
+        let expected = Err(crate::login_item::NO_FIXTURE.to_string());
+        assert_eq!(super::login_status(), expected);
+        assert_eq!(super::set_launch_at_login(true), expected);
+        assert_eq!(super::set_launch_at_login(false), expected);
     }
 }
