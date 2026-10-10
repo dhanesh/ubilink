@@ -1,95 +1,77 @@
 # ubilink — build / test / run
 #
-# This is a no-build, dependency-light project: two standalone Rust crates
-# (no workspace) plus a zero-npm vanilla frontend in dist/.
-#   • src-tauri/  — ubilink-core lib + the `ubilink-sign` CLI
-#   • registry/   — the `ubilink-registry` service (separate crate; S2 keeps a server
-#                   out of the core)
-#   • app/        — ubilink-app, the GUI-free command layer both desktop shells call
-#                   (R3); no tauri*/gpui* crate in its tree (verify-deps-clean).
-#   • dist/       — the panel UI (hand-authored ES modules; no bundler)
+# Four standalone Rust crates (no workspace):
+#   • src-tauri/    — ubilink-core lib + the `ubilink-sign` CLI (the directory keeps its
+#                     old name; the crate depends on no Tauri crate)
+#   • registry/     — the `ubilink-registry` service (separate crate; S2 keeps a server
+#                     out of the core)
+#   • app/          — ubilink-app, the GUI-free command layer the desktop app calls (R3);
+#                     no tauri*/gpui* crate in its tree (verify-deps-clean)
+#   • desktop-gpui/ — the macOS app itself: native GPUI, binary `ubilink`, Ubilink.app,
+#                     org.dhanesh.ubilink (D24 — it replaced the Tauri app in Phase 2b)
 #
-# The macOS desktop app IS wired up (desktop/ — the Tauri shell, #[tauri::command]
-# wrappers, global hotkey). `make run` builds and launches it (needs a desktop
-# session + Accessibility/Automation grants — see docs/RUNBOOK-gui-panel.md).
-# `make run-ui` serves the panel UI in a plain browser for quick preview, and
-# `make run-registry` runs the registry service.
-#
-# desktop-gpui/ (`ubilink-next.app`, org.ubilink.next) is the GPUI Phase 0 shell
-# (R2): it lives beside desktop/ rather than replacing it, builds/tests via
-# build-next/bundle-next/test-gpui, and keeps its automation socket out of release
-# builds (release-clean). `make probe` drives it with scripts/probe.py's GUI
-# scenarios for local use; those need a desktop session, so they are NOT part of
-# `make verify` (R16).
+# `make bundle` builds Ubilink.app for local use and `make run` opens it; it runs
+# against your REAL data dir (~/Library/Application Support/org.dhanesh.ubilink) and
+# needs a desktop session + the Automation grant (docs/RUNBOOK-gui-panel.md).
+# `make run-registry` runs the registry service. The automation socket the probes use
+# never reaches a release build (release-clean, part of `make verify`). `make probe`
+# drives the app with scripts/probe.py's GUI scenarios for local use; those need a
+# desktop session, so they are NOT part of `make verify` (R16).
 
 CARGO    ?= cargo
 # CI sets LOCKED=--locked so build/test/clippy pin to the committed lockfiles
 # (reproducible, no silent dep drift). Empty locally for dev ergonomics.
 LOCKED   ?=
-NODE     ?= node
 PYTHON   ?= python3
 CORE     := src-tauri/Cargo.toml
 REGISTRY := registry/Cargo.toml
-DESKTOP  := desktop/Cargo.toml
-# R3 (GPUI Phase 0 plan, task 3): the GUI-free Tauri/GPUI command layer shared by
-# both desktop shells. Lightweight like CORE/REGISTRY (no tauri*/gpui* in its
-# tree — see verify-deps-clean), so it folds into the same fast targets they use
-# rather than getting its own heavy test-desktop-style target.
+# R3 (GPUI Phase 0 plan, task 3): the GUI-free command layer the desktop app calls.
+# Lightweight like CORE/REGISTRY (no tauri*/gpui* in its tree — see
+# verify-deps-clean), so it folds into the same fast targets they use.
 APP      := app/Cargo.toml
-# R2: the GPUI shell crate. Heavy (pulls gpui-kit + objc2 + tray-icon) and needs
-# full Xcode for its Metal shaders, so — like DESKTOP — it gets its own
-# build-next/test-gpui targets instead of folding into build/test.
+# R2: the GPUI app crate. Heavy (pulls gpui-kit + objc2 + tray-icon) and needs full
+# Xcode for its Metal shaders, so it gets its own build-gpui/test-gpui targets
+# instead of folding into the fast build/test loop.
 NEXT     := desktop-gpui/Cargo.toml
-UI_DIR   := dist
-UI_PORT  ?= 1420
+# The app's real data dir (desktop-gpui/src/paths.rs); `make run` uses it.
+DATA_DIR := $(HOME)/Library/Application Support/org.dhanesh.ubilink
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-release build-desktop build-next bundle bundle-next \
-        test test-rust test-js test-desktop test-gpui \
+.PHONY: help build build-release build-gpui bundle \
+        test test-rust test-gpui \
         validate verify verify-fmt verify-clippy verify-spec verify-deps-clean check \
         verify-version test-scripts release-clean budget dist \
-        run run-desktop run-ui run-registry probe fmt clean
+        run run-registry probe fmt clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
 
-build: ## Build all crates (debug): core lib, ubilink-sign, ubilink-registry, ubilink-app
+build: ## Build the light crates (debug): core lib, ubilink-sign, ubilink-registry, ubilink-app
 	$(CARGO) build $(LOCKED) --manifest-path $(CORE)
 	$(CARGO) build $(LOCKED) --manifest-path $(REGISTRY)
 	$(CARGO) build $(LOCKED) --manifest-path $(APP)
 
-build-release: ## Build all crates optimized (release)
+build-release: ## Build the light crates optimized (release)
 	$(CARGO) build $(LOCKED) --release --manifest-path $(CORE)
 	$(CARGO) build $(LOCKED) --release --manifest-path $(REGISTRY)
 	$(CARGO) build $(LOCKED) --release --manifest-path $(APP)
 
-build-desktop: ## Build the Tauri desktop app (heavy: pulls the Tauri dep tree)
-	$(CARGO) build $(LOCKED) --manifest-path $(DESKTOP)
-
-build-next: ## Build the GPUI shell, desktop-gpui/ (heavy: pulls the GPUI dep tree; needs full Xcode)
+build-gpui: ## Build the GPUI app, desktop-gpui/ (debug; heavy: pulls the GPUI dep tree; needs full Xcode)
 	$(CARGO) build $(LOCKED) --manifest-path $(NEXT)
 
-bundle: ## Build Ubilink.app for local use (stable self-signed identity so macOS keeps permission grants)
+bundle: ## Build Ubilink.app (GPUI) into desktop-gpui/bundle/ for local use (stable self-signed identity so macOS keeps permission grants)
 	bash scripts/bundle-macos.sh dev
-
-bundle-next: ## Build ubilink-next.app (GPUI shell, org.ubilink.next) for local use, same stable dev identity
-	bash scripts/bundle-next.sh dev
 
 dist: ## Universal DMG: notarized when all six APPLE_* credentials are set, else an UNNOTARIZED dry run
 	@mode="$$(bash scripts/release-mode.sh "$${GITHUB_REF:-}")" && bash scripts/bundle-macos.sh "$$mode"
 
-test: test-rust test-js test-scripts ## Run the fast suites (Rust core + registry + app, JS panel, script tests)
+test: test-rust test-scripts ## Run the fast suites (Rust core + registry + app, script tests)
 
 test-rust: ## cargo test for the core, registry and app crates
 	$(CARGO) test $(LOCKED) --manifest-path $(CORE)
 	$(CARGO) test $(LOCKED) --manifest-path $(REGISTRY)
 	$(CARGO) test $(LOCKED) --manifest-path $(APP)
-
-test-js: ## node --test for the panel view-state reducer (zero deps)
-	@# node --test exits 0 when the glob matches nothing — fail loudly instead.
-	@set -- $(UI_DIR)/*.test.mjs; [ -e "$$1" ] || { echo "test-js: no $(UI_DIR)/*.test.mjs found" >&2; exit 1; }
-	$(NODE) --test '$(UI_DIR)/*.test.mjs'
 
 test-scripts: ## Run the script tests (scripts/test-*.sh), probe.py's self-tests, and the fixtures schema check
 	@set -e; for t in scripts/test-*.sh; do bash "$$t"; done
@@ -100,10 +82,7 @@ test-scripts: ## Run the script tests (scripts/test-*.sh), probe.py's self-tests
 	@# documented schema on every gate run, not just when they're (re)generated.
 	$(PYTHON) scripts/probe.py fixtures --check
 
-test-desktop: ## cargo test for the Tauri desktop crate (heavy: pulls the Tauri dep tree)
-	$(CARGO) test $(LOCKED) --manifest-path $(DESKTOP)
-
-test-gpui: ## cargo test for the GPUI shell (R16), without and with --features automation
+test-gpui: ## cargo test for the GPUI app (R16), without and with --features automation
 	$(CARGO) test $(LOCKED) --manifest-path $(NEXT)
 	$(CARGO) test $(LOCKED) --manifest-path $(NEXT) --features automation
 
@@ -111,29 +90,27 @@ validate: ## Validate the Manifold spec (needs the `manifold` CLI)
 	manifold validate linking-manifesto-app
 
 # ── The verifier (R1): ONE command that proves a change is sound. fmt-check +
-# clippy(-D warnings) + all tests across EVERY crate (core, registry, desktop,
-# app, GPUI) and the JS panel, plus the release-clean automation-socket guard
-# (R16) and optional spec validation. This is the merge gate — CI runs the SAME
-# target (with LOCKED=--locked), so "green locally" means "green in CI".
-verify: verify-fmt verify-clippy verify-version verify-deps-clean test test-desktop test-gpui release-clean verify-spec ## Full agent/CI gate: fmt+lint+version+test all crates (incl. GPUI) + JS + release-clean + spec
+# clippy(-D warnings) + all tests across EVERY crate (core, registry, app, GPUI),
+# the script tests, plus the release-clean automation-socket guard (R16) and
+# optional spec validation. This is the merge gate — CI runs the SAME target (with
+# LOCKED=--locked), so "green locally" means "green in CI".
+verify: verify-fmt verify-clippy verify-version verify-deps-clean test test-gpui release-clean verify-spec ## Full agent/CI gate: fmt+lint+version+test all crates (incl. GPUI) + script tests + release-clean + spec
 	@echo "[verify] all checks passed ✓"
 
 verify-fmt: ## Fail if any crate is unformatted (non-mutating; run 'make fmt' to fix)
 	$(CARGO) fmt --manifest-path $(CORE) --check
 	$(CARGO) fmt --manifest-path $(REGISTRY) --check
-	$(CARGO) fmt --manifest-path $(DESKTOP) --check
 	$(CARGO) fmt --manifest-path $(APP) --check
 	$(CARGO) fmt --manifest-path $(NEXT) --check
 
 verify-clippy: ## Lint every crate; warnings are errors
 	$(CARGO) clippy $(LOCKED) --manifest-path $(CORE) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(REGISTRY) --all-targets -- -D warnings
-	$(CARGO) clippy $(LOCKED) --manifest-path $(DESKTOP) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(APP) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(NEXT) --all-targets -- -D warnings
 	$(CARGO) clippy $(LOCKED) --manifest-path $(NEXT) --all-targets --features automation -- -D warnings
 
-verify-version: ## Fail if crate versions, tauri.conf.json or CHANGELOG.md disagree with desktop/Cargo.toml
+verify-version: ## Fail if crate versions or CHANGELOG.md disagree with desktop-gpui/Cargo.toml (the app version)
 	bash scripts/check-version.sh
 
 verify-deps-clean: ## R3: ubilink-app's dependency tree must carry no tauri*/gpui*/wry/tao/webkit* crate
@@ -161,21 +138,14 @@ release-clean: ## Fail if the desktop-gpui release binary leaks the automation s
 budget: ## Measure the release app (idle CPU, footprint, binary size, hotkey latency); writes docs/PERFORMANCE.md
 	$(PYTHON) scripts/probe.py budget --write docs/PERFORMANCE.md
 
-run: run-desktop ## Run the local OS app (the Tauri desktop panel; needs a desktop session)
-
-run-desktop: ## Build + launch the ubilink desktop app (global hotkey: Cmd+Shift+K)
-	@echo "Launching Ubilink. Summon the panel with Cmd+Shift+K."
-	@echo "(Grant Automation access on first capture — see docs/RUNBOOK-gui-panel.md.)"
-	$(CARGO) run --manifest-path $(DESKTOP)
-
-run-ui: ## Browser-only preview of the panel UI at http://localhost:$(UI_PORT)
-	@echo "Serving $(UI_DIR)/ at http://localhost:$(UI_PORT)  (Ctrl-C to stop)"
-	@echo "NOTE: preview only — no Tauri bridge in a plain browser, so capture degrades"
-	@echo "      to an explained error (U3). For the real app use 'make run'."
-	@$(PYTHON) -c "import http.server, functools as f; \
-h = http.server.SimpleHTTPRequestHandler; \
-h.extensions_map['.mjs'] = 'text/javascript'; \
-http.server.test(HandlerClass=f.partial(h, directory='$(UI_DIR)'), port=$(UI_PORT))"
+# `open` launches through LaunchServices, which passes no shell environment to the
+# app, so UBILINK_DATA_DIR cannot redirect this run: it is always the real data dir.
+# Probes and the verify skill launch isolated instances instead.
+run: bundle ## Build Ubilink.app (make bundle) and open it — uses your REAL data dir (~/Library/Application Support/org.dhanesh.ubilink)
+	@echo "Opening desktop-gpui/bundle/Ubilink.app against your REAL data dir:"
+	@echo "  $(DATA_DIR)"
+	@echo "Summon the panel with Cmd+Shift+K. Grant Automation on first capture (docs/RUNBOOK-gui-panel.md)."
+	open desktop-gpui/bundle/Ubilink.app
 
 run-registry: build ## Run the integration registry server (set UBILINK_TRUSTED_KEYS=<hex,...>)
 	@echo "Starting ubilink-registry on 127.0.0.1:8787 (set UBILINK_TRUSTED_KEYS to allow publishes)"
@@ -191,13 +161,11 @@ probe: ## Run the local GPUI probes against a desktop session (doctor preflight,
 fmt: ## Format Rust code in every crate
 	$(CARGO) fmt --manifest-path $(CORE)
 	$(CARGO) fmt --manifest-path $(REGISTRY)
-	$(CARGO) fmt --manifest-path $(DESKTOP)
 	$(CARGO) fmt --manifest-path $(APP)
 	$(CARGO) fmt --manifest-path $(NEXT)
 
 clean: ## Remove build artifacts from every crate
 	$(CARGO) clean --manifest-path $(CORE)
 	$(CARGO) clean --manifest-path $(REGISTRY)
-	$(CARGO) clean --manifest-path $(DESKTOP)
 	$(CARGO) clean --manifest-path $(APP)
 	$(CARGO) clean --manifest-path $(NEXT)
