@@ -261,6 +261,7 @@ file:
 - `permissions-two-missing.json`: both missing (`accessibility: false`,
   `automation` not `"granted"`) — onboarding must show exactly two steps.
 - `permissions-all-granted.json`: both granted — the "flipped" state after `key r`
+- `permissions-accessibility-missing.json`: Automation granted, Accessibility missing — capture-permission-route round 3 (a failed capture stays on capture)
   (Re-check) reloads this fixture.
 - The pane each step opens comes from `app/src/permissions.rs::settings_pane_url`
   (`"accessibility"` / `"automation"`), not from the fixture.
