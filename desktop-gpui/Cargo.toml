@@ -44,8 +44,8 @@ ubilink-app = { path = "../app" }
 # font-kit text stack is switched on by gpui-kit itself (its gpui_platform dependency).
 gpui-kit = "=0.7.0"
 
-# Menu-bar icon and the global hotkey (U1), the same jobs Tauri's tray + global-shortcut
-# plugin do in desktop/.
+# Menu-bar icon and the global hotkey (U1), the jobs Tauri's tray + global-shortcut
+# plugin did in the deleted Tauri shell.
 tray-icon = "0.26"
 global-hotkey = "0.8"
 
@@ -81,7 +81,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSURL",
   "NSError",
 ] }
-# Launch at login via SMAppService (replaces the Tauri autostart path).
+# Launch at login via SMAppService (replaced the Tauri autostart path).
 objc2-service-management = { version = "0.3", default-features = false, features = [
   "std",
   "objc2",

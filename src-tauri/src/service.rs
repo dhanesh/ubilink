@@ -5,7 +5,7 @@
 // library an actual linking engine.
 // See .manifold/linking-manifesto-app.md
 //
-// UbilinkService is the single entry point a UI (or the Tauri command layer) calls.
+// UbilinkService is the single entry point a UI (via the ubilink-app command layer) calls.
 // It composes the pieces built in earlier rounds into the core user flow:
 //   capture active resource (permission-gated, S4) -> validate the link through
 //   the bounded API (S5) -> link it to another resource in the graph (RT-4) ->

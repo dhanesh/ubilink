@@ -2,9 +2,9 @@
 // docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
 //
 // The GPUI shell that replaced desktop/ (Tauri) in Phase 2b: it ships as `ubilink`
-// (Ubilink.app, `org.dhanesh.ubilink`), the Tauri app's identity and data dir. A separate crate for the same reason desktop/ is
-// (D11): the GUI tree stays out of ubilink-core, which holds all logic and is tested
-// headlessly. This Phase 0 binary only proves the pinned stack builds, bundles and runs
+// (Ubilink.app, `org.dhanesh.ubilink`), the Tauri app's identity and data dir (D24). A
+// separate crate for the same reason the Tauri shell was (D11): the GUI tree stays out of
+// ubilink-core, which holds all logic and is tested headlessly. This Phase 0 binary only proves the pinned stack builds, bundles and runs
 // as a menu-bar (accessory) app with the shell of R4 (tray, hotkeys, pop-up panel —
 // see src/shell/). Building needs full Xcode (GPUI compiles Metal shaders); running needs a
 // desktop session.

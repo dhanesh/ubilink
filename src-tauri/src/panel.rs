@@ -1,14 +1,13 @@
 // Satisfies: U5 (the panel surfaces a captured resource's backlinks), U3 (a capture
 // failure becomes an explained, non-empty message for the UI — never silent), U2
-// (the view model is the minimal data the <=2-action flow needs), and the U1/U2/U4
-// MARKUP CONTRACT (tests assert the static panel carries the instant-render,
-// single-action, and accessibility structure). See .manifold/linking-manifesto-app.md
+// (the view model is the minimal data the <=2-action flow needs). The U1/U2/U4 display
+// contract is proven on the running GPUI app by its probes and the attended checks in
+// docs/RUNBOOK-gui-panel.md. See .manifold/linking-manifesto-app.md
 //
-// This is the command-layer contract: the functions a Tauri `#[tauri::command]` will
-// wrap (capture_current / open / dismiss). The Tauri binding itself is ENV-blocked
-// (needs a webview + display) and lives behind docs/RUNBOOK-gui-panel.md; everything
-// HERE is plain Rust over UbilinkService and is cargo-tested. Keeping the logic out of
-// the Tauri layer is why the panel's behaviour is verifiable without a GUI.
+// This is the command-layer contract the app's views call through ubilink-app
+// (capture_current / open / dismiss). Everything HERE is plain Rust over
+// UbilinkService and is cargo-tested; keeping the logic out of the GUI layer is why
+// the panel's behaviour is verifiable without a GUI.
 
 use crate::adapter::{capture_active, ResourceAdapter};
 use crate::resource::ResourceIdentity;
@@ -19,7 +18,7 @@ use std::sync::Mutex;
 /// The explanation for a poisoned backend lock (a command panicked mid-update).
 const POISONED: &str = "internal state was poisoned";
 
-/// One link as the panel renders it (name + uri). Serialized to the webview as JSON.
+/// One link as the panel renders it (name + uri). Serializable, so it exports as JSON.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LinkView {
     pub name: String,
@@ -68,7 +67,7 @@ pub struct GraphStats {
     pub links: i64,
 }
 
-/// Backs the Tauri command layer. Wraps the integrated service so the panel's logic
+/// Backs the ubilink-app command layer. Wraps the integrated service so the panel's logic
 /// is testable headlessly.
 pub struct PanelBackend {
     service: UbilinkService,
@@ -81,7 +80,7 @@ impl PanelBackend {
 
     /// The `capture_current` command: capture the active resource (permission-gated,
     /// S4) and surface its existing backlinks (U5). On any failure, return the
-    /// user-facing explanation (U3) as `Err` — the webview shows it, never silence.
+    /// user-facing explanation (U3) as `Err` — the panel shows it, never silence.
     ///
     /// Takes the shared backend rather than `&mut self` because the adapter call
     /// (an `osascript` round trip, up to its timeout if the app stalls) must NOT
@@ -192,7 +191,7 @@ impl PanelBackend {
     }
 
     /// The `capabilities` command (O2): the supported app/platform/mechanism set,
-    /// serialized for the webview to disclose what works where.
+    /// serializable so a view can disclose what works where.
     pub fn capabilities(&self) -> Vec<crate::capabilities::Support> {
         self.service.capability_overview()
     }
@@ -356,7 +355,7 @@ mod tests {
     #[test]
     fn capture_failure_becomes_an_explained_message_not_silence() {
         // U3: a permission-gated adapter with no grant yields a non-empty Err string
-        // the webview can show — never an empty/silent failure.
+        // the panel can show — never an empty/silent failure.
         struct LiveAdapter;
         impl ResourceAdapter for LiveAdapter {
             fn id(&self) -> &str {
@@ -483,7 +482,7 @@ mod tests {
             caps.iter().any(|s| s.app == "Safari"),
             "expected the baseline matrix"
         );
-        // serializable for the webview (the disclosure crosses the IPC boundary).
+        // serializable (the disclosure can cross a process or IPC boundary).
         assert!(serde_json::to_string(&caps).is_ok());
     }
 }

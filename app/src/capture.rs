@@ -1,7 +1,7 @@
 //! `capture_current`'s logic (D11/D12): detect the frontmost app, then capture its
-//! resource. Moved verbatim from `desktop/src/main.rs` — no Tauri type appears
-//! anywhere in this path, so the `#[tauri::command]` wrapper left in the shell is
-//! `capture_current(state) -> capture_now(state.inner())` and nothing else.
+//! resource. Moved verbatim from the deleted Tauri shell (`desktop/src/main.rs`,
+//! D24) — no GUI type appears anywhere in this path, so the GPUI capture view calls
+//! `capture_now` directly.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -61,9 +61,8 @@ pub fn capture_from(state: &AppState, frontmost: &str) -> Result<PanelView, Stri
 
 /// Capture the resource of whatever app is frontmost right now: detect it, then
 /// capture from it. Kept as the composition of `detect_frontmost` + `capture_from`
-/// so the `capture_current` command's synchronous behavior is unchanged; the ⌘⇧K
-/// handler (desktop/src/main.rs) calls the two halves separately so it can focus
-/// the panel in between.
+/// so callers can also run the two halves separately (the Tauri shell's ⌘⇧K handler
+/// did, to focus the panel in between).
 pub fn capture_now(state: &AppState) -> Result<PanelView, String> {
     let frontmost = detect_frontmost()?;
     capture_from(state, &frontmost)
