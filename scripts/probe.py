@@ -832,6 +832,15 @@ def _validate_permissions_all_granted(doc) -> list:
     return issues
 
 
+def _validate_permissions_accessibility_missing(doc) -> list:
+    # Phase 2 capture-permission-route round 3: Automation granted, only Accessibility
+    # missing, so a failed capture must stay on the capture route.
+    issues = _validate_permission_doc(doc)
+    if not issues and not (doc["accessibility"] is False and doc["automation"] == "granted"):
+        issues.append("accessibility must be missing and automation granted")
+    return issues
+
+
 _ADAPTER_DEFAULTS_JSON = REPO_ROOT / "src-tauri" / "src" / "adapters.default.json"
 
 
@@ -970,6 +979,7 @@ _FIXTURE_VALIDATORS = {
     "graph-ranking.json": _validate_graph_shape,
     "permissions-two-missing.json": _validate_permissions_two_missing,
     "permissions-all-granted.json": _validate_permissions_all_granted,
+    "permissions-accessibility-missing.json": _validate_permissions_accessibility_missing,
     "adapters.json": _validate_adapters,
     "graph-empty.json": _validate_graph_empty,
     "login-item-enabled.json": lambda d: _validate_login_item(d, "enabled"),
@@ -992,6 +1002,7 @@ FIXTURE_FILES = [
     "ranking-golden.json",
     "permissions-two-missing.json",
     "permissions-all-granted.json",
+    "permissions-accessibility-missing.json",
     "adapters.json",
     "graph-empty.json",
     "login-item-enabled.json",
