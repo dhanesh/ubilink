@@ -578,51 +578,55 @@ fn backlinks_section(
     let (foreground, muted) = (theming::primary_text(cx), cx.theme().muted_foreground);
     let focus_bg = cx.theme().list_active;
     let count = backlinks.len();
-    let rows = backlinks.iter().zip(rows).enumerate().map(|(ix, (link, handle))| {
-        let focused = handle.is_focused(window);
-        div()
-            .id(SharedString::from(format!("backlink-{ix}")))
-            .role(Role::ListItem)
-            .track_focus(handle)
-            .on_click(cx.listener(move |this, _, _, cx| this.open_backlink(ix, cx)))
-            .cursor_pointer()
-            .rounded(radius::CARD)
-            .when(focused, |d| d.bg(focus_bg))
-            .aria_position_in_set(ix + 1)
-            .aria_size_of_set(count)
-            .flex()
-            .flex_row()
-            .items_baseline()
-            .line_height(px(18.))
-            .gap(spacing::S3)
-            .w_full()
-            .min_w_0()
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .max_w(relative(0.45))
-                    .text_size(font_size::ROW)
-                    .text_color(foreground)
-                    .truncate()
-                    .child(text!(
-                        id = SharedString::from(format!("backlink-{ix}-name")),
-                        link.name.clone()
-                    )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(font_size::META)
-                    .font_family(MONO_FONT_FAMILY)
-                    .text_color(muted)
-                    .truncate()
-                    .child(text!(
-                        id = SharedString::from(format!("backlink-{ix}-uri")),
-                        link.uri.clone()
-                    )),
-            )
-    });
+    let rows = backlinks
+        .iter()
+        .zip(rows)
+        .enumerate()
+        .map(|(ix, (link, handle))| {
+            let focused = handle.is_focused(window);
+            div()
+                .id(SharedString::from(format!("backlink-{ix}")))
+                .role(Role::ListItem)
+                .track_focus(handle)
+                .on_click(cx.listener(move |this, _, _, cx| this.open_backlink(ix, cx)))
+                .cursor_pointer()
+                .rounded(radius::CARD)
+                .when(focused, |d| d.bg(focus_bg))
+                .aria_position_in_set(ix + 1)
+                .aria_size_of_set(count)
+                .flex()
+                .flex_row()
+                .items_baseline()
+                .line_height(px(18.))
+                .gap(spacing::S3)
+                .w_full()
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .max_w(relative(0.45))
+                        .text_size(font_size::ROW)
+                        .text_color(foreground)
+                        .truncate()
+                        .child(text!(
+                            id = SharedString::from(format!("backlink-{ix}-name")),
+                            link.name.clone()
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(font_size::META)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_color(muted)
+                        .truncate()
+                        .child(text!(
+                            id = SharedString::from(format!("backlink-{ix}-uri")),
+                            link.uri.clone()
+                        )),
+                )
+        });
     div()
         .flex()
         .flex_col()
