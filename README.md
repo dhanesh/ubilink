@@ -29,7 +29,7 @@ and tested, and is coming to the app in a later release.
 | Core | **Rust** (Tauri) | OS automation, the link graph, the capability broker — the trusted domain |
 | Commands | **Rust** (`app/`, ubilink-app) | the GUI-free command layer both desktop shells call; no Tauri or GPUI crate in its tree |
 | UI | Web (Tauri webview) | the shipping hotkey panel + settings (`desktop/`, `dist/`) |
-| UI (next) | **Native GPUI** (`desktop-gpui/`) | `ubilink-next`, the native rewrite of the panel; in progress, not yet shipped ([D22](DECISIONS.md)) |
+| UI (next) | **Native GPUI** (`desktop-gpui/`) | the native rewrite of the panel (binary `ubilink`, taking over Ubilink.app); not yet shipped ([D22](DECISIONS.md)) |
 | Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/child** access (and, on macOS, no network); all privileged access is broker-mediated |
 | Storage | **Local SQLite** | the bidirectional graph, on-device, zero telemetry |
 
@@ -89,7 +89,7 @@ Built and tested:
   [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) and drift-guarded by a test —
   `src-tauri/src/capabilities.rs`
 - ✅ GUI-free command layer shared by both desktop shells — `app/`
-- 🚧 Native GPUI app, `ubilink-next` (`desktop-gpui/`), built beside the Tauri app
+- 🚧 Native GPUI app, binary `ubilink` (`desktop-gpui/`), built beside the Tauri app
   rather than replacing it yet:
   - menu-bar shell with a native blurred pop-up panel, global hotkeys and tray
   - all four views ported:
@@ -114,7 +114,7 @@ Not done yet:
   tests and the CLI tools.
 - ⬜ **No OS sandbox off macOS.** On Linux/Windows the plugin host has no jail, so
   network, native file writes and signals are open there (`DECISIONS.md` D1).
-- ⬜ **`ubilink-next` does not ship yet.** The released app is still the Tauri app.
+- ⬜ **The GPUI app does not ship yet.** The released app is still the Tauri app.
   Before the cutover, these still need an attended check:
   - the real login-item registration (SMAppService)
   - the native save and open dialogs
@@ -155,7 +155,7 @@ make verify                  # the merge gate: fmt + clippy + every crate's test
 make verify LOCKED=--locked  # exactly what CI runs
 make test                    # faster loop: core + registry + app + JS (skips the Tauri and GPUI builds)
 make run                     # build + launch the desktop app (Tauri)
-make bundle-next             # build ubilink-next.app, the GPUI app, for local use
+make bundle-next             # build Ubilink.app from the GPUI app, for local use
 make probe                   # GPUI probes against a live desktop session (not part of verify)
 make budget                  # measure the GPUI release app (idle CPU, footprint, size, hotkey latency)
 ```

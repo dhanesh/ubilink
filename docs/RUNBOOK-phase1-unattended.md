@@ -88,8 +88,8 @@ is what the measured timings in
 
 - Quit apps that pop windows or take focus on their own: mail and chat clients,
   updaters, IDEs that steal focus on build, video calls, password managers' prompts.
-- Quit any running `ubilink-next` (`pgrep -x ubilink-next` prints nothing) and the
-  Tauri `ubilink` app's panel.
+- Quit any running `ubilink` (`pgrep -x ubilink` prints nothing): the GPUI app and the
+  Tauri app share that process name.
 - Do not use the Mac while the run goes. The pasteboard, the key window and the cursor
   are shared, and a click is a focus theft.
 
@@ -179,5 +179,5 @@ dead is terminated after checking its pid still runs the recorded binary. When t
 whole run is over, check that nothing is left:
 
 ```sh
-pgrep -x ubilink-next || echo "nothing running"
+pgrep -x ubilink || echo "nothing running"
 ```

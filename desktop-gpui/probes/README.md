@@ -1,7 +1,7 @@
 # Probe scenarios
 
 Each `<name>.json` here is a scenario that `scripts/probe.py run <name>` runs against
-fresh, isolated automation instances of `ubilink-next` (GPUI Phase 0 R8). The Phase 1
+fresh, isolated automation instances of `ubilink` (GPUI Phase 0 R8). The Phase 1
 spec's `[proof:]` clauses become scenarios in this format, so the format is part of
 the contract. Change it only together with `scripts/probe.py`, and keep
 `scripts/test_probe.py` passing.
