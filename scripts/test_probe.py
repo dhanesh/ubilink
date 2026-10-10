@@ -254,11 +254,11 @@ class BuildProvenance(unittest.TestCase):
             json.dumps({"reason": "compiler-artifact", "target": {"name": "serde", "kind": ["lib"]},
                         "executable": None}),
             "not json",
-            json.dumps({"reason": "compiler-artifact", "target": {"name": "ubilink-next", "kind": ["bin"]},
-                        "executable": "/x/target/debug/ubilink-next", "fresh": True}),
+            json.dumps({"reason": "compiler-artifact", "target": {"name": "ubilink", "kind": ["bin"]},
+                        "executable": "/x/target/debug/ubilink", "fresh": True}),
             json.dumps({"reason": "build-finished", "success": True}),
         ])
-        self.assertEqual(probe.executable_from_cargo_json(out), "/x/target/debug/ubilink-next")
+        self.assertEqual(probe.executable_from_cargo_json(out), "/x/target/debug/ubilink")
         self.assertIsNone(probe.executable_from_cargo_json('{"reason": "build-finished"}'))
 
     def test_source_revision_reports_dirty_build_inputs_only(self):
@@ -285,7 +285,7 @@ class BuildProvenance(unittest.TestCase):
             cache, run_dir, bindir = d / "cache", d / "run", d / "bin"
             for x in (cache, run_dir, bindir):
                 x.mkdir()
-            exe = d / "built-ubilink-next"
+            exe = d / "built-ubilink"
             exe.write_bytes(b"binary from this commit")
             probe_log = d / "lock-seen"
             # A fake cargo: records whether target.lock is held while it "builds",
@@ -302,7 +302,7 @@ class BuildProvenance(unittest.TestCase):
                     held = "held"
                 open({str(probe_log)!r}, "w").write(held)
                 print(json.dumps({{"reason": "compiler-artifact",
-                                  "target": {{"name": "ubilink-next", "kind": ["bin"]}},
+                                  "target": {{"name": "ubilink", "kind": ["bin"]}},
                                   "executable": {str(exe)!r}}}))
             """))
             fake.chmod(0o755)
@@ -341,7 +341,7 @@ class ReleaseInstance(unittest.TestCase):
 
     def test_release_instance_launches_and_stops(self):
         # A stand-in "release binary" that creates its single-instance socket path
-        # the way ubilink-next does before GPUI starts, then idles.
+        # the way ubilink does before GPUI starts, then idles.
         with tempfile.TemporaryDirectory() as d:
             fake = Path(d) / "fake-release"
             fake.write_text(textwrap.dedent("""\
@@ -2093,11 +2093,11 @@ class ReleaseCleanSharedCache(unittest.TestCase):
                 open({str(log)!r}, "a").write(f"{{held}} {{target}} {{auto}}\\n")
                 os.makedirs(os.path.join(target, "release"), exist_ok=True)
                 # Both builds write the SAME path, as real cargo does.
-                exe = os.path.join(target, "release", "ubilink-next")
+                exe = os.path.join(target, "release", "ubilink")
                 words = {tokens!r} if (auto or {leak!r}) else ["clean"]
                 open(exe, "w").write("\\n".join(words) + "\\n")
                 print(json.dumps({{"reason": "compiler-artifact",
-                                  "target": {{"name": "ubilink-next", "kind": ["bin"]}},
+                                  "target": {{"name": "ubilink", "kind": ["bin"]}},
                                   "executable": exe}}))
             """)
             with _FakeCargoEnv(d):

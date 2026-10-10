@@ -1,4 +1,4 @@
-//! The app's data directory: the ONE resolver for where ubilink-next keeps its files
+//! The app's data directory: the ONE resolver for where ubilink keeps its files
 //! (spec O1, R8; controller ruling R-i on Task 8).
 //!
 //! Every store MUST go through [`data_dir`]: the graph database
@@ -10,10 +10,11 @@
 //!   a control channel, so it carries no automation surface (TN1 is about the socket
 //!   and verbs). `scripts/probe.py` sets it for every instance it launches, automation
 //!   and release builds alike.
-//! - Otherwise `~/Library/Application Support/org.ubilink.next`: the same place Tauri's
-//!   `app_data_dir()` puts desktop/'s data, but under this app's own bundle id (spec
-//!   D4), so the GPUI app never shares the Tauri app's (`org.dhanesh.ubilink`) data
-//!   before Phase 2 decides on a migration.
+//! - Otherwise `~/Library/Application Support/org.dhanesh.ubilink`: exactly where Tauri's
+//!   `app_data_dir()` put desktop/'s data, under the bundle id this app took over in
+//!   GPUI Phase 2b, with the same file names, so an existing user's graph, plugin
+//!   state and adapters carry over with no migration. This is the user's REAL data:
+//!   probes and tests must set `UBILINK_DATA_DIR`.
 //!
 //! The `graph_dir` fixture (`crate::fixtures`) is separate: a probe-loaded path to a
 //! prepared graph, consulted by the graph opener on top of this directory.
@@ -23,7 +24,7 @@ use std::path::PathBuf;
 
 pub const DATA_DIR_ENV: &str = "UBILINK_DATA_DIR";
 /// The bundle id the default data dir is named after (Info.plist, bundle-next.sh).
-pub const BUNDLE_ID: &str = "org.ubilink.next";
+pub const BUNDLE_ID: &str = "org.dhanesh.ubilink";
 
 /// Where this process keeps its data. Not created here: the store that first writes
 /// creates it.
@@ -31,7 +32,7 @@ pub fn data_dir() -> PathBuf {
     let (dir, ignored) = resolve(std::env::var_os(DATA_DIR_ENV), std::env::var_os("HOME"));
     if let Some(bad) = ignored {
         eprintln!(
-            "[ubilink-next] {DATA_DIR_ENV} ignored, must be absolute: {}",
+            "[ubilink] {DATA_DIR_ENV} ignored, must be absolute: {}",
             bad.to_string_lossy()
         );
     }
@@ -90,14 +91,14 @@ mod tests {
     }
 
     #[test]
-    fn data_dir_defaults_to_application_support_under_the_next_bundle_id() {
+    fn data_dir_defaults_to_the_shipping_app_data_dir() {
         let (d, _) = resolve(None, os("/Users/me"));
+        // Phase 2b: the Tauri app's own directory, so existing users keep their graph.
         assert_eq!(
             d,
-            PathBuf::from("/Users/me/Library/Application Support/org.ubilink.next")
+            PathBuf::from("/Users/me/Library/Application Support/org.dhanesh.ubilink")
         );
-        // Never the Tauri app's directory.
-        assert!(!d.to_string_lossy().contains("org.dhanesh.ubilink"));
+        assert!(d.ends_with(BUNDLE_ID));
         // An empty override is no override.
         assert_eq!(resolve(os(""), os("/Users/me")).0, d);
     }
@@ -107,7 +108,7 @@ mod tests {
         let (d, ignored) = resolve(os("rel/data"), os("/Users/me"));
         assert_eq!(
             d,
-            PathBuf::from("/Users/me/Library/Application Support/org.ubilink.next")
+            PathBuf::from("/Users/me/Library/Application Support/org.dhanesh.ubilink")
         );
         assert_eq!(ignored, os("rel/data"));
     }

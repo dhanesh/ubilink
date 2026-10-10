@@ -1,7 +1,7 @@
-//! Single instance: one ubilink-next per user. A second launch connects to the first's
+//! Single instance: one ubilink per user. A second launch connects to the first's
 //! local socket, asks it to show the panel, and exits.
 //!
-//! LaunchServices already folds a second `open ubilink-next.app` into a reopen event
+//! LaunchServices already folds a second `open Ubilink.app` into a reopen event
 //! (handled by `Application::on_reopen` in main.rs); this socket covers what it does not:
 //! running the binary directly, or `open -n`. It is deliberately a different socket from
 //! the automation channel (R6: "separate from the single-instance socket"), and carries
@@ -22,7 +22,7 @@ const SHOW: &str = "show";
 pub fn socket_path() -> PathBuf {
     std::env::var_os(SOCKET_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("org.ubilink.next.instance.sock"))
+        .unwrap_or_else(|| std::env::temp_dir().join("org.dhanesh.ubilink.instance.sock"))
 }
 
 /// The outcome of claiming the instance.

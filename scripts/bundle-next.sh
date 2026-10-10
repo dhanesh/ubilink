@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Build ubilink-next.app — the GPUI shell (desktop-gpui/) — with Apple's own tools only,
-# modelled on scripts/bundle-macos.sh. It ships BESIDE the Tauri Ubilink.app until
-# Phase 2 (spec D4), so it has its own bundle id (org.ubilink.next) and executable
-# (ubilink-next): macOS keys permission grants to the bundle id, and the two apps must
-# never share them. Spec: docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
+# Build Ubilink.app from the GPUI app (desktop-gpui/) with Apple's own tools only,
+# modelled on scripts/bundle-macos.sh. Since GPUI Phase 2b the GPUI app carries the
+# shipping identity: executable `ubilink`, bundle id org.dhanesh.ubilink (the Tauri
+# app's, so macOS permission grants and the data dir carry over). This dev-only script
+# is a stop-gap until the Phase 2b bundler replaces it.
+# Spec: docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
 #
 #   bundle-next.sh dev   host-arch app signed with the same stable self-signed identity
 #                        as bundle-macos.sh, so macOS keeps Accessibility/Automation
@@ -16,9 +17,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${1:-dev}"
 
-APP_NAME="ubilink-next"
-EXE="ubilink-next"
-BUNDLE_ID="org.ubilink.next"
+APP_NAME="Ubilink"
+EXE="ubilink"
+BUNDLE_ID="org.dhanesh.ubilink"
 # One version for the whole product: desktop/Cargo.toml stays the source of truth
 # (scripts/version.sh, spec §5) until the Phase 2 cut-over.
 VERSION="$(bash "$ROOT/scripts/version.sh")"
@@ -39,7 +40,7 @@ trap 'rm -rf "$WORK"' EXIT
 case "$MODE" in
   dev) ;;
   dry-run | release)
-    die "mode '$MODE' is not available yet — universal, notarized ubilink-next builds arrive in Phase 2 (use 'dev')"
+    die "mode '$MODE' is not available yet — universal, notarized GPUI builds arrive in Phase 2 (use 'dev')"
     ;;
   *) die "unknown mode '$MODE' (expected dev; dry-run and release arrive in Phase 2)" ;;
 esac

@@ -82,11 +82,11 @@ pub fn start(inbox: Inbox) {
         // string matches into integer compares, so without this the verb names would
         // not appear in the binary and `release-clean` could not prove it sees them.
         Ok(path) => eprintln!(
-            "[ubilink-next] {MARKER}: automation channel listening on {} (verbs: {})",
+            "[ubilink] {MARKER}: automation channel listening on {} (verbs: {})",
             path.display(),
             protocol::VERBS.join(" ")
         ),
-        Err(e) => eprintln!("[ubilink-next] automation channel unavailable: {e}"),
+        Err(e) => eprintln!("[ubilink] automation channel unavailable: {e}"),
     }
 }
 
@@ -102,7 +102,7 @@ fn listen(inbox: Inbox) -> Result<std::path::PathBuf, String> {
                 // S1: the uid check comes before reading a single byte.
                 let peer = socket::peer_uid(&stream);
                 if !socket::peer_allowed(uid, peer) {
-                    eprintln!("[ubilink-next] automation: refused peer uid {peer:?}");
+                    eprintln!("[ubilink] automation: refused peer uid {peer:?}");
                     continue;
                 }
                 let inbox = inbox.clone();

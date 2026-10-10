@@ -143,7 +143,7 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
     let tray = match tray::build() {
         Ok(t) => Some(t),
         Err(e) => {
-            eprintln!("[ubilink-next] tray item unavailable: {e}");
+            eprintln!("[ubilink] tray item unavailable: {e}");
             None
         }
     };
@@ -206,7 +206,7 @@ fn prewarm(cx: &mut App) {
                 let _ = cx.update(|cx| handle.update(cx, |_, window, _| window.remove_window()));
             })
             .detach(),
-        Err(e) => eprintln!("[ubilink-next] panel prewarm failed: {e}"),
+        Err(e) => eprintln!("[ubilink] panel prewarm failed: {e}"),
     }
 }
 
@@ -236,7 +236,7 @@ pub fn state(cx: &mut App) -> ShellState {
 fn log_state(cx: &mut App) {
     let s = state(cx);
     if let Ok(json) = serde_json::to_string(&s) {
-        eprintln!("[ubilink-next] shell state: {json}");
+        eprintln!("[ubilink] shell state: {json}");
     }
 }
 
@@ -348,7 +348,7 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
     let (handle, view) = match opened {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[ubilink-next] panel failed to open: {e}");
+            eprintln!("[ubilink] panel failed to open: {e}");
             return;
         }
     };

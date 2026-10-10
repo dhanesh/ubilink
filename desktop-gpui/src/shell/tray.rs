@@ -38,14 +38,14 @@ pub fn build() -> Result<TrayIcon, String> {
         &MenuItem::with_id(ID_BROWSE, "Browse links   ⌘⇧L", true, None),
         &MenuItem::with_id(ID_SETTINGS, "Settings…   ⌘⇧,", true, None),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(ID_QUIT, "Quit ubilink-next", true, None),
+        &MenuItem::with_id(ID_QUIT, "Quit ubilink", true, None),
     ])
     .map_err(|e| format!("tray menu: {e}"))?;
     let icon = Icon::from_rgba(link_glyph(ICON_PX), ICON_PX, ICON_PX)
         .map_err(|e| format!("tray icon: {e}"))?;
     TrayIconBuilder::new()
-        .with_id("ubilink-next-tray")
-        .with_tooltip("ubilink-next — ⌘⇧K to capture a link")
+        .with_id("ubilink-tray")
+        .with_tooltip("Ubilink — ⌘⇧K to capture a link")
         .with_menu(Box::new(menu))
         // Template image: macOS recolours it for light/dark menu bars, as the Tauri
         // shell's ubilink-link.png does.

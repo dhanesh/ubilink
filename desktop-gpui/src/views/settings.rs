@@ -861,10 +861,8 @@ mod tests {
     use ubilink_core::{AdapterRegistry, GraphStats, LinkGraph, PanelBackend, UbilinkService};
 
     fn temp_state(tag: &str) -> AppState {
-        let dir = std::env::temp_dir().join(format!(
-            "ubilink-next-settings-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ubilink-settings-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         AppState {
