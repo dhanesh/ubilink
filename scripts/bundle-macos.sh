@@ -365,6 +365,9 @@ verify_outputs() {
 }
 
 build_binary
+# Before anything is signed or sent to Apple's notary service; verify_outputs checks
+# the packaged copy again.
+check_no_automation "$BIN"
 assemble_app
 case "$MODE" in
   dev) sign_app "$(ensure_dev_identity)" ;;

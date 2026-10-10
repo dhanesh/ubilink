@@ -161,7 +161,6 @@ pub fn stats_text(stats: &GraphStats) -> String {
     )
 }
 
-/// The stats Label when the counts cannot be read (U3).
 /// The version Label, `Ubilink <version>` (B1: the Tauri panel's Settings footer,
 /// `renderVersion`), so a bug report can name the build. The crate version is the app
 /// version (scripts/version.sh reads this crate's Cargo.toml), and the RC checklist in
@@ -170,6 +169,7 @@ pub fn version_text() -> String {
     format!("Ubilink {}", env!("CARGO_PKG_VERSION"))
 }
 
+/// The stats Label when the counts cannot be read (U3).
 pub fn stats_error_message(e: &str) -> String {
     format!("Couldn't read the graph: {e}. Reopen Settings to try again.")
 }
