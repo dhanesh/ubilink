@@ -569,7 +569,6 @@ impl SettingsView {
             .id("launch-at-login-label")
             .relative()
             .flex_shrink_0()
-            .text_sm()
             .text_color(foreground)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.set_launch_at_login(!on, cx)))
@@ -587,7 +586,9 @@ impl SettingsView {
             .flex_row()
             .items_center()
             .gap(spacing::S2)
-            .text_size(font_size::ROW)
+            // The label, its status and the explanation share one size: the Tauri
+            // settings' meta size (`.set-pill`, `.set-sub`: --fs-meta).
+            .text_size(font_size::META)
             .child(switch)
             .child(label)
             .when_some(status, |this, status| {
