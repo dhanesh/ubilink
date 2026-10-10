@@ -2,7 +2,7 @@
 
 - id: copy-link
 - proven: no
-- anchors: probes/copy-link.json, probes/fixtures/capture-ok.json
+- anchors: probes/copy-link.json, probes/copy-dismiss.json, probes/fixtures/capture-ok.json
 - constraints: linking-manifesto-app:U2
 
 ## What it is
@@ -29,14 +29,22 @@ not just that it changed.
 
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name copy-link
-echo "exit $?"
+SCENARIOS="copy-link copy-dismiss"
+for name in $SCENARIOS; do
+  python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
+  echo "$name exit $?"
+done
 ```
 
-Expected: exit 0. `$OUT/copy-link/result.json`'s `verdict` is `"PASS"`;
+Expected: both exit 0. `$OUT/copy-link/result.json`'s `verdict` is `"PASS"`;
 `transcript.txt` shows a PASS line for each of "Enter: pbpaste prints the fixture
 URI, change count higher" and "Cmd-C: pbpaste prints the fixture URI, change count
 higher", with a "fresh instance for the Cmd-C round" `restart` line between them.
+
+`$OUT/copy-dismiss/result.json`'s `verdict` is `"PASS"`; `transcript.txt` shows PASS
+for "Enter: still visible on capture ~1 s after the copy", "Enter: the panel hides by
+itself within ~3 s of the key", "Enter: window left the screen" and the same three
+"Cmd-C: ..." lines.
 
 ## Proof
 
@@ -54,19 +62,34 @@ higher", with a "fresh instance for the Cmd-C round" `restart` line between them
   `capture-ok.json` replayed), so it cannot be passing only because the Enter round
   left the panel in a convenient state.
 - **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+- **Self-dismiss (Phase 2 parity, `copy-dismiss`).** After each copy key the Copied
+  Label is still shown and the panel still visible about 1 s later, then within about
+  3 s of the key the panel hides by itself: `shell.visible` false and route null,
+  `window_id` refuses, and `winframe: gone` sees the window leave Quartz's on-screen
+  list. The pasteboard still holds the URI afterwards.
 
-Record it (SKILL.md, Evidence):
+Record it (SKILL.md, Evidence). Each feature has one evidence record per head, so
+both scenarios go into **one** `verify_evidence.py record` call, each scenario's
+artifacts renamed to a unique prefix first, and `--result` is `fail` if **either**
+scenario's exit is not 0 (browser-navigation.md explains why).
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
-R="$OUT/copy-link"
-RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
+mkdir -p "$WT/.verify-run/$INSTANCE"
+REC="$(mktemp -d "$WT/.verify-run/$INSTANCE/record-copy-link.XXXXXX")"
+RESULT=pass
+for name in $SCENARIOS; do
+  R="$OUT/$name"
+  e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
+  [ "$e" -eq 0 ] || RESULT=fail
+  for f in "$R"/*; do cp "$f" "$REC/$name-$(basename "$f")"; done
+done
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature copy-link \
   --verifier "$VERIFIER" --result "$RESULT" \
-  --action "scenario copy-link (desktop-gpui/probes/copy-link.json) on instance $INSTANCE" \
-  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
-  --side-effect "pasteboard carries the fixture's exact URI after each round; opened sink stayed []; see result.json" \
-  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+  --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
+  --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
+  --side-effect "pasteboard carries the fixture's exact URI after each round of both scenarios; opened sink stayed []; see each scenario's renamed result.json" \
+  $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
 ## Gotchas
@@ -82,3 +105,7 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
 - This feature is Phase 1 work: today's stub never reaches a `captured` phase
   (phase stays `"stub"`), so `scenario --name copy-link` exits 1 at its first `see`
   until Phase 1 lands.
+- `copy-dismiss` is a Phase 2 parity scenario: on the Phase 1 head (5017f5b) it exits
+  1 at "Enter: the panel hides by itself within ~3 s of the key" (the panel stays
+  open after a copy) until Phase 2 lands. Its timing is from the key press and
+  approximate; an implementation should hold Copied about 1.2-1.5 s.

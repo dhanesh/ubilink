@@ -1,0 +1,246 @@
+{
+  "description": "Phase 2 parity: after Enter (and, on a fresh instance, Cmd-C) copies the captured URI, the Copied confirmation shows, the panel stays up with it for at least ~1 s, then hides by itself within ~3 s of the key (state, window_id and Quartz all agree), and the pasteboard holds the URI",
+  "requirement": "P2-copy-dismiss (GPUI Phase 2 parity, Tauri dist/panel.js confirmCopy: copy, then dismiss_panel)",
+  "notes": [
+    "Tauri dismisses straight after copying (U2: done in two actions, get out of the way). The README contract adds that the Copied Label stays visible at least 1 s before a self-dismiss, so a user sees the confirmation; copy-link.json (Copied visible after the key, pasteboard read) stays valid alongside this.",
+    "Timing: the Copied node is awaited, then the pasteboard is read, then sleep 700 ms; with the a11y poll and the steps' own overhead the visibility check lands at about 1 s after the key. It is deliberately a little under 1 s so a correct implementation that hides at exactly 1.0 s is not flaky. Implementations should hold the confirmation about 1.2-1.5 s.",
+    "'Hides within 3 s' is measured from the key press and is approximate: the hidden check retries for 2000 ms after the ~1 s visible check, so the panel must be gone about 3 s after the key.",
+    "Hidden means three things (panel-dismiss.json): state.shell.visible false and route null, window_id refuses (no panel), and the window number winframe recorded is gone from Quartz's on-screen list.",
+    "The Cmd-C round runs after a restart so it does not depend on the Enter round's dismissal.",
+    "Each round is a block: if another app steals focus during a visibility check, the probe re-runs the round once from a closed panel."
+  ],
+  "setup": {
+    "fixtures": {
+      "capture": "capture-ok.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "Enter: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce",
+      "block": "enter"
+    },
+    {
+      "name": "Enter: open the capture view",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      },
+      "block": "enter"
+    },
+    {
+      "name": "Enter: captured URI shown",
+      "see": {
+        "role": "Label",
+        "text": "https://example.com/"
+      },
+      "route": "capture",
+      "timeout_ms": 3000,
+      "block": "enter"
+    },
+    {
+      "name": "Enter: panel on screen (records its window number)",
+      "winframe": "any",
+      "block": "enter"
+    },
+    {
+      "name": "Enter: copy",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      },
+      "block": "enter"
+    },
+    {
+      "name": "Enter: a11y Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000,
+      "block": "enter"
+    },
+    {
+      "name": "Enter: pbpaste prints the fixture URI, change count higher",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "changed": true,
+      "block": "enter"
+    },
+    {
+      "name": "Enter: hold ~1 s",
+      "sleep_ms": 700,
+      "block": "enter"
+    },
+    {
+      "name": "Enter: still visible on capture ~1 s after the copy",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      },
+      "block": "enter"
+    },
+    {
+      "name": "Enter: Copied still shown ~1 s after the copy",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "route": "capture",
+      "timeout_ms": 0,
+      "block": "enter"
+    },
+    {
+      "name": "Enter: the panel hides by itself within ~3 s of the key",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "enter"
+    },
+    {
+      "name": "Enter: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "enter"
+    },
+    {
+      "name": "Enter: window left the screen",
+      "winframe": "gone",
+      "block": "enter"
+    },
+    {
+      "name": "Enter: the pasteboard still holds the URI",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "block": "enter"
+    },
+    {
+      "name": "fresh instance for the Cmd-C round",
+      "restart": true
+    },
+    {
+      "name": "Cmd-C: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce",
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: open the capture view",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      },
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: captured URI shown",
+      "see": {
+        "role": "Label",
+        "text": "https://example.com/"
+      },
+      "route": "capture",
+      "timeout_ms": 3000,
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: panel on screen (records its window number)",
+      "winframe": "any",
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: copy",
+      "call": "key",
+      "args": {
+        "keys": "cmd-c"
+      },
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: a11y Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000,
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: pbpaste prints the fixture URI, change count higher",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "changed": true,
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: hold ~1 s",
+      "sleep_ms": 700,
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: still visible on capture ~1 s after the copy",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      },
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: Copied still shown ~1 s after the copy",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "route": "capture",
+      "timeout_ms": 0,
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: the panel hides by itself within ~3 s of the key",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: window left the screen",
+      "winframe": "gone",
+      "block": "cmd-c"
+    },
+    {
+      "name": "Cmd-C: the pasteboard still holds the URI",
+      "pasteboard": "read",
+      "expect": "https://example.com/",
+      "block": "cmd-c"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

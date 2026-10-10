@@ -2,7 +2,7 @@
 
 - id: capture-view
 - proven: no
-- anchors: src/views/capture.rs:CaptureView, src/views/capture.rs:State, src/views/mod.rs:ViewState, src/fixtures.rs, probes/capture-view.json, probes/fixtures/capture-delayed.json, probes/fixtures/capture-failed.json
+- anchors: src/views/capture.rs:CaptureView, src/views/capture.rs:State, src/views/mod.rs:ViewState, src/fixtures.rs, probes/capture-view.json, probes/capture-permission-route.json, probes/fixtures/capture-delayed.json, probes/fixtures/capture-failed.json
 - constraints: linking-manifesto-app:B1, linking-manifesto-app:U3
 
 ## What it is
@@ -32,17 +32,25 @@ name and URI, the error sentence, the `opened` sink — not a sample of them.
 
 ```sh
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
-python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name capture-view
-echo "exit $?"
+SCENARIOS="capture-view capture-permission-route"
+for name in $SCENARIOS; do
+  python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
+  echo "$name exit $?"
+done
 ```
 
-Expected: exit 0. `$OUT/capture-view/result.json`'s `verdict` is `"PASS"` and
+Expected: both exit 0. `$OUT/capture-view/result.json`'s `verdict` is `"PASS"` and
 `counts.failed` is 0; `transcript.txt` shows one PASS line per step, including "a11y
 Capturing node while the capture is pending", "captured: name and URI in the a11y
 tree", "a11y error node states the failure and the next step (verbatim fixture
 text)" and "nothing launched". The per-step JSON files under `$OUT/capture-view/`
 hold each step's request/response, so a verifier can read the exact `view.phase`
 value and a11y dump at each point without re-driving it.
+
+`$OUT/capture-permission-route/result.json`'s `verdict` is `"PASS"`; `transcript.txt`
+shows PASS for "automation missing: the failed capture routes to onboarding",
+"automation missing: same window id", "automation granted: still on capture, phase
+failed" and "automation granted: no onboarding steps".
 
 ## Proof
 
@@ -64,20 +72,36 @@ value and a11y dump at each point without re-driving it.
   capture shown with the error" requires the prior fixture's name to be absent;
   `view.phase` reads `"failed"`.
 - **Side effect.** "nothing launched" requires the `opened` sink to equal `[]`.
+- **Permission route (Phase 2 parity, `capture-permission-route`).** A failed capture
+  whose permission report (the `permission` fixture, the one onboarding reads) says
+  Automation is not granted switches the same window (saved `window_id`, unchanged
+  process) to route `onboarding` with its steps listed and nothing opened; after a
+  `restart` with `permissions-all-granted.json` the same failure stays on route
+  `capture`, `view.phase` `"failed"`, message verbatim, a second later. The no-report
+  case is this feature's own `capture-view.json` failure half (stays on capture).
 
-Record it (SKILL.md, Evidence) by pinning `result.json` and every file in
-`$OUT/capture-view/`:
+Record it (SKILL.md, Evidence). Each feature has one evidence record per head, so
+both scenarios go into **one** `verify_evidence.py record` call, each scenario's
+artifacts renamed to a unique prefix first, and `--result` is `fail` if **either**
+scenario's exit is not 0 (browser-navigation.md explains why).
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
-R="$OUT/capture-view"
-RESULT=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("pass" if r["exit"]==0 else "fail")' "$R/result.json")
+mkdir -p "$WT/.verify-run/$INSTANCE"
+REC="$(mktemp -d "$WT/.verify-run/$INSTANCE/record-capture-view.XXXXXX")"
+RESULT=pass
+for name in $SCENARIOS; do
+  R="$OUT/$name"
+  e=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit"])' "$R/result.json")
+  [ "$e" -eq 0 ] || RESULT=fail
+  for f in "$R"/*; do cp "$f" "$REC/$name-$(basename "$f")"; done
+done
 python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "$INSTANCE" --feature capture-view \
   --verifier "$VERIFIER" --result "$RESULT" \
-  --action "scenario capture-view (desktop-gpui/probes/capture-view.json) on instance $INSTANCE" \
-  --observed "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$R/result.json")" \
-  --side-effect "opened sink stayed [] across both the success and the failure path; see result.json" \
-  $(for f in "$R"/*; do printf -- '--artifact %s ' "$f"; done)
+  --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
+  --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
+  --side-effect "opened sink stayed [] on the success, failure and permission-route paths; see each scenario's renamed result.json" \
+  $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
 `RESULT` above is read straight from `result.json`'s own `exit` field (ruling
@@ -95,3 +119,7 @@ automatically; name the transcript's failing step in `--observed` when it does.
   never shows a Capturing/captured/failed sequence, so `scenario --name
   capture-view` exits 1 at its first `view.phase` check until Phase 1 lands.
   `proven: no` stays until then.
+- `capture-permission-route` is a Phase 2 parity scenario: on the Phase 1 head
+  (5017f5b) it exits 1 at "automation missing: the failed capture routes to
+  onboarding" (route stays `capture`) until Phase 2 lands the Tauri `capture-err`
+  routing.
