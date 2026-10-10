@@ -1,0 +1,127 @@
+{
+  "description": "Parity: the capture panel fits its backlinks. With the subject's 3 backlinks (graph-backlinks.json), and again with 4 after graph-backlinks-newer.json is merged, the last backlink row lies inside the backlinks' scroll box and the box inside the window, so no row is cut off.",
+  "requirement": "P2-capture-fit (GPUI Phase 2b parity, Tauri ee80e70:dist/panel.js fitWindow/desiredHeight for the capture view)",
+  "notes": [
+    "Measured layout (views/layout.rs): view.layout.last_backlink (the last row), view.layout.backlinks_box (the list's scroll box) and view.layout.viewport, in window points from one frame, compared with {\"path\": ...} operands.",
+    "Tauri sized the window to the capture view's content (scrollHeight). At a fixed 140 pt the third backlink row is cut by the panel's bottom padding and later rows scroll out of sight.",
+    "Fails before the fix (on the instrumentation commit) at '3 backlinks: the last row is fully visible'."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "capture": "capture-subject.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "capture the subject",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "3 backlinks listed",
+      "see": {
+        "sequence": {
+          "role": "ListItem",
+          "texts": [
+            "https://gamma.example/three",
+            "https://beta.example/two",
+            "https://alpha.example/one"
+          ],
+          "mode": "exact",
+          "deep": true
+        }
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "3 backlinks: the last row is fully visible",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_backlink.y": {
+          "ge": 0
+        },
+        "view.layout.last_backlink.bottom": {
+          "le": {
+            "path": "view.layout.backlinks_box.bottom"
+          }
+        },
+        "view.layout.backlinks_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "3 backlinks: the panel is on its display",
+      "winframe": "state"
+    },
+    {
+      "name": "hide",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false
+      }
+    },
+    {
+      "name": "merge a newer backlink",
+      "seed_graph": "graph-backlinks-newer.json"
+    },
+    {
+      "name": "capture again",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "4 backlinks listed",
+      "see": {
+        "role": "ListItem"
+      },
+      "route": "capture",
+      "timeout_ms": 3000,
+      "count": 4
+    },
+    {
+      "name": "4 backlinks: the last row is fully visible",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_backlink.y": {
+          "ge": 0
+        },
+        "view.layout.last_backlink.bottom": {
+          "le": {
+            "path": "view.layout.backlinks_box.bottom"
+          }
+        },
+        "view.layout.backlinks_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "4 backlinks: the panel is on its display",
+      "winframe": "state"
+    }
+  ]
+}

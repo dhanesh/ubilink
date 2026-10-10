@@ -97,7 +97,8 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
-    /// Measured places and text sizes (`views::layout`): `viewport`, `last_adapter`,
+    /// Measured places and text sizes (`views::layout`): `viewport`, the adapter
+    /// grid's scroll box (`adapters_box`) and its last switch (`last_adapter`),
     /// the action buttons (`export_button`, `import_button`, `reset_button`, and while
     /// the reset question shows `reset_confirm_button`, `reset_cancel_button`), and the
     /// launch-at-login `login_label` / `login_status` text sizes.
@@ -1052,18 +1053,29 @@ impl Render for SettingsView {
             })
             .child(login_row)
             .child(
+                // The grid's scroll box, wrapped so its own place can be measured (a
+                // canvas inside it would scroll with the switches).
                 div()
-                    .id("settings-adapters")
+                    .relative()
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .content_start()
-                    .gap_x(ADAPTER_GAP)
-                    .gap_y(ADAPTER_GAP)
-                    .children(switches),
+                    .child(
+                        div()
+                            .id("settings-adapters")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .content_start()
+                            .gap_x(ADAPTER_GAP)
+                            .gap_y(ADAPTER_GAP)
+                            .children(switches),
+                    )
+                    .child(LAYOUT.bounds("adapters_box")),
             )
             .child(
                 div()

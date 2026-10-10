@@ -26,6 +26,7 @@
 //! it), and settled only by the newest view's capture, so a stale result from an
 //! earlier show can never overwrite a newer one.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -36,6 +37,7 @@ use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
 use super::escape::{self, EscapeAction, EscapeState};
+use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
@@ -105,6 +107,10 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
+    /// Measured places (`views::layout`): `viewport`, the backlinks' scroll box
+    /// (`backlinks_box`) and its last row (`last_backlink`), when there are backlinks.
+    #[serde(default)]
+    pub layout: BTreeMap<String, serde_json::Value>,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -113,11 +119,15 @@ pub fn state() -> super::ViewState {
         view: Route::Capture.as_str().into(),
         phase: lock().phase.into(),
         theme_samples: SAMPLES.get(),
+        layout: LAYOUT.get(),
     })
 }
 
 /// The newest capture view's theme sample regions (R14), written at prepaint.
 static SAMPLES: Samples = Samples::new();
+
+/// The newest capture view's measured layout (`views::layout`), written at prepaint.
+static LAYOUT: Layout = Layout::new();
 
 /// The copy button's label (R2's click path; Enter and ⌘C are the keyboard path).
 pub const COPY_BUTTON: &str = "Copy link";
@@ -602,6 +612,9 @@ fn backlinks_section(
                 .gap(spacing::S3)
                 .w_full()
                 .min_w_0()
+                .when(ix + 1 == count, |d| {
+                    d.relative().child(LAYOUT.bounds("last_backlink"))
+                })
                 .child(
                     div()
                         .flex_shrink_0()
@@ -642,16 +655,27 @@ fn backlinks_section(
                 .child(text!(BACKLINKS_HEADING)),
         )
         .child(
+            // The scroll box, wrapped so its own place can be measured (a canvas
+            // inside it would scroll with the rows).
             div()
-                .id("backlinks")
-                .role(Role::List)
+                .relative()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .children(rows),
+                .child(
+                    div()
+                        .id("backlinks")
+                        .role(Role::List)
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .children(rows),
+                )
+                .child(LAYOUT.bounds("backlinks_box")),
         )
         .into_any_element()
 }
@@ -663,6 +687,7 @@ impl Render for CaptureView {
             window.focus(&self.focus, cx);
         }
         SAMPLES.clear();
+        LAYOUT.clear();
         self.appearance.ensure(window, cx);
         let copied = self.copied;
         let captured = matches!(self.phase, Phase::Captured { .. });
