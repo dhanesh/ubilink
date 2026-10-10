@@ -756,12 +756,8 @@ impl Render for CaptureView {
                         this.open_backlink(row, cx);
                         cx.stop_propagation();
                     }
-                    Some(KeyAction::Copy) => {
-                        if this.copy(cx) {
-                            cx.stop_propagation();
-                        }
-                    }
-                    None => {}
+                    Some(KeyAction::Copy) if this.copy(cx) => cx.stop_propagation(),
+                    Some(KeyAction::Copy) | None => {}
                 }
             }))
             .size_full()
