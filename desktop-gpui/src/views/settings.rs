@@ -655,8 +655,12 @@ impl SettingsView {
         if let Ok(path) = &result {
             let (program, args) = reveal_command(Path::new(path));
             // Best effort, as Tauri's: the file is written whether or not Finder opens.
-            if let Err(e) = std::process::Command::new(program).args(args).spawn() {
-                eprintln!("[ubilink] couldn't reveal the export in Finder: {e}");
+            // `open` returns at once; reap it off the main thread so no zombie stays.
+            match std::process::Command::new(program).args(args).spawn() {
+                Ok(mut child) => {
+                    std::thread::spawn(move || child.wait());
+                }
+                Err(e) => eprintln!("[ubilink] couldn't reveal the export in Finder: {e}"),
             }
         }
         self.show(export_message(&result), cx);
