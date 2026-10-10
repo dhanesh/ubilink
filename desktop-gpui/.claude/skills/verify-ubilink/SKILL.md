@@ -415,8 +415,8 @@ entry names in `SCENARIOS`:
 ```sh
 FEATURE=shell
 SCENARIOS="shell"
-REC="$WT/.verify-run/$INSTANCE/record-$FEATURE"
-rm -rf "$REC"; mkdir -p "$REC"
+mkdir -p "$WT/.verify-run/$INSTANCE"
+REC="$(mktemp -d "$WT/.verify-run/$INSTANCE/record-$FEATURE.XXXXXX")"
 RESULT=pass
 OBSERVED=""
 for name in $SCENARIOS; do

@@ -85,8 +85,8 @@ scenario's exit code (both, except at the first task's head: see Drive it):
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
-REC="$WT/.verify-run/$INSTANCE/record-link-browser"
-rm -rf "$REC"; mkdir -p "$REC"
+mkdir -p "$WT/.verify-run/$INSTANCE"
+REC="$(mktemp -d "$WT/.verify-run/$INSTANCE/record-link-browser.XXXXXX")"
 RESULT=pass
 for name in $SCENARIOS; do
   R="$OUT/$name"
