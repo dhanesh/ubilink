@@ -148,6 +148,8 @@ const ADAPTER_W: Pixels = px(140.);
 const ADAPTER_H: Pixels = px(16.);
 const ADAPTER_GAP: Pixels = spacing::S2;
 const HINT_H: Pixels = px(18.);
+/// A plain or danger action button's side padding (the Tauri `--pad-control`, 14 px).
+const BUTTON_PAD_X: Pixels = px(14.);
 
 /// What Settings' height depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -723,10 +725,20 @@ impl SettingsView {
                 }
             }))
             .map(|d| {
+                // One height for every action button, as the Tauri panel's `.set-btn`
+                // (6 pt + 14 pt padding around 13 pt text: 28 pt). Export keeps its
+                // accent look and wider padding (the R14 accent sample needs the fill).
                 let button = match look {
                     Look::Accent => theming::accent_button(id),
-                    Look::Plain => Button::new(id).small(),
-                    Look::Danger => Button::new(id).small().danger(),
+                    Look::Plain => Button::new(id)
+                        .small()
+                        .h(theming::ACCENT_H)
+                        .px(BUTTON_PAD_X),
+                    Look::Danger => Button::new(id)
+                        .small()
+                        .danger()
+                        .h(theming::ACCENT_H)
+                        .px(BUTTON_PAD_X),
                 }
                 .label(label)
                 .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)));
