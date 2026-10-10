@@ -470,7 +470,8 @@ a `text!` element (role `Label`).
   `Requires approval`, `Not registered`, `Not found` (`login_item::Status::label`);
   with requires-approval or not-found, a Label with the report's `explanation`
   verbatim. The switch is on for Enabled and Requires approval, off otherwise. See the
-  launch-at-login seam below.
+  launch-at-login seam below. A Label exactly `Ubilink <version>`, the crate version
+  (Phase 2b, the Tauri panel's settings footer).
 
 ### Launch-at-login seam (R13, spec D6, ruling R-o)
 
