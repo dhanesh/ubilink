@@ -88,8 +88,8 @@ is what the measured timings in
 
 - Quit apps that pop windows or take focus on their own: mail and chat clients,
   updaters, IDEs that steal focus on build, video calls, password managers' prompts.
-- Quit any running `ubilink` (`pgrep -x ubilink` prints nothing): the GPUI app and the
-  Tauri app share that process name.
+- Quit any running `ubilink` (`pgrep -x ubilink` prints nothing): an installed
+  Ubilink.app owns the global hotkeys and the default single-instance socket.
 - Do not use the Mac while the run goes. The pasteboard, the key window and the cursor
   are shared, and a click is a focus theft.
 
@@ -101,7 +101,7 @@ host will run in:
 
 ```sh
 # need >= 15 GB free first. Safe to free once CARGO_TARGET_DIR is set: the per-crate target dirs
-#   rm -rf desktop/target src-tauri/target registry/target app/target desktop-gpui/target
+#   rm -rf src-tauri/target registry/target app/target desktop-gpui/target
 # Never seed or merge the shared dir by copying other target dirs (that caused E0463).
 export CARGO_TARGET_DIR="$HOME/Library/Caches/ubilink-probe/target"
 export CARGO_INCREMENTAL=0
@@ -120,8 +120,7 @@ find "$CARGO_TARGET_DIR"/{debug,release} -maxdepth 2 -name '*ubilink*' -exec rm 
 
 Check free disk space first: the shared target dir needs at least 15 GB free before
 it is warmed. Once `CARGO_TARGET_DIR` is exported, the old per-crate target dirs
-(`desktop/target`, `src-tauri/target`, `registry/target`, `app/target`,
-`desktop-gpui/target`) are no longer used and are safe to remove to make room. Never
+(`src-tauri/target`, `registry/target`, `app/target`, `desktop-gpui/target`) are no longer used and are safe to remove to make room. Never
 seed or merge the shared dir by copying in another target dir's contents — mixing
 build metadata from different target dirs this way is what caused E0463 in an
 earlier run.

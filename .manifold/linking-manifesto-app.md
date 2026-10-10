@@ -23,11 +23,12 @@ extended per-app by community integrations.
 **Architectural decisions locked in m1:**
 - **Framework:** Tauri (Rust core for OS automation + the link graph; web UI; capability-gated IPC).
   **Desktop shell superseded 2026-10-04 (D22):** the UI panel was the Tauri webview
-  (D8/D11); it is now a native GPUI shell (`desktop-gpui/`, building `ubilink-next.app`)
-  — no second WebKit process, no bundler step. `desktop/` (Tauri) keeps shipping and
-  keeps passing `make verify` until Phase 2 removes it; command logic for both shells
-  lives in a GUI-free `app/` crate neither `tauri` nor `gpui` depend on, so the Rust
-  core/broker architecture (T1) is otherwise unchanged. See D22/D23.
+  (D8/D11); it is now a native GPUI app (`desktop-gpui/`, building `Ubilink.app`)
+  — no second WebKit process, no bundler step. Since the Phase 2b cutover (2026-10-10,
+  D24) it is the only app: the Tauri shell (`desktop/`) and its web panel (`dist/`) are
+  deleted. Command logic lives in a GUI-free `app/` crate with no `tauri` or `gpui`
+  dependency, so the Rust core/broker architecture (T1) is otherwise unchanged. See
+  D22/D23/D24.
 - **Extensibility:** third-party integrations = declarative manifest + sandboxed JS, distributed as installable bundles.
 - **Platform scope:** macOS-first with deep fidelity in v1; core is platform-agnostic so Windows/Linux are adapters, not rewrites.
 - **License:** MIT.
