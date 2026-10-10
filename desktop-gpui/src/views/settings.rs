@@ -66,14 +66,15 @@
 //! buttons use the same wrapper for Enter/Space.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use objc2::MainThreadMarker;
 use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
@@ -84,6 +85,7 @@ use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
 use crate::login_item::{self, Report, Status};
+use crate::shell::native;
 use crate::theme::tokens::{font_size, radius, spacing};
 
 /// The settings route's view-state, for Task 6's automation `state` verb.
@@ -441,27 +443,33 @@ mod sm_app_service {
     }
 }
 
-/// Where a release build's save dialog starts: Downloads (the Tauri app's export
-/// folder), else home.
-fn export_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+/// Where a release build's Export writes, as the Tauri app's did: `home`'s Downloads
+/// folder, else `home` itself.
+pub fn export_dir_in(home: &Path) -> PathBuf {
     let downloads = home.join("Downloads");
     if downloads.is_dir() {
         downloads
     } else {
-        home
+        home.to_path_buf()
     }
 }
 
-/// The save dialog's suggested name, stamped like the Tauri app's export file.
-fn export_file_name() -> String {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("ubilink-export-{stamp}.json")
+/// The user's export folder ([`export_dir_in`] of `$HOME`).
+fn export_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    export_dir_in(&home)
+}
+
+/// The command that shows `path` selected in a Finder window (the Tauri app's
+/// `open -R <path>` after an export): a program and its argv, never a shell line, so
+/// the path is one argument whatever it contains.
+pub fn reveal_command(path: &Path) -> (&'static str, Vec<OsString>) {
+    (
+        "/usr/bin/open",
+        vec![OsString::from("-R"), path.as_os_str().into()],
+    )
 }
 
 /// An automation build never opens a real file dialog on the host (O4).
@@ -498,8 +506,11 @@ pub struct SettingsView {
     focused: bool,
     /// Reset was pressed and the confirmation is showing; nothing is deleted yet.
     confirming_reset: bool,
-    /// The open save/open dialog, if any; dropped (cancelled) with the view.
+    /// The open file dialog's task, if any; dropped (cancelled) with the view.
     _dialog: Task<()>,
+    /// Import's file dialog is up: a second press is ignored rather than stacking
+    /// another dialog.
+    dialog_open: bool,
     /// Launch at login: the status last read (on show) or reported by the last
     /// register/unregister, or the error line to show instead (U3).
     login: Result<Report, String>,
@@ -517,6 +528,7 @@ impl SettingsView {
             focused: false,
             confirming_reset: false,
             _dialog: Task::ready(()),
+            dialog_open: false,
             login: login_status().map_err(|e| login_status_error_message(&e)),
             appearance: FollowAppearance::default(),
             fitted: None,
@@ -624,26 +636,29 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Export: to the `export_path` fixture if set, else where a save dialog says.
+    /// Export: to the `export_path` fixture if set; else, as the Tauri app did, no
+    /// dialog: `ubilink_app::export_graph` writes a stamped file into Downloads (or
+    /// home), Finder reveals it, and the hint line names the path.
     fn export(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = fixtures::path(Fixture::ExportPath) {
             let result = export_to(crate::app_state::get(), &path);
             return self.show(export_message(&result), cx);
         }
         if cfg!(feature = "automation") {
+            // O4: an automation build never writes to the host's Downloads or opens
+            // Finder; a probe loads an `export_path` fixture.
             let e = NO_FIXTURE.replace("{kind}", "export_path");
             return self.show(export_message(&Err(e)), cx);
         }
-        let chosen = cx.prompt_for_new_path(&export_dir(), Some(&export_file_name()));
-        self._dialog = cx.spawn(async move |this, cx| {
-            let result = match chosen.await {
-                Ok(Ok(Some(path))) => export_to(crate::app_state::get(), &path),
-                Ok(Ok(None)) => return,
-                Ok(Err(e)) => Err(format!("couldn't open the save dialog: {e}")),
-                Err(_) => return,
-            };
-            let _ = this.update(cx, |view, cx| view.show(export_message(&result), cx));
-        });
+        let result = ubilink_app::export_graph(crate::app_state::get(), &export_dir());
+        if let Ok(path) = &result {
+            let (program, args) = reveal_command(Path::new(path));
+            // Best effort, as Tauri's: the file is written whether or not Finder opens.
+            if let Err(e) = std::process::Command::new(program).args(args).spawn() {
+                eprintln!("[ubilink] couldn't reveal the export in Finder: {e}");
+            }
+        }
+        self.show(export_message(&result), cx);
     }
 
     /// Import: from the `import_path` fixture if set, else the file an open dialog picks.
@@ -656,6 +671,22 @@ impl SettingsView {
             let e = NO_FIXTURE.replace("{kind}", "import_path");
             return self.show(import_message(&Err(e)), cx);
         }
+        if self.dialog_open {
+            return;
+        }
+        // Why the dance around the dialog: GPUI opens it with
+        // `beginWithCompletionHandler` and neither activates the app nor sets a level.
+        // Ubilink is an accessory app whose panel is a non-activating NSPanel at the
+        // pop-up level (101), so the dialog opened behind the panel, in an inactive
+        // app, and each press stacked another unseen one. So: activate the app, drop
+        // the panel to the normal level while the dialog is up, and on every way out
+        // (a file, Cancel or Escape, an error) put the panel back at its level and make
+        // it key again, so Settings keeps taking Tab and Escape.
+        self.dialog_open = true;
+        if let Some(mtm) = MainThreadMarker::new() {
+            native::lower_panel_for_dialog(mtm);
+        }
+        cx.activate(true);
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -663,16 +694,24 @@ impl SettingsView {
             prompt: Some("Import".into()),
         });
         self._dialog = cx.spawn(async move |this, cx| {
-            let result = match chosen.await {
-                Ok(Ok(Some(paths))) => match paths.first() {
-                    Some(path) => import_from(crate::app_state::get(), path),
-                    None => return,
-                },
-                Ok(Ok(None)) => return,
-                Ok(Err(e)) => Err(format!("couldn't open the file dialog: {e}")),
-                Err(_) => return,
+            let answer = chosen.await;
+            // Outside any update: becoming key notifies GPUI synchronously.
+            if let Some(mtm) = MainThreadMarker::new() {
+                native::restore_panel_after_dialog(mtm);
+            }
+            let result = match answer {
+                Ok(Ok(Some(paths))) => paths
+                    .first()
+                    .map(|path| import_from(crate::app_state::get(), path)),
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(e)) => Some(Err(format!("couldn't open the file dialog: {e}"))),
             };
-            let _ = this.update(cx, |view, cx| view.show(import_message(&result), cx));
+            let _ = this.update(cx, |view, cx| {
+                view.dialog_open = false;
+                if let Some(result) = result {
+                    view.show(import_message(&result), cx);
+                }
+            });
         });
     }
 
@@ -1054,11 +1093,11 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        adapter_columns, content_height, export_message, export_to, import_from, import_message,
-        list_error_message, login_status_error_message, login_toggle_error_message, reset,
-        reset_message, state, stats_error_message, stats_text, toggle, toggle_message,
-        version_text, Content, LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION,
-        RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
+        adapter_columns, content_height, export_dir_in, export_message, export_to, import_from,
+        import_message, list_error_message, login_status_error_message, login_toggle_error_message,
+        reset, reset_message, reveal_command, state, stats_error_message, stats_text, toggle,
+        toggle_message, version_text, Content, LOGIN_SWITCH, NOT_FOUND_EXPLANATION,
+        REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -1109,6 +1148,33 @@ mod tests {
         assert_eq!(h(10, false, true), 188.0 + 14.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
+    }
+
+    /// Export as the Tauri app did: into Downloads when there is one, else home.
+    #[test]
+    fn export_goes_to_downloads_else_home() {
+        let home = std::env::temp_dir().join(format!("ubilink-export-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(export_dir_in(&home), home, "no Downloads: home");
+        std::fs::create_dir_all(home.join("Downloads")).unwrap();
+        assert_eq!(export_dir_in(&home), home.join("Downloads"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The reveal is `open -R <path>` as one argv (no shell), whatever the path holds.
+    #[test]
+    fn reveal_is_open_dash_r_with_the_path_as_one_argument() {
+        let path = std::path::Path::new("/Users/x/Downloads/a b; rm -rf ~ $(x).json");
+        let (program, args) = reveal_command(path);
+        assert_eq!(program, "/usr/bin/open");
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-R"),
+                path.as_os_str().to_os_string()
+            ]
+        );
     }
 
     #[test]

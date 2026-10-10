@@ -19,6 +19,8 @@ use super::placement::{cursor_from_appkit, Display, Rect};
 
 /// NSPopUpWindowLevel (kCGPopUpMenuWindowLevel), the level GPUI gives `WindowKind::PopUp`.
 const POPUP_WINDOW_LEVEL: isize = 101;
+/// NSNormalWindowLevel: where a file dialog opens.
+const NORMAL_WINDOW_LEVEL: isize = 0;
 
 /// Every display in global top-left points, primary first (AppKit lists the menu-bar
 /// screen first), plus the primary's height for the cursor flip.
@@ -93,13 +95,40 @@ pub struct PanelFacts {
 /// one (Task 6 saw this live: `window_id` right after `resign_key` found the closing
 /// panel). NSApp lists windows oldest first, so the newest visible NSPanel is the
 /// current one; callers that need "is a panel open at all" ask the shell first.
+///
+/// File dialogs (NSSavePanel, and NSOpenPanel below it) are NSPanels too; they are
+/// never ours, so they are skipped even while one is newer and on screen.
 fn visible_panel(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     let panel_class = AnyClass::get(c"NSPanel")?;
+    let dialog_class = AnyClass::get(c"NSSavePanel");
     let windows = NSApplication::sharedApplication(mtm).windows();
     (0..windows.count())
         .rev()
         .map(|i| windows.objectAtIndex(i))
-        .find(|w| w.isVisible() && w.isKindOfClass(panel_class))
+        .find(|w| {
+            w.isVisible()
+                && w.isKindOfClass(panel_class)
+                && !dialog_class.is_some_and(|c| w.isKindOfClass(c))
+        })
+}
+
+/// Settings' Import (release builds): before a file dialog opens, drop the panel to
+/// the normal window level, so the dialog (ordered front after it, at the normal
+/// level) is not hidden under a pop-up-level panel. Returns whether there was a panel.
+pub fn lower_panel_for_dialog(mtm: MainThreadMarker) -> bool {
+    visible_panel(mtm)
+        .map(|w| w.setLevel(NORMAL_WINDOW_LEVEL))
+        .is_some()
+}
+
+/// The dialog closed (chosen, cancelled or failed): the panel goes back to its
+/// pop-up level and takes key status again, so Tab and Escape reach Settings. Call
+/// outside any GPUI update: becoming key notifies GPUI synchronously.
+pub fn restore_panel_after_dialog(mtm: MainThreadMarker) {
+    if let Some(w) = visible_panel(mtm) {
+        w.setLevel(POPUP_WINDOW_LEVEL);
+        w.makeKeyWindow();
+    }
 }
 
 /// Inspect the app's visible GPUI panel window, if any.
