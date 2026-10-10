@@ -62,13 +62,16 @@ fn resolve(overridden: Option<OsString>, home: Option<OsString>) -> (PathBuf, Op
 
 /// Automation builds: an instance a probe named (`UBILINK_INSTANCE`) must also have its
 /// own data dir, or it would read and write the user's real graph (O1). Refusing to
-/// start makes a misconfigured harness fail loudly instead of touching real data.
+/// start makes a misconfigured harness fail loudly instead of touching real data. An
+/// empty or relative `UBILINK_DATA_DIR` counts as missing: [`resolve`] ignores it and
+/// would fall back to the real directory.
 #[cfg(feature = "automation")]
 pub fn instance_guard(instance: Option<&OsString>, data: Option<&OsString>) -> Result<(), String> {
-    match (instance, data) {
-        (Some(i), None) => Err(format!(
-            "UBILINK_INSTANCE={} is set but {DATA_DIR_ENV} is not: an automation instance \
-             must have its own data dir (refusing to use the real one)",
+    let usable = data.is_some_and(|d| !d.is_empty() && std::path::Path::new(d).is_absolute());
+    match instance {
+        Some(i) if !usable => Err(format!(
+            "UBILINK_INSTANCE={} is set but {DATA_DIR_ENV} is not an absolute path: an \
+             automation instance must have its own data dir (refusing to use the real one)",
             i.to_string_lossy()
         )),
         _ => Ok(()),
@@ -127,6 +130,11 @@ mod tests {
             .unwrap_err()
             .contains(DATA_DIR_ENV));
         assert!(instance_guard(Some(&inst), Some(&data)).is_ok());
+        // An empty or relative override would resolve to the real dir: refused too.
+        for bad in ["", "rel/data"] {
+            let bad = OsString::from(bad);
+            assert!(instance_guard(Some(&inst), Some(&bad)).is_err());
+        }
         // The maintainer's plain automation run (no instance name) is not a probe.
         assert!(instance_guard(None, None).is_ok());
         assert!(instance_guard(None, Some(&data)).is_ok());
