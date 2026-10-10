@@ -8,7 +8,8 @@
 //! e.g. `export_graph`'s save directory). A shell wraps each function in a thin
 //! `#[tauri::command]`/GPUI-action adapter that supplies those inputs from its own
 //! runtime and keeps the JS-facing command name, argument names and return JSON
-//! shape unchanged (dist/panel.js depends on them — see task-3-report.md).
+//! shape unchanged (desktop-gpui's views read them, as the Tauri web panel retired in
+//! GPUI Phase 2b did — see task-3-report.md).
 //!
 //! What stayed in `desktop/src/main.rs` instead (and why) is also in that report:
 //! window geometry (`resize_panel`, `dismiss_panel`), `restart_app`
