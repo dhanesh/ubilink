@@ -142,7 +142,7 @@ pub fn toggle(state: &ubilink_app::AppState, app: &str, enabled: bool) -> (Strin
     (toggle_message(app, enabled, &result), result.is_err())
 }
 
-/// The stats Label, worded as the Tauri settings view does (B1):
+/// The stats Label, worded as the Tauri settings view was (B1):
 /// `5 links · 3 connections`, `1 link · 1 connection`, `0 links · 0 connections`.
 pub fn stats_text(stats: &GraphStats) -> String {
     fn plural(n: i64) -> &'static str {

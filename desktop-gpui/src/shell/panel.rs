@@ -25,7 +25,7 @@ use super::Route;
 use crate::theme::tokens::radius;
 use crate::views;
 
-/// Panel size in points: the Tauri panel's (desktop/tauri.conf.json, 640x140).
+/// Panel size in points: the Tauri panel's (its tauri.conf.json, 640x140; deleted in D24).
 pub const PANEL_SIZE: (f64, f64) = (640.0, 140.0);
 
 pub fn options(placement: Option<Placement>) -> WindowOptions {

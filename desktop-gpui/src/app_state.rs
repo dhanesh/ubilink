@@ -16,7 +16,7 @@
 //!   automation build skips it and starts `NotDetermined`: probes drive permissions
 //!   through the `permission` fixture seam (`crate::fixtures`, spec O4) and capture
 //!   through the `capture` fixture, so nothing in a probe depends on the real answer.
-//!   A release build probes once at start-up, exactly as the Tauri shell does.
+//!   A release build probes once at start-up, exactly as the Tauri shell did.
 //!
 //! The data dir comes from [`crate::paths::data_dir`] (the one resolver, O1), so a
 //! probe instance's graph is its own `UBILINK_DATA_DIR/ubilink-graph.sqlite`, the file
@@ -82,7 +82,7 @@ fn shared() -> &'static Shared {
 
 /// The automation permission the service starts with. An automation build never
 /// runs `runner` (I5: no TCC prompt or focus theft inside a probe); a release build
-/// asks it once, as `desktop/src/main.rs` does.
+/// asks it once, as the Tauri shell's `desktop/src/main.rs` did.
 fn startup_permission<R: CommandRunner>(runner: &R) -> PermissionState {
     #[cfg(feature = "automation")]
     {

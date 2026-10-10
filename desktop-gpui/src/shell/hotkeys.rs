@@ -1,5 +1,5 @@
 //! The three global hotkeys (R4): ⌘⇧K capture, ⌘⇧L browser, ⌘⇧, settings — the same
-//! bindings as the Tauri shell (desktop/src/main.rs `hotkey_shortcuts`).
+//! bindings as the deleted Tauri shell had (its `hotkey_shortcuts`).
 //!
 //! TN4: global-hotkey 0.8 uses Carbon `RegisterEventHotKey` with a handler on the
 //! application event target, so the manager must be created on the main thread once

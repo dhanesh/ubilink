@@ -1,5 +1,5 @@
 //! The menu-bar item (R4): with no Dock icon (accessory policy) it is the app's
-//! always-reachable home, as in the Tauri shell. GPUI has no status-item API, so this
+//! always-reachable home, as it was in the Tauri shell. GPUI has no status-item API, so this
 //! uses tray-icon 0.26 (an NSStatusItem underneath) with a muda menu.
 //!
 //! TN4: built on the main thread inside GPUI's run closure, after NSApp exists, and kept
@@ -47,8 +47,8 @@ pub fn build() -> Result<TrayIcon, String> {
         .with_id("ubilink-tray")
         .with_tooltip("Ubilink — ⌘⇧K to capture a link")
         .with_menu(Box::new(menu))
-        // Template image: macOS recolours it for light/dark menu bars, as the Tauri
-        // shell's ubilink-link.png does.
+        // Template image: macOS recolours it for light/dark menu bars, as it did for
+        // the deleted Tauri shell's ubilink-link.png.
         .with_icon_templated(icon)
         .build()
         .map_err(|e| format!("tray: {e}"))
@@ -65,7 +65,7 @@ pub fn present(tray: &TrayIcon) -> bool {
 const ICON_PX: u32 = 44;
 
 /// A two-ring "link" glyph as black-on-transparent RGBA, drawn in code: decoding the
-/// Tauri shell's PNG would need an image decoder, a new external crate. Two rings
+/// old Tauri shell's PNG would need an image decoder, a new external crate. Two rings
 /// overlap on the diagonal, like a chain link.
 fn link_glyph(size: u32) -> Vec<u8> {
     let s = f64::from(size);

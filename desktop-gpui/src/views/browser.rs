@@ -37,7 +37,7 @@
 //! run on the shared state, replaces the rows, and the header's trail Label turns
 //! from `Your links` into `Linked to <names joined by " › ">` (the Tauri browser's
 //! `browse-state.mjs` `drill`, B1). Left goes back one level and restores the rows
-//! and the selection that were left behind. Both clear the filter, as Tauri does.
+//! and the selection that were left behind. Both clear the filter, as Tauri did.
 //! The focused Input only lets Right/Left through at its text edges, so they are
 //! bubble-phase actions here (A11Y-NOTES.md): Right at the end of a typed filter
 //! drills, Left at its start does nothing while there is filter text (Tauri: ←
