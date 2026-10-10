@@ -41,8 +41,10 @@
 //! The focused Input only lets Right/Left through at its text edges, so they are
 //! bubble-phase actions here (A11Y-NOTES.md): Right at the end of a typed filter
 //! drills, Left at its start does nothing while there is filter text (Tauri: ←
-//! edits a non-empty filter). A failed drill stays put and shows the core's message
-//! and what to do (U3).
+//! edits a non-empty filter). At the top level with an empty filter, Left closes the
+//! panel the way a dismiss does (Phase 2 R3; Tauri `panel.js` ArrowLeft → `browseBack`
+//! dismisses at the root) and opens nothing. A failed drill stays put and shows the
+//! core's message and what to do (U3).
 //!
 //! ⌘L links two links (R8), as the Tauri browser's `linkMarkedTo` (B1): the first
 //! press marks the selected link and a Label says `Linking from “<name>”`; ⌘L on a
@@ -394,6 +396,17 @@ impl Rows {
     }
 }
 
+/// What Left at the filter's start edge does (`BrowserRows::left`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeftKey {
+    /// The filter has text: the key edits it, the browser does nothing.
+    Edit,
+    /// Back one level; select this shown row there.
+    Back(usize),
+    /// Top level, empty filter: close the panel.
+    Close,
+}
+
 /// A level the browser drilled down from: what Left restores.
 #[derive(Debug, Clone, PartialEq)]
 struct Frame {
@@ -471,6 +484,19 @@ impl BrowserRows {
         *self = BrowserRows::new(frame.rows);
         self.trail = trail;
         Some(frame.selected.min(self.shown_count().saturating_sub(1)))
+    }
+
+    /// Left at the filter's start edge with `filter` typed (Phase 2 R3): a non-empty
+    /// filter is being edited and nothing changes; otherwise go `back` one level, or,
+    /// at the top level, ask for the panel to close.
+    pub fn left(&mut self, filter: &str) -> LeftKey {
+        if !filter.is_empty() {
+            return LeftKey::Edit;
+        }
+        match self.back() {
+            Some(row) => LeftKey::Back(row),
+            None => LeftKey::Close,
+        }
     }
 
     /// The trail Label's text for the current level.
@@ -738,17 +764,32 @@ impl BrowserView {
         cx.notify();
     }
 
-    /// Left: back out one level and restore the selection left there.
+    /// Left: back out one level and restore the selection left there; at the top
+    /// level with an empty filter, close the panel (Phase 2 R3).
     fn drill_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(list), Some(filter)) = (self.list.clone(), self.filter.clone()) else {
+        let Some(filter) = self.filter.clone() else {
             return;
         };
+        let query = filter.read(cx).value();
         // Left at the start of a typed filter is the user editing it (Tauri parity).
-        if !filter.read(cx).value().is_empty() {
-            return;
-        }
-        let Some(row) = list.update(cx, |state, _| state.delegate_mut().back()) else {
-            return;
+        let outcome = match self.list.clone() {
+            Some(list) => list.update(cx, |state, _| state.delegate_mut().left(&query)),
+            // Rows not loaded yet: the top level, nothing drilled.
+            None if query.is_empty() => LeftKey::Close,
+            None => LeftKey::Edit,
+        };
+        let row = match outcome {
+            LeftKey::Edit => return,
+            LeftKey::Back(row) => row,
+            LeftKey::Close => {
+                // Hide as a dismiss does, once this key's dispatch is over (the shell
+                // removes this very window). Nothing is opened.
+                cx.spawn(async move |_, cx| {
+                    cx.update(|cx| crate::shell::execute(crate::shell::Command::Hide, cx));
+                })
+                .detach();
+                return;
+            }
         };
         self.open_error = None;
         self.linked = None;
@@ -1116,8 +1157,8 @@ mod tests {
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
         drill_failed_text, is_mark_key, link_failed_text, linked_text, linking_text, mark_step,
-        min_window_span, open_failed_text, p99, state, step, trail_text, BrowserRows, MarkStep,
-        Rows, GAP, HEADER_H, PAD_Y, ROW_H,
+        min_window_span, open_failed_text, p99, state, step, trail_text, BrowserRows, LeftKey,
+        MarkStep, Rows, GAP, HEADER_H, PAD_Y, ROW_H,
     };
     use std::sync::Mutex;
     use ubilink_core::{AdapterRegistry, LinkGraph, PanelBackend, UbilinkService};
@@ -1392,7 +1433,10 @@ mod tests {
         let mut rows = BrowserRows::new(Rows::from_query(query));
         let top: Vec<String> = rows.shown().map(|e| e.uri.clone()).collect();
         assert_eq!(rows.trail_text(), "Your links");
-        assert_eq!(rows.back(), None, "Left at the top level does nothing");
+        assert_eq!(rows.back(), None, "back at the top level restores nothing");
+        // Phase 2 R3: a typed filter is edited, an empty one at the top closes.
+        assert_eq!(rows.left("be"), LeftKey::Edit);
+        assert_eq!(rows.left(""), LeftKey::Close);
 
         let parent = rows.shown_entry(1).unwrap().clone();
         assert_eq!(parent.name, "Gamma Doc");
@@ -1413,6 +1457,18 @@ mod tests {
         assert_eq!(rows.back(), Some(0));
         assert_eq!(rows.trail_text(), "Linked to Gamma Doc");
 
+        assert!(rows.drill(0, Vec::new()));
+        assert_eq!(
+            rows.left("x"),
+            LeftKey::Edit,
+            "drilled, a typed filter is edited"
+        );
+        assert_eq!(rows.trail_text(), "Linked to Gamma Doc › Subject Note");
+        assert_eq!(
+            rows.left(""),
+            LeftKey::Back(0),
+            "drilled, Left still goes back"
+        );
         assert_eq!(rows.back(), Some(1), "row 2 is selected again");
         assert_eq!(rows.trail_text(), "Your links");
         let back: Vec<String> = rows.shown().map(|e| e.uri.clone()).collect();

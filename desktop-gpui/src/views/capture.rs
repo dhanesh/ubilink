@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use gpui_kit::component::{ActiveTheme, Disableable};
 use gpui_kit::prelude::FluentBuilder;
@@ -46,6 +47,12 @@ pub const CAPTURING_TEXT: &str = "Capturing the active resource…";
 /// The copied confirmation's text (R2): shown once the URI is on the pasteboard.
 pub const COPIED_TEXT: &str = "Copied";
 
+/// How long the `Copied` confirmation stays up before the panel hides itself (Phase 2
+/// R2; the Tauri panel's `confirmCopy` then `dismiss_panel`). At least 1 s, so the user
+/// sees it (probes/README.md, "Phase 1 view-state contract"), and well inside the 3 s
+/// from the key by which the panel must be gone.
+pub const COPIED_HOLD: Duration = Duration::from_millis(1300);
+
 /// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
 pub const BACKLINKS_HEADING: &str = "Linked to this";
 
@@ -61,6 +68,28 @@ pub fn is_copy_key(keystroke: &Keystroke) -> bool {
         "enter" => !m.platform && !m.control,
         "c" => m.platform != m.control,
         _ => false,
+    }
+}
+
+/// What a key does in the capture view (Phase 2 R4, spec TN2: focus decides).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAction {
+    /// Put the captured URI on the pasteboard (R2).
+    Copy,
+    /// Open backlink row `n` (0-based, display order) through the core opener.
+    Open(usize),
+}
+
+/// The action `keystroke` takes when backlink row `focused_row` (if any) holds keyboard
+/// focus: plain Enter on a focused row opens that row and does not copy; every other
+/// copy key (Enter with no row focused, ⌘C anywhere) copies; anything else does nothing.
+pub fn key_action(keystroke: &Keystroke, focused_row: Option<usize>) -> Option<KeyAction> {
+    if !is_copy_key(keystroke) {
+        return None;
+    }
+    match (keystroke.key.as_str(), focused_row) {
+        ("enter", Some(row)) => Some(KeyAction::Open(row)),
+        _ => Some(KeyAction::Copy),
     }
 }
 
@@ -412,9 +441,18 @@ pub struct CaptureView {
     /// key handler: GPUI dispatches keys from the focused element up its path.
     focus: FocusHandle,
     focused: bool,
-    /// The URI is on the pasteboard: the `Copied` confirmation shows. The panel stays
-    /// open after a copy, so the confirmation stays until the panel next hides.
+    /// The URI is on the pasteboard: the `Copied` confirmation shows, and stays until
+    /// the panel hides itself `COPIED_HOLD` later (Phase 2 R2).
     copied: bool,
+    /// One focus handle per backlink row, in display order: each row is a tab stop, so
+    /// Tab (gpui-base `Root`'s `focus_next`) steps through them one at a time, and the
+    /// focused row is what Enter opens (Phase 2 R4).
+    rows: Vec<FocusHandle>,
+    /// A failed backlink open: the core's reason and what to do (U3).
+    open_error: Option<String>,
+    /// The pending self-dismiss after a copy; dropped (cancelled) with the view, so a
+    /// panel that already hid or switched route is never hidden by a stale copy.
+    _dismiss: Option<Task<()>>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
@@ -428,18 +466,45 @@ impl CaptureView {
         let generation = lock().begin();
         let capture = cx.spawn(async move |this, cx| {
             let phase = run_capture(cx).await;
-            let _ = this.update(cx, |view, cx| {
-                if lock().settle(generation, &phase) {
-                    view.phase = phase;
-                    cx.notify();
-                }
-            });
+            let failed = matches!(phase, Phase::Failed { .. });
+            let settled = this
+                .update(cx, |view, cx| {
+                    let settled = lock().settle(generation, &phase);
+                    if settled {
+                        view.phase = phase;
+                        cx.notify();
+                    }
+                    settled
+                })
+                .unwrap_or(false);
+            if !(settled && failed) {
+                return;
+            }
+            // Phase 2 R1 (the Tauri panel's capture-err handler): the failure shows
+            // first, then the permission report decides. Automation not granted takes
+            // the user to where it is fixed (U3): the same panel window switches to
+            // onboarding. Granted, or no report, keeps the failure here.
+            let to_onboarding = cx
+                .background_executor()
+                .spawn(async { super::onboarding::failed_capture_routes_here() })
+                .await;
+            // Hiding or re-routing the panel drops this view and cancels this task, so
+            // reaching here means the panel is still open on this capture; a newer
+            // capture (generation) owns the route instead.
+            if to_onboarding && lock().generation == generation {
+                cx.update(|cx| {
+                    crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx)
+                });
+            }
         });
         CaptureView {
             phase: Phase::Capturing,
             focus: cx.focus_handle(),
             focused: false,
+            rows: Vec::new(),
+            open_error: None,
             copied: false,
+            _dismiss: None,
             appearance: FollowAppearance::default(),
             _capture: capture,
         }
@@ -455,57 +520,113 @@ impl CaptureView {
         cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()));
         self.copied = true;
         cx.notify();
+        // Phase 2 R2 (U2: the copy ends the interaction): keep `Copied` up for
+        // `COPIED_HOLD`, then hide the panel as a dismiss does. A second copy restarts
+        // the hold. The task is the view's, so it dies with the view.
+        self._dismiss = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_HOLD).await;
+            if this.upgrade().is_some() {
+                cx.update(|cx| crate::shell::execute(crate::shell::Command::Hide, cx));
+            }
+        }));
         true
+    }
+
+    /// The backlink row holding keyboard focus, if any.
+    fn focused_row(&self, window: &Window) -> Option<usize> {
+        self.rows.iter().position(|h| h.is_focused(window))
+    }
+
+    /// Open backlink row `ix` (Enter on the focused row, or a click; the Tauri panel's
+    /// backlink anchors) through ubilink-app's `open_link_with`, so the core re-validates
+    /// the URI (D16) and the shell's `Opener` seam decides what runs: the real launcher
+    /// in a release build, the `opened` sink in an automation build (S2). Nothing is
+    /// copied, and the panel stays open, as in Tauri. A failed open says what to do (U3).
+    fn open_backlink(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Phase::Captured { backlinks, .. } = &self.phase else {
+            return;
+        };
+        let Some(uri) = backlinks.get(ix).map(|l| l.uri.clone()) else {
+            return;
+        };
+        let opened = ubilink_app::open_link_with(
+            app_state::get(),
+            &crate::opener::Opener(ubilink_app::SpawnRunner),
+            &uri,
+        );
+        self.open_error = opened
+            .err()
+            .map(|e| super::browser::open_failed_text(&uri, &e));
+        cx.notify();
     }
 }
 
 /// The backlinks section (R3): a heading, then one `ListItem` row per backlink in
 /// the order given (newest link first), each row's name and URI as `text!` Labels
 /// (A11Y-NOTES.md). The panel is short, so the rows are one line each and scroll.
-/// They are the only `ListItem` nodes in the capture view (probes/README.md). The
-/// view only shows them; browsing to and opening links is the browser's (R6/R7).
-fn backlinks_section(backlinks: &[LinkView], cx: &App) -> AnyElement {
+/// They are the only `ListItem` nodes in the capture view (probes/README.md). Each row
+/// tracks its own focus handle (`rows`, one per backlink) under its own element id, so
+/// a Tab-focused row's `ListItem` node itself is the accessibility tree's focused node
+/// (gpui-pre's div sets the a11y focus for an id'd element whose tracked handle is
+/// focused). Enter on it (the view's key handler) or a click opens it (Phase 2 R4).
+fn backlinks_section(
+    backlinks: &[LinkView],
+    rows: &[FocusHandle],
+    window: &Window,
+    cx: &mut Context<CaptureView>,
+) -> AnyElement {
     let (foreground, muted) = (theming::primary_text(cx), cx.theme().muted_foreground);
+    let focus_bg = cx.theme().list_active;
     let count = backlinks.len();
-    let rows = backlinks.iter().enumerate().map(|(ix, link)| {
-        div()
-            .id(SharedString::from(format!("backlink-{ix}")))
-            .role(Role::ListItem)
-            .aria_position_in_set(ix + 1)
-            .aria_size_of_set(count)
-            .flex()
-            .flex_row()
-            .items_baseline()
-            .line_height(px(18.))
-            .gap(spacing::S3)
-            .w_full()
-            .min_w_0()
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .max_w(relative(0.45))
-                    .text_size(font_size::ROW)
-                    .text_color(foreground)
-                    .truncate()
-                    .child(text!(
-                        id = SharedString::from(format!("backlink-{ix}-name")),
-                        link.name.clone()
-                    )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(font_size::META)
-                    .font_family(MONO_FONT_FAMILY)
-                    .text_color(muted)
-                    .truncate()
-                    .child(text!(
-                        id = SharedString::from(format!("backlink-{ix}-uri")),
-                        link.uri.clone()
-                    )),
-            )
-    });
+    let rows = backlinks
+        .iter()
+        .zip(rows)
+        .enumerate()
+        .map(|(ix, (link, handle))| {
+            let focused = handle.is_focused(window);
+            div()
+                .id(SharedString::from(format!("backlink-{ix}")))
+                .role(Role::ListItem)
+                .track_focus(handle)
+                .on_click(cx.listener(move |this, _, _, cx| this.open_backlink(ix, cx)))
+                .cursor_pointer()
+                .rounded(radius::CARD)
+                .when(focused, |d| d.bg(focus_bg))
+                .aria_position_in_set(ix + 1)
+                .aria_size_of_set(count)
+                .flex()
+                .flex_row()
+                .items_baseline()
+                .line_height(px(18.))
+                .gap(spacing::S3)
+                .w_full()
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .max_w(relative(0.45))
+                        .text_size(font_size::ROW)
+                        .text_color(foreground)
+                        .truncate()
+                        .child(text!(
+                            id = SharedString::from(format!("backlink-{ix}-name")),
+                            link.name.clone()
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(font_size::META)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_color(muted)
+                        .truncate()
+                        .child(text!(
+                            id = SharedString::from(format!("backlink-{ix}-uri")),
+                            link.uri.clone()
+                        )),
+                )
+        });
     div()
         .flex()
         .flex_col()
@@ -544,9 +665,18 @@ impl Render for CaptureView {
         self.appearance.ensure(window, cx);
         let copied = self.copied;
         let captured = matches!(self.phase, Phase::Captured { .. });
+        let row_count = match &self.phase {
+            Phase::Captured { backlinks, .. } => backlinks.len(),
+            _ => 0,
+        };
+        if self.rows.len() != row_count {
+            self.rows = (0..row_count)
+                .map(|_| cx.focus_handle().tab_stop(true))
+                .collect();
+        }
         let backlinks = match &self.phase {
             Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
-                Some(backlinks_section(backlinks, cx))
+                Some(backlinks_section(backlinks, &self.rows, window, cx))
             }
             _ => None,
         };
@@ -620,9 +750,14 @@ impl Render for CaptureView {
         };
         div()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                if is_copy_key(&event.keystroke) && this.copy(cx) {
-                    cx.stop_propagation();
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                match key_action(&event.keystroke, this.focused_row(window)) {
+                    Some(KeyAction::Open(row)) => {
+                        this.open_backlink(row, cx);
+                        cx.stop_propagation();
+                    }
+                    Some(KeyAction::Copy) if this.copy(cx) => cx.stop_propagation(),
+                    Some(KeyAction::Copy) | None => {}
                 }
             }))
             .size_full()
@@ -679,6 +814,15 @@ impl Render for CaptureView {
             )
             .child(body)
             .when_some(backlinks, |d, section| d.child(section))
+            .when_some(self.open_error.clone(), |d, error| {
+                d.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(font_size::META)
+                        .text_color(theme.danger)
+                        .child(text!(error)),
+                )
+            })
             .when(copied, |d| {
                 d.child(
                     div()
@@ -711,8 +855,11 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
-    use super::{is_copy_key, order_by_recency, state, Phase, Tracker};
+    use super::{
+        is_copy_key, key_action, order_by_recency, state, KeyAction, Phase, Tracker, COPIED_HOLD,
+    };
     use std::sync::Mutex;
+    use std::time::Duration;
     use ubilink_core::{
         AdapterRegistry, LinkGraph, LinkView, PanelBackend, ResourceIdentity, UbilinkService,
     };
@@ -821,6 +968,14 @@ mod tests {
         assert!(parse_fixture("not json").is_err());
     }
 
+    /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
+    /// and the panel is gone well inside 3 s of the key.
+    #[test]
+    fn copied_hold_meets_the_contract() {
+        assert!(COPIED_HOLD >= Duration::from_secs(1));
+        assert!(COPIED_HOLD <= Duration::from_millis(1500));
+    }
+
     /// R2's key model, headless: Enter and ⌘C (and Ctrl-C, as Tauri) copy; other keys
     /// and modified Enters don't; only a captured phase has anything to copy.
     #[test]
@@ -856,6 +1011,22 @@ mod tests {
             .copy_payload(),
             None
         );
+    }
+
+    /// Phase 2 R4's key model, headless (spec TN2): Enter on a focused backlink row
+    /// opens that row and does not copy; Enter with no row focused copies; ⌘C copies
+    /// whether or not a row is focused; other keys do nothing.
+    #[test]
+    fn enter_opens_the_focused_row_else_copies() {
+        let key = |k: &str| gpui_kit::Keystroke::parse(k).unwrap();
+        assert_eq!(key_action(&key("enter"), None), Some(KeyAction::Copy));
+        assert_eq!(key_action(&key("enter"), Some(1)), Some(KeyAction::Open(1)));
+        assert_eq!(key_action(&key("enter"), Some(0)), Some(KeyAction::Open(0)));
+        assert_eq!(key_action(&key("cmd-c"), Some(1)), Some(KeyAction::Copy));
+        assert_eq!(key_action(&key("cmd-c"), None), Some(KeyAction::Copy));
+        for k in ["shift-enter", "cmd-enter", "space", "tab", "escape"] {
+            assert_eq!(key_action(&key(k), Some(1)), None, "{k}");
+        }
     }
 
     /// The backlinks of a captured `phase`, as (name, uri) pairs in display order.

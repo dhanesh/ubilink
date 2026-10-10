@@ -92,6 +92,9 @@ pub enum Command {
     Open(Route),
     /// Hotkeys: hide if open on this route, otherwise `Open`.
     Toggle(Route),
+    /// Hide the panel, whatever its route, the way a hotkey toggle hides it (Phase 2
+    /// R2: the capture view's self-dismiss after a copy). Nothing open: nothing to do.
+    Hide,
     Quit,
 }
 
@@ -323,6 +326,7 @@ pub fn execute(cmd: Command, cx: &mut App) {
     let hotkey_at = None;
     match (cmd, current) {
         (Command::Quit, _) => cx.quit(),
+        (Command::Hide, _) => hide(cx),
         (Command::Toggle(r), Some(open)) if open == r => hide(cx),
         (Command::Open(r) | Command::Toggle(r), Some(_)) => switch_route(r, cx),
         (Command::Open(r) | Command::Toggle(r), None) => open(r, hotkey_at, cx),
