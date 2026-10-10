@@ -78,6 +78,7 @@ use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
 
+use super::escape::{self, EscapeAction, EscapeState};
 use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
@@ -762,15 +763,21 @@ impl Render for SettingsView {
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
-            // Escape closes an open reset confirmation (Tauri) without deleting.
+            // Escape closes an open reset confirmation without deleting, else
+            // dismisses the panel (Tauri, `views::escape`).
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.confirming_reset
-                    && event.keystroke.key == "escape"
-                    && !event.keystroke.modifiers.modified()
-                {
-                    this.cancel_reset(window, cx);
-                    cx.stop_propagation();
+                if !escape::is_escape(&event.keystroke) {
+                    return;
                 }
+                let state = EscapeState {
+                    confirming_reset: this.confirming_reset,
+                    ..EscapeState::default()
+                };
+                match escape::escape_action(Route::Settings, state) {
+                    EscapeAction::CloseConfirmation => this.cancel_reset(window, cx),
+                    _ => escape::dismiss_panel(cx),
+                }
+                cx.stop_propagation();
             }))
             .size_full()
             .flex()

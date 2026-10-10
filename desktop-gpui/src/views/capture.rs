@@ -35,6 +35,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
+use super::escape::{self, EscapeAction, EscapeState};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
@@ -751,6 +752,16 @@ impl Render for CaptureView {
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                // Escape dismisses (Tauri's generic handler, `views::escape`).
+                if escape::is_escape(&event.keystroke) {
+                    if escape::escape_action(Route::Capture, EscapeState::default())
+                        == EscapeAction::Dismiss
+                    {
+                        escape::dismiss_panel(cx);
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
                 match key_action(&event.keystroke, this.focused_row(window)) {
                     Some(KeyAction::Open(row)) => {
                         this.open_backlink(row, cx);

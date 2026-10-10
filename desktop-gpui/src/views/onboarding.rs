@@ -36,6 +36,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
+use super::escape::{self, EscapeAction, EscapeState};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::opener::Opener;
@@ -444,6 +445,16 @@ impl Render for OnboardingView {
             // Bubble phase: `R` from anywhere in the view, including a focused step
             // button (a Button binds nothing to it).
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                // Escape dismisses (Tauri's generic handler, `views::escape`).
+                if escape::is_escape(&event.keystroke) {
+                    if escape::escape_action(Route::Onboarding, EscapeState::default())
+                        == EscapeAction::Dismiss
+                    {
+                        escape::dismiss_panel(cx);
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
                 if is_recheck_key(&event.keystroke) {
                     this.start_check(true, cx);
                     cx.stop_propagation();
