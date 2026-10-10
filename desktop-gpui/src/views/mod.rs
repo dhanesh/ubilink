@@ -32,6 +32,7 @@ pub mod browser;
 pub mod capture;
 pub mod onboarding;
 pub mod settings;
+pub mod theming;
 
 use gpui_kit::{AnyView, App};
 use serde::{Deserialize, Serialize};

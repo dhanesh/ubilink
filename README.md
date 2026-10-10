@@ -27,7 +27,9 @@ and tested, and is coming to the app in a later release.
 | Layer | Tech | Why |
 |-------|------|-----|
 | Core | **Rust** (Tauri) | OS automation, the link graph, the capability broker — the trusted domain |
-| UI | Web (Tauri webview) | the hotkey panel + settings |
+| Commands | **Rust** (`app/`, ubilink-app) | the GUI-free command layer both desktop shells call; no Tauri or GPUI crate in its tree |
+| UI | Web (Tauri webview) | the shipping hotkey panel + settings (`desktop/`, `dist/`) |
+| UI (next) | **Native GPUI** (`desktop-gpui/`) | `ubilink-next`, the native rewrite of the panel; in progress, not yet shipped ([D22](DECISIONS.md)) |
 | Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/child** access (and, on macOS, no network); all privileged access is broker-mediated |
 | Storage | **Local SQLite** | the bidirectional graph, on-device, zero telemetry |
 
@@ -86,6 +88,20 @@ Built and tested:
 - ✅ Capability matrix derived from the adapter registry, published as
   [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) and drift-guarded by a test —
   `src-tauri/src/capabilities.rs`
+- ✅ GUI-free command layer shared by both desktop shells — `app/`
+- 🚧 Native GPUI app, `ubilink-next` (`desktop-gpui/`), built beside the Tauri app
+  rather than replacing it yet:
+  - menu-bar shell with a native blurred pop-up panel, global hotkeys and tray
+  - all four views ported:
+    - capture, with copy and backlinks
+    - link browser, with a virtualised list, fuzzy filter, keyboard navigation and
+      ⌘L linking
+    - onboarding
+    - settings, with adapters, graph export/import/reset and launch at login
+  - light and dark token theming
+  - each feature is proven on the running app by the GPUI probes
+    (`scripts/probe.py`, `desktop-gpui/probes/`) through an automation socket
+    that release builds never contain ([D23](DECISIONS.md))
 
 Not done yet:
 
@@ -98,6 +114,13 @@ Not done yet:
   tests and the CLI tools.
 - ⬜ **No OS sandbox off macOS.** On Linux/Windows the plugin host has no jail, so
   network, native file writes and signals are open there (`DECISIONS.md` D1).
+- ⬜ **`ubilink-next` does not ship yet.** The released app is still the Tauri app.
+  Before the cutover, these still need an attended check:
+  - the real login-item registration (SMAppService)
+  - the native save and open dialogs
+  - VoiceOver
+  - live capture
+  - a recorded performance budget
 - ⬜ **No hosted registry.** The registry service persists its index and each id's
   owner to a data directory (`UBILINK_REGISTRY_DATA`), but no public, governed
   instance runs yet ([`docs/RUNBOOK-registry.md`](docs/RUNBOOK-registry.md)).
@@ -124,14 +147,26 @@ Press **Cmd+Shift+K** to capture, **Cmd+Shift+L** to browse your links, and
 
 ## Build & test
 
-Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, and Node ≥ 22.13.
+Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, Node ≥ 22.13, and
+full Xcode (the GPUI crate compiles Metal shaders).
 
 ```sh
-make verify                  # the merge gate: fmt + clippy + every crate's tests + JS tests
+make verify                  # the merge gate: fmt + clippy + every crate's tests (incl. GPUI) + JS tests + release-clean
 make verify LOCKED=--locked  # exactly what CI runs
-make test                    # faster loop: core + registry + JS (skips the Tauri build)
-make run                     # build + launch the desktop app
+make test                    # faster loop: core + registry + app + JS (skips the Tauri and GPUI builds)
+make run                     # build + launch the desktop app (Tauri)
+make bundle-next             # build ubilink-next.app, the GPUI app, for local use
+make probe                   # GPUI probes against a live desktop session (not part of verify)
+make budget                  # measure the GPUI release app (idle CPU, footprint, size, hotkey latency)
 ```
+
+**GPUI probes:** `make probe` and `make budget` drive the real app. That means it
+takes focus and uses the pasteboard, and it needs an unlocked screen and Screen
+Recording permission for the terminal. Check the Mac first with
+`python3 scripts/probe.py doctor`.
+
+To prove a `desktop-gpui` change on the running app and record SHA-bound evidence,
+use the verify skill at `desktop-gpui/.claude/skills/verify-ubilink/`.
 
 **Node:** the sandbox tests spawn a real `node --permission` process, which needs
 Node ≥ 22.13 (CI uses Node 22). The plugin host runs with an empty environment, so
