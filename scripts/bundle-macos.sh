@@ -19,8 +19,8 @@
 # which a build cache may prune or redirect (a pruned symlinked target/ made a dry run
 # fail at assembly after a full build). The binary is the path cargo reports for the
 # desktop-gpui `ubilink` bin (--message-format=json), never an assumed
-# target/release/ubilink: with a shared CARGO_TARGET_DIR the Tauri crate (desktop/)
-# writes a binary of the same name there.
+# target/release/ubilink: a shared CARGO_TARGET_DIR can still hold a stale `ubilink`
+# from the deleted Tauri crate (D24), and an automation build writes the same path.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -302,6 +302,21 @@ make_dmg() {
   fi
 }
 
+# The automation test channel must never ship (S1/TN1, D23). Its socket name, marker and
+# verb names are the same list as `python3 scripts/probe.py release-clean`'s
+# _AUTOMATION_TOKENS (scripts/test-bundle-modes.sh keeps the two equal). Raw bytes,
+# not `strings`, so every slice of a universal binary is searched.
+AUTOMATION_TOKENS=(auto.sock UBILINK_AUTOMATION_MARKER open_view trigger_hotkey resign_key set_appearance load_fixture)
+
+check_no_automation() {
+  local exe="$1" t found=()
+  for t in "${AUTOMATION_TOKENS[@]}"; do
+    if LC_ALL=C grep -aqF -- "$t" "$exe"; then found+=("$t"); fi
+  done
+  [ "${#found[@]}" -eq 0 ] ||
+    die "$exe contains automation token(s): ${found[*]} — an automation build must never ship"
+}
+
 verify_outputs() {
   log "verifying…"
   local exe="$APP/Contents/MacOS/$EXE" archs libs ents keys nkeys entval plist="$APP/Contents/Info.plist"
@@ -310,12 +325,13 @@ verify_outputs() {
     case " $archs " in *" arm64 "*) ;; *) die "no arm64 slice (have: $archs)" ;; esac
     case " $archs " in *" x86_64 "*) ;; *) die "no x86_64 slice (have: $archs)" ;; esac
   fi
-  # The GPUI app, not the Tauri one (both build a binary named `ubilink`): GPUI renders
-  # through Metal and links no WebKit; Tauri's webview is WebKit. Version and plist
-  # checks alone would pass for either binary.
+  # The GPUI app, not a stale Tauri `ubilink` left in a shared target dir (D24): GPUI
+  # renders through Metal and links no WebKit; the deleted Tauri webview was WebKit.
+  # Version and plist checks alone would pass for either binary.
   libs="$(otool -L "$exe")" || die "otool could not read $exe"
-  case "$libs" in *WebKit.framework*) die "$exe links WebKit — that is the Tauri app, not desktop-gpui" ;; esac
+  case "$libs" in *WebKit.framework*) die "$exe links WebKit — a webview build, not the GPUI app" ;; esac
   case "$libs" in *Metal.framework*) ;; *) die "$exe does not link Metal — not the GPUI app" ;; esac
+  check_no_automation "$exe"
   codesign --verify --deep --strict --verbose=2 "$APP"
   # `|| die` (rather than letting `set -e` abort silently) so a codesign failure here
   # is reported by name, distinct from the entitlements-content checks below.

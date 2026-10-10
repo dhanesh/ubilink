@@ -79,5 +79,33 @@ expect "bundle: entitlements file exists"      yes "$([ -f "$HERE/../desktop-gpu
 expect "bundle: icon exists"                   yes "$([ -f "$HERE/../desktop-gpui/packaging/icon.png" ] && echo yes || echo no)"
 expect "bundle-next.sh folded into bundle-macos.sh" no "$([ -e "$HERE/bundle-next.sh" ] && echo yes || echo no)"
 
+# The shipped binary is scanned for the automation channel's tokens (S1/TN1), with the
+# same list as probe.py release-clean (parsed, not imported), from verify_outputs.
+py_tokens="$(python3 -I - "$HERE/probe.py" <<'PY'
+import ast, sys
+tree = ast.parse(open(sys.argv[1]).read())
+for node in tree.body:
+    if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "_AUTOMATION_TOKENS" for t in node.targets):
+        print(" ".join(ast.literal_eval(node.value)))
+PY
+)"
+sh_tokens="$(sed -n 's/^AUTOMATION_TOKENS=(\(.*\))$/\1/p' "$B")"
+expect "bundle: token list equals probe.py's _AUTOMATION_TOKENS" "$py_tokens" "$sh_tokens"
+expect "bundle: token list is not empty"        yes "$([ -n "$sh_tokens" ] && echo yes || echo no)"
+expect "bundle: verify_outputs runs the scan"   yes "$(awk '/^verify_outputs\(\) \{/,/^}/' "$B" | grep -qE '^[[:space:]]*check_no_automation "\$exe"' && echo yes || echo no)"
+# Behaviour: the scan function itself, lifted out of the script, on two fake binaries.
+SCAN="$(mktemp -d)"
+{
+  echo 'die() { echo "die: $*" >&2; exit 1; }'
+  grep -E '^AUTOMATION_TOKENS=' "$B"
+  awk '/^check_no_automation\(\) \{/,/^}/' "$B"
+  echo 'check_no_automation "$1"'
+} >"$SCAN/scan.sh"
+printf 'GPUI\0Metal\0ubilink\0' >"$SCAN/clean"
+printf 'GPUI\0\1\2/tmp/ubilink-501/x/auto.sock\0trigger_hotkey\0' >"$SCAN/dirty"
+expect "bundle: scan passes a clean binary"     0 "$(bash "$SCAN/scan.sh" "$SCAN/clean" 2>/dev/null; echo $?)"
+expect "bundle: scan refuses an automation binary" "1 yes" "$(err="$(bash "$SCAN/scan.sh" "$SCAN/dirty" 2>&1)"; rc=$?; printf '%s' "$err" | grep -qF 'auto.sock trigger_hotkey' && echo "$rc yes" || echo "$rc no")"
+rm -r "$SCAN"
+
 echo "test-bundle-modes: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
