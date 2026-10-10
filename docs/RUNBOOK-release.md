@@ -1,7 +1,10 @@
 # Runbook: releasing Ubilink
 
 How to cut a release of the macOS app. Design: `docs/superpowers/specs/2026-09-14-v0.1-release-design.md`.
-Pipeline: `.github/workflows/release.yml`. Packaging: `scripts/bundle-macos.sh`.
+Pipeline: `.github/workflows/release.yml`. Packaging: `scripts/bundle-macos.sh`, which
+builds `Ubilink.app` from the GPUI app (`desktop-gpui/`, release profile, no
+`automation` feature) into `desktop-gpui/bundle/`; its entitlements and icon live
+in `desktop-gpui/packaging/`.
 
 ## One-time setup
 
@@ -44,10 +47,11 @@ Pipeline: `.github/workflows/release.yml`. Packaging: `scripts/bundle-macos.sh`.
 
 ## Cutting a release
 
-1. **Bump the version** in `desktop/Cargo.toml`, `src-tauri/Cargo.toml` and
-   `registry/Cargo.toml`; run `cargo check --manifest-path <each>/Cargo.toml` to update
-   the lockfiles; add a `## [X.Y.Z] - unreleased` section to `CHANGELOG.md`.
-   `make verify` (`verify-version`) fails if any of these disagree. Merge via a PR.
+1. **Bump the version** in `desktop-gpui/Cargo.toml` (the source of truth — the shipped
+   GPUI app), `src-tauri/Cargo.toml`, `registry/Cargo.toml` and `app/Cargo.toml`; run
+   `cargo check --manifest-path <each>/Cargo.toml` to update the lockfiles; add a
+   `## [X.Y.Z] - unreleased` section to `CHANGELOG.md`. `make verify` (`verify-version`)
+   fails if any of these disagree. Merge via a PR.
 2. **Release candidate:** `git tag -a vX.Y.Z-rc.1 -m "Ubilink X.Y.Z-rc.1" && git push origin vX.Y.Z-rc.1`.
    Approve the `release` environment when GitHub asks. Without Apple secrets the DMG
    is `…-UNNOTARIZED.dmg`; with them it is notarized and stapled.
@@ -78,7 +82,7 @@ On a clean **Apple silicon** Mac and a clean **Intel** Mac:
   `make dist`.
 - **`release-mode: … final release tag but no Apple credentials`:** add the secrets
   (setup step 2) or use an `-rc.N` tag.
-- **`release-mode: tag vA does not match version B`:** the tag and `desktop/Cargo.toml`
+- **`release-mode: tag vA does not match version B`:** the tag and `desktop-gpui/Cargo.toml`
   disagree; bump or re-tag.
 - **Captures fail with error -1743 on a signed build:** the Apple Events entitlement
   is missing from the signature — check

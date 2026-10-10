@@ -1,7 +1,7 @@
 //! Where the panel opens: on the display under the mouse cursor, centred horizontally
 //! with its top edge a fifth of the way down (Spotlight-style), and never spilling off
-//! that display. Ported from desktop/src/placement.rs (the Tauri shell) so both shells
-//! agree on placement (R4: "on the display under the cursor"). Pure, so the
+//! that display. Ported from the Tauri shell's desktop/src/placement.rs (deleted in
+//! D24) so the GPUI app kept its placement (R4: "on the display under the cursor"). Pure, so the
 //! multi-display cases — which need hardware to try by hand — are covered by tests.
 //!
 //! Everything here is in global POINTS with a TOP-LEFT origin at the primary display's

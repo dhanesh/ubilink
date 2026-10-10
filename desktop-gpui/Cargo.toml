@@ -1,23 +1,23 @@
-# Satisfies: R2 (GPUI Phase 0 — a GPUI crate that builds `ubilink-next.app`).
+# Satisfies: R2 (GPUI Phase 0 — a GPUI crate that builds the app), GPUI Phase 2b (it is
+# now the shipping app: binary `ubilink`, Ubilink.app, `org.dhanesh.ubilink`).
 # See docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
 #
 # SEPARATE crate from ubilink-core on purpose (D11's rule, fourth time it applies after
 # registry/ and desktop/): GPUI, tray-icon, global-hotkey and the objc2 AppKit
 # bindings are a large native GUI tree, and the core stays GUI-free (D1/D8) so its S2
-# `no_network_deps` guard stays physically true. It also lives BESIDE desktop/ rather
-# than replacing it (spec D4): the Tauri shell keeps shipping until Phase 2, and this
-# crate builds a separately-identified app (`ubilink-next`, `org.ubilink.next`) so the
-# two never share macOS permission grants or a bundle id.
+# `no_network_deps` guard stays physically true. Phases 0-2a built it beside desktop/
+# under its own identity (spec D4); Phase 2b gave it the Tauri app's name, bundle id and
+# data dir, and the package name stays as it was to keep Cargo.lock unchanged.
 [package]
 name = "ubilink-next"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "GPUI desktop shell for ubilink (Phase 0 foundation; replaces desktop/ in Phase 2)."
+description = "Ubilink: the native GPUI macOS menu-bar app (tray, hotkeys, pop-up panel)."
 publish = false
 
 [[bin]]
-name = "ubilink-next"
+name = "ubilink"
 path = "src/main.rs"
 
 [features]
@@ -44,8 +44,8 @@ ubilink-app = { path = "../app" }
 # font-kit text stack is switched on by gpui-kit itself (its gpui_platform dependency).
 gpui-kit = "=0.7.0"
 
-# Menu-bar icon and the global hotkey (U1), the same jobs Tauri's tray + global-shortcut
-# plugin do in desktop/.
+# Menu-bar icon and the global hotkey (U1), the jobs Tauri's tray + global-shortcut
+# plugin did in the deleted Tauri shell.
 tray-icon = "0.26"
 global-hotkey = "0.8"
 
@@ -81,7 +81,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSURL",
   "NSError",
 ] }
-# Launch at login via SMAppService (replaces the Tauri autostart path).
+# Launch at login via SMAppService (replaced the Tauri autostart path).
 objc2-service-management = { version = "0.3", default-features = false, features = [
   "std",
   "objc2",

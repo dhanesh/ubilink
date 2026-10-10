@@ -1,7 +1,7 @@
 # ubilink feature map
 
-One file per user-facing feature of ubilink-next, in sweep order. Each names its source
-anchors (paths relative to `desktop-gpui/`), how to reach it, the exact drive, and what
+One file per user-facing feature of ubilink (desktop-gpui/), in sweep order. Each names
+its source anchors (paths relative to `desktop-gpui/`), how to reach it, the exact drive, and what
 proves it. A diff touching an anchor makes that feature *touched*, and a touched feature
 needs fresh evidence on the new head.
 

@@ -13,7 +13,7 @@ pub struct PermissionReport {
     /// Accessibility (AXIsProcessTrusted) — lets Ubilink script another app's
     /// menus (AX-based adapters, e.g. Bear's "Copy Link"). Defect 5: this is
     /// NOT required for the global hotkey, which registers via Carbon
-    /// `RegisterEventHotKey` (see `desktop/src/main.rs`'s `register_hotkeys`)
+    /// `RegisterEventHotKey` (`desktop-gpui/src/shell/hotkeys.rs`, via global-hotkey)
     /// and needs no TCC grant at all — nor for capture from browsers/Finder,
     /// which goes through osascript (Automation) instead.
     pub accessibility: bool,

@@ -4,16 +4,16 @@
 //
 // `design/ubilink-tokens.json` is embedded at compile time (`include_str!`)
 // rather than read at start-up: Task 12's brief requires the shell to have no
-// runtime file dependency on `design/`, which stays a web/Tauri-shell asset
-// (binding constraint: don't touch `design/`, `dist/`).
+// runtime file dependency on `design/` (Phase 0's binding constraint was not to
+// touch `design/` or the Tauri web panel that also rendered it).
 
 use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
 use gpui_kit::SharedString;
 use serde::Deserialize;
 
-/// The source of truth: the same JSON `dist/tokens.css` renders for the web
-/// shell, embedded so the GPUI binary ships with no runtime dependency on
-/// `design/`.
+/// The source of truth (`design/ubilink-tokens.json`, which the deleted Tauri web
+/// panel also rendered as `dist/tokens.css`), embedded so the GPUI binary ships with
+/// no runtime dependency on `design/`.
 const RAW_TOKENS: &str = include_str!("../../../design/ubilink-tokens.json");
 
 /// Mirrors `design/ubilink-tokens.json`'s shape. Only the fields Task 12 (and

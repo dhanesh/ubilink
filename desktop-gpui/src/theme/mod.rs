@@ -1,5 +1,5 @@
-//! Converts ubilink's web design tokens (`design/ubilink-tokens.json`, also
-//! rendered as `dist/tokens.css` for the Tauri shell) into gpui-component
+//! Converts ubilink's design tokens (`design/ubilink-tokens.json`, which the
+//! deleted Tauri web panel rendered as `dist/tokens.css`) into gpui-component
 //! `ThemeConfig`s for light and dark mode (Phase 0 R12). Everything the
 //! tokens define but gpui-component's `ThemeConfig`/`ThemeConfigColors` have
 //! no slot for — the spacing scale, the radii/font sizes beyond the one pair

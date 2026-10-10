@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ubilink_instance.py: long-lived, named ubilink-next instances for verify-ubilink.
+"""ubilink_instance.py: long-lived, named ubilink instances for verify-ubilink.
 
 `scripts/probe.py run` launches instances, runs one scenario and tears them down in a
 single process. A verifier needs the same instances to outlive one command: launch,

@@ -189,7 +189,7 @@ fn settle_capture(backend: &Mutex<PanelBackend>, result: Result<PanelView, Strin
             .and_then(|b| b.export_graph());
         match export {
             Ok(json) => order_by_recency(&view.resource.uri, &mut view.backlinks, &json),
-            Err(e) => eprintln!("[ubilink-next] backlinks shown unordered: {e}"),
+            Err(e) => eprintln!("[ubilink] backlinks shown unordered: {e}"),
         }
     }
     Phase::from_core(Ok(view))
@@ -218,7 +218,7 @@ fn order_by_recency(subject: &str, backlinks: &mut [LinkView], export: &str) {
     let export: Export = match serde_json::from_str(export) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[ubilink-next] backlinks shown unordered: unreadable export ({e})");
+            eprintln!("[ubilink] backlinks shown unordered: unreadable export ({e})");
             return;
         }
     };

@@ -23,7 +23,7 @@ pub fn graph_stats(state: &AppState) -> Result<GraphStats, String> {
     backend.graph_stats()
 }
 
-/// Settings: wipe the graph (destructive — the webview confirms first). Returns
+/// Settings: wipe the graph (destructive — the Settings view confirms first). Returns
 /// the number of resources removed.
 pub fn reset_graph(state: &AppState) -> Result<i64, String> {
     let mut backend = state
@@ -55,7 +55,7 @@ pub fn export_graph(state: &AppState, dir: &Path) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Settings: import a graph-export JSON (read by the webview's file input).
+/// Settings: import a graph-export JSON (read from a fixture or an open dialog's file).
 /// Merges into the current graph; returns a human summary.
 pub fn import_graph(state: &AppState, json: &str) -> Result<String, String> {
     let mut backend = state

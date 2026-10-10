@@ -1,22 +1,21 @@
-# ── Rust / Tauri core ──
+# ── Rust ──
 /src-tauri/target/
 **/target/
 *.rs.bk
 *.pdb
 
-# ── Node / web frontend ──
+# ── Node (the plugin sandbox host) ──
 node_modules/
-dist-ssr/
-.vite/
 *.local
-# NOTE: root /dist/ is NOT ignored — this is a no-build app, so dist/ holds
-# hand-authored frontend SOURCE (panel.html/css/js), not generated output.
-# The CI signing artifacts under src-tauri/dist/ ARE generated, so ignore those:
+# The CI signing artifacts under src-tauri/dist/ are generated:
 /src-tauri/dist/
 
-# ── Tauri build output ──
-/src-tauri/gen/
-/src-tauri/WixTools/
+# ── App bundles (scripts/bundle-macos.sh: Ubilink.app + DMG) ──
+/desktop-gpui/bundle/
+
+# ── Leftovers of the deleted Tauri app (D24) ──
+# desktop/ is gone from the tree, but a checkout that built it still has its
+# generated output on disk; keep that out of `git status` until it is deleted.
 /desktop/gen/
 /desktop/WixTools/
 

@@ -5,7 +5,7 @@
 //! two probe instances never share a socket (R8).
 //!
 //! S2: deliberately a different path and listener from the single-instance socket
-//! (`shell::single_instance`, `org.ubilink.next.instance.sock`), which carries one fixed
+//! (`shell::single_instance`, `org.dhanesh.ubilink.instance.sock`), which carries one fixed
 //! word and is compiled into every build; this one exists only with the `automation`
 //! feature.
 //!

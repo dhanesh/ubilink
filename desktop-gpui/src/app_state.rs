@@ -16,7 +16,7 @@
 //!   automation build skips it and starts `NotDetermined`: probes drive permissions
 //!   through the `permission` fixture seam (`crate::fixtures`, spec O4) and capture
 //!   through the `capture` fixture, so nothing in a probe depends on the real answer.
-//!   A release build probes once at start-up, exactly as the Tauri shell does.
+//!   A release build probes once at start-up, exactly as the Tauri shell did.
 //!
 //! The data dir comes from [`crate::paths::data_dir`] (the one resolver, O1), so a
 //! probe instance's graph is its own `UBILINK_DATA_DIR/ubilink-graph.sqlite`, the file
@@ -49,7 +49,7 @@ static SHARED: OnceLock<Shared> = OnceLock::new();
 pub fn init() {
     let shared = shared();
     if let Some(e) = &shared.error {
-        eprintln!("[ubilink-next] {e}");
+        eprintln!("[ubilink] {e}");
     }
 }
 
@@ -82,7 +82,7 @@ fn shared() -> &'static Shared {
 
 /// The automation permission the service starts with. An automation build never
 /// runs `runner` (I5: no TCC prompt or focus theft inside a probe); a release build
-/// asks it once, as `desktop/src/main.rs` does.
+/// asks it once, as the Tauri shell's `desktop/src/main.rs` did.
 fn startup_permission<R: CommandRunner>(runner: &R) -> PermissionState {
     #[cfg(feature = "automation")]
     {
@@ -109,7 +109,7 @@ fn build(data_dir: &Path, permission: PermissionState) -> (AppState, Option<Stri
     let db_path = data_dir.join(GRAPH_FILE);
     let graph = match LinkGraph::open(&db_path.to_string_lossy()) {
         Ok(g) => {
-            eprintln!("[ubilink-next] link graph: {}", db_path.display());
+            eprintln!("[ubilink] link graph: {}", db_path.display());
             g
         }
         Err(e) => {
@@ -126,11 +126,11 @@ fn build(data_dir: &Path, permission: PermissionState) -> (AppState, Option<Stri
     if let Ok(json) = std::fs::read_to_string(&user_adapters) {
         match adapters.extend_from_json(&json) {
             Ok(n) => eprintln!(
-                "[ubilink-next] loaded {n} user adapter(s) from {}",
+                "[ubilink] loaded {n} user adapter(s) from {}",
                 user_adapters.display()
             ),
             Err(e) => eprintln!(
-                "[ubilink-next] ignoring invalid {}: {e}",
+                "[ubilink] ignoring invalid {}: {e}",
                 user_adapters.display()
             ),
         }
@@ -159,10 +159,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "ubilink-next-app-state-{tag}-{}",
-            std::process::id()
-        ));
+        let d =
+            std::env::temp_dir().join(format!("ubilink-app-state-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

@@ -1,10 +1,10 @@
 // Satisfies: R2 (GPUI Phase 0 foundation). See
 // docs/superpowers/specs/2026-10-03-gpui-phase0-foundation.md.
 //
-// The GPUI shell that replaces desktop/ (Tauri) in Phase 2; until then it ships beside
-// it as `ubilink-next` (spec D4). A separate crate for the same reason desktop/ is
-// (D11): the GUI tree stays out of ubilink-core, which holds all logic and is tested
-// headlessly. This Phase 0 binary only proves the pinned stack builds, bundles and runs
+// The GPUI shell that replaced desktop/ (Tauri) in Phase 2b: it ships as `ubilink`
+// (Ubilink.app, `org.dhanesh.ubilink`), the Tauri app's identity and data dir (D24). A
+// separate crate for the same reason the Tauri shell was (D11): the GUI tree stays out of
+// ubilink-core, which holds all logic and is tested headlessly. This Phase 0 binary only proves the pinned stack builds, bundles and runs
 // as a menu-bar (accessory) app with the shell of R4 (tray, hotkeys, pop-up panel —
 // see src/shell/). Building needs full Xcode (GPUI compiles Metal shaders); running needs a
 // desktop session.
@@ -36,12 +36,12 @@ fn main() {
         std::env::var_os(automation::socket::INSTANCE_ENV).as_ref(),
         std::env::var_os(paths::DATA_DIR_ENV).as_ref(),
     ) {
-        eprintln!("[ubilink-next] {e}");
+        eprintln!("[ubilink] {e}");
         std::process::exit(2);
     }
     // Resolved once at startup and logged, so a run's data location is visible in its
     // log (and a relative override is reported) before any store opens it.
-    eprintln!("[ubilink-next] data dir: {}", paths::data_dir().display());
+    eprintln!("[ubilink] data dir: {}", paths::data_dir().display());
     // Single instance (R4's "one process"): settle it before GPUI starts, so a second
     // launch exits without ever creating windows, a tray item or hotkeys.
     // The listener thread posts to the shell's inbox, created here so it exists first.
@@ -49,11 +49,11 @@ fn main() {
     let on_show = inbox.clone();
     match single_instance::claim(move || on_show.post(ShellEvent::Show)) {
         Claim::Signalled => {
-            eprintln!("[ubilink-next] already running: asked it to show the panel");
+            eprintln!("[ubilink] already running: asked it to show the panel");
             return;
         }
         Claim::Primary => {}
-        Claim::Unguarded(e) => eprintln!("[ubilink-next] single-instance guard unavailable: {e}"),
+        Claim::Unguarded(e) => eprintln!("[ubilink] single-instance guard unavailable: {e}"),
     }
     // After the single-instance claim, so a second launch never binds (or clears) the
     // first one's automation socket; before GPUI, like the single-instance listener:
@@ -66,7 +66,7 @@ fn main() {
     app_state::init();
 
     let app = gpui_kit::application();
-    // `open ubilink-next.app` while it runs: LaunchServices sends a reopen instead of
+    // `open Ubilink.app` while it runs: LaunchServices sends a reopen instead of
     // starting a second process. Show the panel, as the Tauri shell's tray "Show" did.
     app.on_reopen(|cx| shell::execute(Command::Open(Route::Capture), cx));
     app.run(move |cx| {

@@ -205,7 +205,7 @@ _GPUI_MANIFEST = REPO_ROOT / "desktop-gpui" / "Cargo.toml"
 
 def _cargo_release_build(features, target: Path, out_dir: Path, label: str):
     """Build the desktop-gpui release binary into the shared `target` and copy it to
-    out_dir/ubilink-next-<label>. Returns (copy, None) or (None, why).
+    out_dir/ubilink-<label>. Returns (copy, None) or (None, why).
 
     Final review C3: the factory verifier runs this in a fresh clone with 600 s per
     command, so the build goes through the shared warm target (shared_target_dir(),
@@ -231,8 +231,8 @@ def _cargo_release_build(features, target: Path, out_dir: Path, label: str):
         return None, f"`{' '.join(cmd)}` exited {proc.returncode}"
     exe = executable_from_cargo_json(proc.stdout)
     if not exe or not Path(exe).is_file():
-        return None, "cargo reported no ubilink-next executable"
-    own = Path(out_dir) / f"ubilink-next-{label}"
+        return None, "cargo reported no ubilink executable"
+    own = Path(out_dir) / f"ubilink-{label}"
     if subprocess.run(["cp", "-c", exe, str(own)], capture_output=True).returncode != 0:
         shutil.copy2(exe, own)
     return own, None
@@ -261,7 +261,7 @@ def cmd_release_clean(args: argparse.Namespace) -> int:
     name to be found — otherwise a check that can never find anything would pass.
     Both builds go through the shared warm target under the target lock (C3), and
     each binary is copied out under that lock and checked from the copy, so the
-    automation build overwriting target/release/ubilink-next no longer matters (the
+    automation build overwriting target/release/ubilink no longer matters (the
     old third "restore the shipped binary" build is gone with it).
     """
     failures = []
@@ -1072,7 +1072,7 @@ def cmd_fixtures(args: argparse.Namespace) -> int:
 # `run`: the instance runner and scenario engine (R8, O1, O4, TN5)
 # ══════════════════════════════════════════════════════════════════════════
 #
-# R8: launch isolated automation instances of ubilink-next (own data dir, sockets,
+# R8: launch isolated automation instances of ubilink (own data dir, sockets,
 # fixtures, no real hotkeys), drive them through the automation socket (R6), and
 # check what they show with scenario files under desktop-gpui/probes/. The scenario
 # format is documented in desktop-gpui/probes/README.md; keep the two in step.
@@ -1238,7 +1238,7 @@ def source_revision(repo: Path = None) -> tuple:
     return head.stdout.strip(), status.returncode != 0 or bool(status.stdout.strip())
 
 
-def executable_from_cargo_json(stdout: str, bin_name: str = "ubilink-next"):
+def executable_from_cargo_json(stdout: str, bin_name: str = "ubilink"):
     """The `executable` of the compiler-artifact message for `bin_name`, or None.
 
     Taken from cargo's own report instead of assumed (`target/debug/<name>`): the
@@ -1268,11 +1268,11 @@ _builds = {}
 
 
 def build_binary(run_dir: Path, release: bool = False, out=print) -> Build:
-    """Build ubilink-next and take this run's own copy of it, under the target lock.
+    """Build ubilink and take this run's own copy of it, under the target lock.
 
     The warm target dir (shared_target_dir(): an exported CARGO_TARGET_DIR, else
     CACHE_ROOT/target) is shared by every clone and commit (that is its point), so
-    its `ubilink-next` is whatever the last probe built. Building and cloning the
+    its `ubilink` is whatever the last probe built. Building and cloning the
     produced executable into `run_dir` both happen while holding
     CACHE_ROOT/target.lock: no other probe can replace the binary between our build
     finishing and our copy, so the instances run exactly this commit's code even when
@@ -1308,8 +1308,8 @@ def build_binary(run_dir: Path, release: bool = False, out=print) -> Build:
             raise ProbeError(f"{key} build exited {proc.returncode}")
         exe = executable_from_cargo_json(proc.stdout)
         if not exe or not Path(exe).is_file():
-            raise ProbeError(f"cargo reported no ubilink-next executable for the {key} build")
-        own = Path(run_dir) / f"ubilink-next-{key}"
+            raise ProbeError(f"cargo reported no ubilink executable for the {key} build")
+        own = Path(run_dir) / f"ubilink-{key}"
         if subprocess.run(["cp", "-c", exe, str(own)], capture_output=True).returncode != 0:
             shutil.copy2(exe, own)
     build = Build(own, key, _sha256_file(own), commit, dirty)
@@ -1431,7 +1431,7 @@ def instance_name(label: str, pid: int = None) -> str:
 
 
 class Instance:
-    """One isolated ubilink-next process.
+    """One isolated ubilink process.
 
     Isolation (O1): its own UBILINK_INSTANCE (so its own automation socket), its own
     single-instance socket (UBILINK_INSTANCE_SOCKET, so it neither signals nor is
@@ -1519,7 +1519,7 @@ class Instance:
 
     def _launch(self, timeout: float):
         # Launched directly, not through `open`: LaunchServices would fold it into the
-        # user's running ubilink-next (same bundle id) instead of starting an instance.
+        # user's running ubilink (same bundle id) instead of starting an instance.
         log = open(self.log_path, "ab")
         try:
             self.proc = subprocess.Popen(
@@ -3372,7 +3372,7 @@ def _cputime(pid: int) -> float:
 def stripped_size_mb(binary: Path, work: Path) -> float:
     """Size of the binary after `strip` (a copy; idempotent on an already-stripped
     release build, which `strip = true` in desktop-gpui's release profile makes it)."""
-    copy = Path(work) / "stripped-ubilink-next"
+    copy = Path(work) / "stripped-ubilink"
     shutil.copy2(binary, copy)
     proc = subprocess.run(["strip", str(copy)], capture_output=True, text=True)
     if proc.returncode != 0:

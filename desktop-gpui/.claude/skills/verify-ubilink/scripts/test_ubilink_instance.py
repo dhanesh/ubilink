@@ -112,7 +112,7 @@ class Reclaim(unittest.TestCase):
         """A claim whose 'binary' is a copy of sleep that is really running."""
         d = self.root / name
         d.mkdir()
-        binary = d / "ubilink-next-automation"
+        binary = d / "ubilink-automation"
         shutil.copy("/bin/sleep", binary)
         # A copied system binary loses its valid signature and macOS kills it on exec;
         # an ad-hoc signature lets it run under the new path.
@@ -315,7 +315,7 @@ class RestartEndToEnd(unittest.TestCase):
         self.run_root.mkdir(parents=True)
         self.real_is_ours = ui.is_ours
         ui.is_ours = alive_not_zombie  # the stand-in is a script: ps shows its interpreter
-        self.binary = TMP / "fake-ubilink-next"
+        self.binary = TMP / "fake-ubilink"
         self.binary.write_text(FAKE_APP)
         self.binary.chmod(0o755)
         self.inst = ui.probe.Instance("vr", str(self.binary))

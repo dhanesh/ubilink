@@ -61,12 +61,17 @@ pub enum CaptureFailure {
 }
 
 impl CaptureFailure {
-    /// The human-readable message the UI shows (U3 — always non-empty).
-    pub fn explanation(&self) -> &str {
+    /// The human-readable message the UI shows (U3 — always non-empty). For a
+    /// missing permission it says what failed AND what to do: the explanation
+    /// followed by `how_to_fix`, so no caller can drop the fix.
+    pub fn explanation(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            CaptureFailure::PermissionRequired { explanation, .. } => explanation,
-            CaptureFailure::Unsupported { explanation } => explanation,
-            CaptureFailure::AdapterError { explanation } => explanation,
+            CaptureFailure::PermissionRequired {
+                explanation,
+                how_to_fix,
+            } => std::borrow::Cow::Owned(format!("{explanation} {how_to_fix}")),
+            CaptureFailure::Unsupported { explanation } => explanation.into(),
+            CaptureFailure::AdapterError { explanation } => explanation.into(),
         }
     }
 }
@@ -394,6 +399,28 @@ mod tests {
     }
 
     #[test]
+    fn explanation_joins_the_fix_for_permission_and_is_verbatim_otherwise() {
+        // U3: a permission failure tells the user what failed and how to fix it.
+        let p = CaptureFailure::PermissionRequired {
+            explanation: "ubilink needs your permission.".into(),
+            how_to_fix: "Grant access in System Settings.".into(),
+        };
+        assert_eq!(
+            p.explanation(),
+            "ubilink needs your permission. Grant access in System Settings."
+        );
+        // The other variants are shown exactly as carried.
+        let u = CaptureFailure::Unsupported {
+            explanation: "No adapter for Foo.".into(),
+        };
+        assert_eq!(u.explanation(), "No adapter for Foo.");
+        let a = CaptureFailure::AdapterError {
+            explanation: "Foo returned nothing.".into(),
+        };
+        assert_eq!(a.explanation(), "Foo returned nothing.");
+    }
+
+    #[test]
     fn permission_gate_blocks_capture_with_explanation_not_silence() {
         // S4 / TN7 / U3: a live-app adapter without permission yields a
         // PermissionRequired failure carrying a human explanation — never silent.
@@ -429,6 +456,10 @@ mod tests {
                 }
                 other => panic!("expected PermissionRequired, got {other:?}"),
             }
+            // U3: the message the UI shows says what failed AND what to do.
+            let msg = err.explanation();
+            assert!(msg.contains("safari.macos"), "what failed: {msg}");
+            assert!(msg.contains("System Settings"), "how to fix: {msg}");
         }
         // With permission granted, the gate opens (and capture runs -> panics here,
         // proving the gate is what stops it). We assert the gate path only.

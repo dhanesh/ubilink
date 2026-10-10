@@ -26,10 +26,9 @@ and tested, and is coming to the app in a later release.
 
 | Layer | Tech | Why |
 |-------|------|-----|
-| Core | **Rust** (Tauri) | OS automation, the link graph, the capability broker — the trusted domain |
-| Commands | **Rust** (`app/`, ubilink-app) | the GUI-free command layer both desktop shells call; no Tauri or GPUI crate in its tree |
-| UI | Web (Tauri webview) | the shipping hotkey panel + settings (`desktop/`, `dist/`) |
-| UI (next) | **Native GPUI** (`desktop-gpui/`) | `ubilink-next`, the native rewrite of the panel; in progress, not yet shipped ([D22](DECISIONS.md)) |
+| Core | **Rust** (`src-tauri/`, ubilink-core) | OS automation, the link graph, the capability broker — the trusted domain; no GUI crate in its tree |
+| Commands | **Rust** (`app/`, ubilink-app) | the GUI-free command layer the app calls; no GPUI crate in its tree |
+| UI | **Native GPUI** (`desktop-gpui/`) | the macOS menu-bar app: hotkey panel, link browser, settings, onboarding (binary `ubilink`, Ubilink.app) ([D22](DECISIONS.md), [D24](DECISIONS.md)) |
 | Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/child** access (and, on macOS, no network); all privileged access is broker-mediated |
 | Storage | **Local SQLite** | the bidirectional graph, on-device, zero telemetry |
 
@@ -65,9 +64,20 @@ way to get it, and revoking the grant stops it).
 
 Built and tested:
 
-- ✅ macOS desktop app: hotkey panel (Cmd+Shift+K capture, Cmd+Shift+L link browser,
-  Cmd+Shift+, settings), permission onboarding, graph export/import, app-adapter
-  manager — `desktop/`, `dist/`
+- ✅ macOS app, native GPUI (`desktop-gpui/`, binary `ubilink`, Ubilink.app): a
+  menu-bar shell with a native blurred pop-up panel, global hotkeys and a tray, and four
+  views:
+  - capture (Cmd+Shift+K), with copy and backlinks
+  - link browser (Cmd+Shift+L), with a virtualised list, fuzzy filter, keyboard
+    navigation and ⌘L linking
+  - onboarding for the Automation permission
+  - settings (Cmd+Shift+,), with app adapters, graph export/import/reset and launch at
+    login
+
+  Light and dark token theming. Each feature is proven on the running app by the GPUI
+  probes (`scripts/probe.py`, `desktop-gpui/probes/`) through an automation socket that
+  release builds never contain ([D23](DECISIONS.md)). It replaced the earlier Tauri
+  app in GPUI Phase 2b, keeping its name, bundle id and data dir ([D24](DECISIONS.md)).
 - ✅ Declarative macOS app adapters (7 browsers, Finder, Bear, Things3), extensible
   with your own `adapters.json`; every `osascript` call is bounded (15 s) —
   `src-tauri/src/adapters_config.rs`, `src-tauri/src/live_capture.rs`,
@@ -88,20 +98,7 @@ Built and tested:
 - ✅ Capability matrix derived from the adapter registry, published as
   [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) and drift-guarded by a test —
   `src-tauri/src/capabilities.rs`
-- ✅ GUI-free command layer shared by both desktop shells — `app/`
-- 🚧 Native GPUI app, `ubilink-next` (`desktop-gpui/`), built beside the Tauri app
-  rather than replacing it yet:
-  - menu-bar shell with a native blurred pop-up panel, global hotkeys and tray
-  - all four views ported:
-    - capture, with copy and backlinks
-    - link browser, with a virtualised list, fuzzy filter, keyboard navigation and
-      ⌘L linking
-    - onboarding
-    - settings, with adapters, graph export/import/reset and launch at login
-  - light and dark token theming
-  - each feature is proven on the running app by the GPUI probes
-    (`scripts/probe.py`, `desktop-gpui/probes/`) through an automation socket
-    that release builds never contain ([D23](DECISIONS.md))
+- ✅ GUI-free command layer the app calls — `app/`
 
 Not done yet:
 
@@ -114,8 +111,8 @@ Not done yet:
   tests and the CLI tools.
 - ⬜ **No OS sandbox off macOS.** On Linux/Windows the plugin host has no jail, so
   network, native file writes and signals are open there (`DECISIONS.md` D1).
-- ⬜ **`ubilink-next` does not ship yet.** The released app is still the Tauri app.
-  Before the cutover, these still need an attended check:
+- ⬜ **Attended checks on the GPUI app.** The probes cannot drive these, so they
+  still need a person at a real Mac ([`docs/RUNBOOK-gui-panel.md`](docs/RUNBOOK-gui-panel.md)):
   - the real login-item registration (SMAppService)
   - the native save and open dialogs
   - VoiceOver
@@ -151,11 +148,11 @@ Requires macOS, the Rust toolchain pinned in `rust-toolchain.toml`, Node ≥ 22.
 full Xcode (the GPUI crate compiles Metal shaders).
 
 ```sh
-make verify                  # the merge gate: fmt + clippy + every crate's tests (incl. GPUI) + JS tests + release-clean
+make verify                  # the merge gate: fmt + clippy + every crate's tests (incl. GPUI) + script tests + release-clean
 make verify LOCKED=--locked  # exactly what CI runs
-make test                    # faster loop: core + registry + app + JS (skips the Tauri and GPUI builds)
-make run                     # build + launch the desktop app (Tauri)
-make bundle-next             # build ubilink-next.app, the GPUI app, for local use
+make test                    # faster loop: core + registry + app + script tests (skips the GPUI build)
+make bundle                  # build Ubilink.app (the GPUI app) into desktop-gpui/bundle/, for local use
+make run                     # make bundle, then open it — against your REAL data dir
 make probe                   # GPUI probes against a live desktop session (not part of verify)
 make budget                  # measure the GPUI release app (idle CPU, footprint, size, hotkey latency)
 ```

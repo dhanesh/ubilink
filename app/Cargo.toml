@@ -1,11 +1,11 @@
 # Satisfies: R3 (GPUI Phase 0 plan, task 3). A SEPARATE crate from both
-# ubilink-core AND desktop/, on purpose: D8/D11 already established that
+# ubilink-core AND the app shell, on purpose: D8/D11 already established that
 # ubilink-core stays GUI-free so its S2 `no_network_deps` guard stays
-# physically true, and that the imperative shell (Tauri today, GPUI next)
-# is a thin wrapper over plain-Rust command logic. This crate IS that
-# command logic, lifted out of desktop/src/main.rs so both shells call the
-# same functions instead of the GPUI port re-deriving Tauri's behaviour —
-# a UI port, not a logic port.
+# physically true, and that the imperative shell is a thin wrapper over
+# plain-Rust command logic. This crate IS that command logic, lifted out of the
+# Tauri shell (desktop/src/main.rs, deleted in D24) so the GPUI port called the
+# same functions instead of re-deriving Tauri's behaviour — a UI port, not a
+# logic port. desktop-gpui/ is now its only caller.
 #
 # Deliberately depends on NOTHING but ubilink-core + serde/serde_json — the
 # exact set the moved command bodies already used. No tauri*, no gpui*, no
@@ -17,7 +17,7 @@ name = "ubilink-app"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "GUI-free Tauri/GPUI command logic for ubilink, shared by both desktop shells (R3)."
+description = "GUI-free command logic for ubilink, called by the GPUI app (R3)."
 
 [lib]
 name = "ubilink_app"
