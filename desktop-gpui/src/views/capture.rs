@@ -428,12 +428,36 @@ impl CaptureView {
         let generation = lock().begin();
         let capture = cx.spawn(async move |this, cx| {
             let phase = run_capture(cx).await;
-            let _ = this.update(cx, |view, cx| {
-                if lock().settle(generation, &phase) {
-                    view.phase = phase;
-                    cx.notify();
-                }
-            });
+            let failed = matches!(phase, Phase::Failed { .. });
+            let settled = this
+                .update(cx, |view, cx| {
+                    let settled = lock().settle(generation, &phase);
+                    if settled {
+                        view.phase = phase;
+                        cx.notify();
+                    }
+                    settled
+                })
+                .unwrap_or(false);
+            if !(settled && failed) {
+                return;
+            }
+            // Phase 2 R1 (the Tauri panel's capture-err handler): the failure shows
+            // first, then the permission report decides. Automation not granted takes
+            // the user to where it is fixed (U3): the same panel window switches to
+            // onboarding. Granted, or no report, keeps the failure here.
+            let to_onboarding = cx
+                .background_executor()
+                .spawn(async { super::onboarding::failed_capture_routes_here() })
+                .await;
+            // Hiding or re-routing the panel drops this view and cancels this task, so
+            // reaching here means the panel is still open on this capture; a newer
+            // capture (generation) owns the route instead.
+            if to_onboarding && lock().generation == generation {
+                cx.update(|cx| {
+                    crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx)
+                });
+            }
         });
         CaptureView {
             phase: Phase::Capturing,

@@ -214,6 +214,21 @@ fn check_permissions() -> Result<Report, String> {
     }
 }
 
+/// Phase 2 R1: does a failed capture take the user here? Only when the permission
+/// report says Automation is not granted — the one permission a capture needs (the
+/// Tauri panel's `canUseCapture`, "Defect 5"). A missing Accessibility grant alone,
+/// or no report at all (a failed check), leaves the failure on the capture view.
+pub fn capture_failure_needs_onboarding(check: &Result<Report, String>) -> bool {
+    matches!(check, Ok(report) if !report.granted(Permission::Automation))
+}
+
+/// Read the same permission report this view shows (the `permission` fixture, or in
+/// a release build the live probe) and answer [`capture_failure_needs_onboarding`].
+/// May block (the release osascript probe): call it off the main thread.
+pub fn failed_capture_routes_here() -> bool {
+    capture_failure_needs_onboarding(&check_permissions())
+}
+
 /// Open `p`'s System Settings pane through the core's launcher, wrapped in the
 /// shell's opener (the opener sink in automation builds). Returns the hint to show.
 fn open_pane(p: Permission) -> String {
@@ -516,8 +531,8 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        read_report, recheck_message, state, status_text, steps_after, Permission, Report, ALL_SET,
-        GRANTED, NOT_GRANTED, UNKNOWN,
+        capture_failure_needs_onboarding, read_report, recheck_message, state, status_text,
+        steps_after, Permission, Report, ALL_SET, GRANTED, NOT_GRANTED, UNKNOWN,
     };
     use Permission::{Accessibility, Automation};
 
@@ -561,6 +576,20 @@ mod tests {
 
         // Nothing missing on first look: show every permission as granted.
         assert_eq!(steps_after(&[], &granted), Permission::ALL);
+    }
+
+    #[test]
+    fn failed_capture_routes_to_onboarding_only_when_automation_is_missing() {
+        assert!(capture_failure_needs_onboarding(&report(false, "denied")));
+        assert!(capture_failure_needs_onboarding(&report(
+            true,
+            "not_determined"
+        )));
+        // Automation granted: Accessibility alone never routes (Tauri "Defect 5").
+        assert!(!capture_failure_needs_onboarding(&report(true, "granted")));
+        assert!(!capture_failure_needs_onboarding(&report(false, "granted")));
+        // No report: stay on the capture view with its failure.
+        assert!(!capture_failure_needs_onboarding(&Err("no report".into())));
     }
 
     #[test]
