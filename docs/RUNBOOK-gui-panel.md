@@ -88,7 +88,13 @@ keychain the first time.
    Check text contrast meets WCAG AA on the real display, in light and dark mode.
 5. **Host-only features the probes stub out (O4):** turn **Launch at login** on and off
    in Settings and confirm System Settings › General › Login Items follows
-   (SMAppService); export and import the graph through the real save and open dialogs.
+   (SMAppService). **Export** writes `ubilink-export-<time>.json` into Downloads (or
+   home), with no dialog, and Finder opens with the file selected; the hint line names
+   the path. **Import**: the open dialog must come to the front, above the panel. Pick
+   the exported file: the counts come back. Then press Import again and cancel with
+   Escape: Settings is still open and takes Tab and Escape. Pressing Import while its
+   dialog is open does nothing; it never stacks a second dialog. No probe can do this:
+   automation builds never open host dialogs (O4).
 6. **O2 — in-app capability disclosure.** The `capabilities` command returns the matrix
    derived from the loaded adapters (tested), but no view shows it yet. The Settings
    adapter list shows the available app adapters, not the per-platform matrix. The

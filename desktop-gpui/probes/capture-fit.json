@@ -4,7 +4,7 @@
   "notes": [
     "Measured layout (views/layout.rs): view.layout.last_backlink (the last row), view.layout.backlinks_box (the list's scroll box) and view.layout.viewport, in window points from one frame, compared with {\"path\": ...} operands.",
     "Tauri sized the window to the capture view's content (scrollHeight). At a fixed 140 pt the third backlink row is cut by the panel's bottom padding and later rows scroll out of sight.",
-    "Fails before the fix (on the instrumentation commit) at '3 backlinks: the last row is fully visible'."
+    "Must fail before the fix (on the instrumentation commit) at '3 backlinks: the last row is fully visible'."
   ],
   "setup": {
     "graph": "graph-backlinks.json",

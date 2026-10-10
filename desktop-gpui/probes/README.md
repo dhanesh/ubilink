@@ -384,6 +384,49 @@ Phase 2 view contract additions these imply, beyond "Phase 1 view-state contract
   Tab (`focused` = `gpui_focus` or `active_descendant_focus` on that node), and Enter
   on a focused row opens its URI through the shell's opener instead of copying.
 
+## Phase 2b parity regression scenarios
+
+A hands-on check of the shipped GPUI app found regressions that the scenarios above
+missed: they read the accessibility tree, which has no bounds or text sizes, and
+nothing pressed Escape. Five scenarios cover them. The four layout scenarios read
+measured layout (`state.view.layout`, below) and compare two measurements with
+`{"path": ...}` operands ([Expectations](#expectations)). Before its fix, each must
+exit 1 at the step named below, after every earlier step passes. `escape-dismiss` is
+checked against 4c6e66d. The layout scenarios fail on the commits
+that add the measurements (8cdc431, f2f8176), because 4c6e66d reports no layout to
+compare. Run them by name.
+
+| Scenario | Requirement | Must fail before its fix at |
+|---|---|---|
+| `escape-dismiss` | Escape, a real keystroke through GPUI's keymap. Capture and onboarding hide the panel. The browser cancels a pending mark, then clears a non-empty filter (rows unfiltered again), then hides. Settings closes an open reset question (nothing deleted), then hides. Each hide is confirmed three ways: `shell.visible` false, `window_id` refuses, and `winframe: gone`. Tauri `dist/panel.js` 555-592. | "capture: Escape dismisses the panel" |
+| `settings-fit` | With the 10 adapters of `fixtures/adapters.json` (3 rows of 4), the last adapter switch ends inside the grid's scroll box, and the box ends inside the window. This holds when shown, while the reset question adds its row, and after Escape closes it. The window stays on its display (`winframe: state`). Tauri `resize_panel` / `fitWindow`. | "shown: the last adapter switch is fully visible (inside its scroll box, inside the window)" |
+| `settings-buttons` | Import, Reset…, Delete everything and Cancel are as tall as Export (measured bounds). Tauri `.set-btn`. | "Import is as tall as Export" (expected 24 vs 28 pt) |
+| `settings-login-text` | The launch-at-login status (`Enabled`) resolves to the same text size as the `Launch at login` label: 12 pt, `font_size::META`. | "Enabled is the label's size" (expected 14 vs 11.375 pt) |
+| `capture-fit` | With 3 backlinks, and with 4 after `graph-backlinks-newer.json` is merged, the last backlink row ends inside the list's scroll box, and the box ends inside the window. | "3 backlinks: the last row is fully visible" |
+
+What no scenario proves: Settings' **Import** dialog appearing in front of the panel,
+and the panel taking keys again after the dialog closes. Automation builds never open
+a host file dialog (O4). The Export reveal in Finder (`open -R`) is the same: it runs
+only in a release build, so a probe cannot see it. Both are checked by hand
+(`docs/RUNBOOK-gui-panel.md`). A probe covers the export write itself through the
+`export_path` fixture (`graph-roundtrip`).
+
+Phase 2b view contract additions:
+
+- **Escape** (`views::escape`, one pure decision per route): Settings closes the
+  reset question, else dismisses. The browser unmarks, else clears the filter, else
+  dismisses. Capture and onboarding dismiss. Dismiss is `shell::Command::Hide`, run
+  once the key's dispatch is over.
+- **Panel height per route** (`views::RouteEntry::height`). Capture, browser and
+  onboarding open at 140 pt. Settings opens at its content height
+  (`settings::content_height`). Capture refits to its backlinks when the capture lands
+  (`capture::content_height`, at most 8 rows). Settings refits when the reset question
+  opens or closes. The shell clamps every height to 96..900, keeps the panel's top,
+  cuts the height to the display's usable area, and moves the panel up rather than off
+  the bottom (`placement::fit_on`). A route switch resizes the same window in place;
+  it is never reopened. The width stays 640.
+- **Layout** (`state.view.layout`, settings and capture): see the table below.
+
 ## Phase 1 view-state contract
 
 What the Phase 1 views must expose for these scenarios to pass. It is derived from
@@ -419,6 +462,8 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
 | browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
+| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
+| capture | `layout` | object | as settings: `viewport`, and with backlinks `backlinks_box` and `last_backlink` | capture-fit |
 | every view | `theme_samples` | object | `{surface, text, accent}`, each `{x, y, w, h}` in window points from the panel's top-left: a region of an opaque surface the view paints with `color.uiBg`'s RGB at full opacity, a region around a run of primary text (`color.text1`) drawn on that surface, and a region inside a control filled with `color.accent`; each at least 24 × 24 pt (the probe fails a smaller one) | theming |
 
 The browser's first-frame time is not a view-state field: the browser records a

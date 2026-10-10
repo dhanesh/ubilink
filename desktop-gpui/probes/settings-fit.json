@@ -4,7 +4,7 @@
   "notes": [
     "The a11y dump carries no bounds, so the view reports measured layout (views/layout.rs), all in window points from one frame: view.layout.last_adapter (the last switch), view.layout.adapters_box (the grid's scroll box, which clips what it does not show) and view.layout.viewport (the window's content size). A {\"path\": ...} operand compares them (README, Expectations): the last switch ends inside the scroll box, and the box ends inside the window.",
     "Tauri fitted the window to its content (clamped 96..900, capped to the display's work area, moved up rather than off the bottom). At a fixed 640x140 the grid is clipped after its first row.",
-    "Fails before the fix (on the instrumentation commits) at 'shown: the last adapter switch is fully visible (inside its scroll box, inside the window)'."
+    "Must fail before the fix (on the instrumentation commit) at 'shown: the last adapter switch is fully visible (inside its scroll box, inside the window)'."
   ],
   "steps": [
     {

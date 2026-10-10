@@ -4,7 +4,7 @@
   "notes": [
     "The Tauri settings view had no launch-at-login row; its nearest equivalents, the status pill (.set-pill) and the row's sub line (.set-sub), used --fs-meta (12 px). The GPUI row uses font_size::META for both texts.",
     "Sizes are measured, not declared: view.layout.login_label.font_px and view.layout.login_status.font_px are the text sizes GPUI resolves for each text's element at prepaint (views/layout.rs).",
-    "Fails on the instrumentation commit (before the fix) at 'Enabled is the label's size' (14 vs 11.375 px)."
+    "Must fail on the instrumentation commit (before the fix) at 'Enabled is the label's size' (14 vs 11.375 px)."
   ],
   "setup": {
     "fixtures": {

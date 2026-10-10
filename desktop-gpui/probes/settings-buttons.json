@@ -4,7 +4,7 @@
   "notes": [
     "Heights are the buttons' measured bounds (view.layout.<name>_button.h, views/layout.rs), compared against Export's in the same state read.",
     "Export keeps its accent look (the R14 accent sample, theming.json); only the heights must agree.",
-    "Fails on the instrumentation commit (before the fix) at 'Import is as tall as Export' (24 vs 28 pt)."
+    "Must fail on the instrumentation commit (before the fix) at 'Import is as tall as Export' (24 vs 28 pt)."
   ],
   "steps": [
     {

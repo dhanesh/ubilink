@@ -5,7 +5,7 @@
     "Tauri reference (ee80e70:dist/panel.js): settings `if (!$('set-reset-confirm').hidden) close it, else dismiss_panel`; browser `if (markedUri) unmark; else if (browse.filter) clear the filter; else dismiss_panel`; every other view falls to the generic `if (e.key === 'Escape') invoke('dismiss_panel')` (capture, onboarding).",
     "The key verb dispatches a real Escape keystroke through GPUI's keymap and listeners in the panel window (the path a keyboard takes): in the browser the focused filter Input maps it to its Escape action, elsewhere it reaches the view's key listener.",
     "graph-backlinks.json seeded; capture-ok.json makes the capture land before Escape. Top-level browser rows in list_links order start Decoy Unrelated, Gamma Doc, Beta Post (browser-left-close.json).",
-    "Fails on 4c6e66d at 'capture: Escape dismisses the panel' (Escape is ignored there)."
+    "Must fail on 4c6e66d at 'capture: Escape dismisses the panel' (Escape is ignored there)."
   ],
   "setup": {
     "graph": "graph-backlinks.json",
