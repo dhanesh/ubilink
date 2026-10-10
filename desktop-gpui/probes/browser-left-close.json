@@ -1,0 +1,250 @@
+{
+  "description": "Phase 2 parity: in the link browser, Left while drilled goes back (panel stays); Left with a non-empty filter at the top level only edits the filter (panel stays); Left at the top level with an empty filter closes the panel (state, window_id and Quartz agree) and opens nothing",
+  "requirement": "P2-browser-left-close (GPUI Phase 2 parity, Tauri dist/panel.js:567-569 ArrowLeft + browseBack 367-371)",
+  "notes": [
+    "Tauri reference: ArrowLeft does nothing special while browse.filter is non-empty (the key edits the filter: `if (browse.filter) return;`), whatever the caret position; otherwise browseBack(): at the root it dismisses the panel, when drilled it goes back one level.",
+    "graph-backlinks.json seeded; top-level rows in list_links order: Decoy Unrelated, Gamma Doc, Beta Post, ... Gamma Doc's only connection is the subject (browser-drill.json).",
+    "Drilled round: one quick check that Left still returns to 'Your links' on route browser with the panel visible (browser-drill.json covers the selection restore).",
+    "Filter round: types 'be', then presses Left three times. The first two move the caret to the start of the text inside the Input; the third reaches the browser's bubble-phase MoveLeft at the text's start edge (A11Y-NOTES.md key table). The browser must still not close, because the filter is non-empty (the Tauri rule is about the filter's content, not the caret). Typing 'x' afterwards proves the caret went to the start and the filter is still being edited ('xbe').",
+    "Close round: a restart gives a fresh browser with an empty filter (End/Escape are intercepted by the browser, so clearing in place is not a plain keystroke). winframe 'any' records the window number right after the panel opens, so 'gone' checks the hide at the window server."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json"
+  },
+  "steps": [
+    {
+      "name": "drilled: open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "drilled: top level",
+      "see": {
+        "role": "Label",
+        "text": "Your links"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "drilled: select Gamma Doc and drill in",
+      "call": "key",
+      "args": {
+        "keys": "down"
+      }
+    },
+    {
+      "see": {
+        "role": "ListItem",
+        "nth": 1,
+        "state": {
+          "selected": true
+        },
+        "text": "https://gamma.example/three",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "right"
+      }
+    },
+    {
+      "name": "drilled: the trail names the parent",
+      "see": {
+        "role": "Label",
+        "text": "Linked to Gamma Doc"
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "drilled: Left goes back",
+      "call": "key",
+      "args": {
+        "keys": "left"
+      }
+    },
+    {
+      "name": "drilled: back at the top level",
+      "see": {
+        "role": "Label",
+        "text": "Your links"
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "drilled: still visible on route browser",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "filter: type 'be'",
+      "call": "key",
+      "args": {
+        "keys": "b e"
+      }
+    },
+    {
+      "name": "filter: the filter holds 'be'",
+      "see": {
+        "role": "TextInput",
+        "text": "be"
+      },
+      "exact": true,
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "filter: Left x3 (caret to the start, then past its edge)",
+      "call": "key",
+      "args": {
+        "keys": "left left left"
+      }
+    },
+    {
+      "name": "filter: let any close happen",
+      "sleep_ms": 500
+    },
+    {
+      "name": "filter: still visible on route browser",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "filter: the filter text is unchanged",
+      "see": {
+        "role": "TextInput",
+        "text": "be"
+      },
+      "exact": true,
+      "route": "browser",
+      "timeout_ms": 0
+    },
+    {
+      "name": "filter: typing continues at the caret (start)",
+      "call": "key",
+      "args": {
+        "keys": "x"
+      }
+    },
+    {
+      "name": "filter: the filter now reads 'xbe'",
+      "see": {
+        "role": "TextInput",
+        "text": "xbe"
+      },
+      "exact": true,
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "filter: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance: a browser with an empty filter",
+      "restart": true
+    },
+    {
+      "name": "empty filter: open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      },
+      "block": "close"
+    },
+    {
+      "name": "empty filter: top level, unfiltered rows",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Your links"
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "https://decoy.example/unrelated",
+              "https://gamma.example/three",
+              "https://beta.example/two"
+            ],
+            "mode": "prefix",
+            "deep": true
+          }
+        }
+      ],
+      "route": "browser",
+      "timeout_ms": 3000,
+      "block": "close"
+    },
+    {
+      "name": "empty filter: panel on screen (records its window number)",
+      "winframe": "any",
+      "block": "close"
+    },
+    {
+      "name": "empty filter: Left",
+      "call": "key",
+      "args": {
+        "keys": "left"
+      },
+      "block": "close"
+    },
+    {
+      "name": "empty filter: Left at the top level closes the panel",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "close"
+    },
+    {
+      "name": "empty filter: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "close"
+    },
+    {
+      "name": "empty filter: window left the screen",
+      "winframe": "gone",
+      "block": "close"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

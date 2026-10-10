@@ -349,6 +349,34 @@ scripts/probe.py ...`. Every input of these scenarios lives under
 Expected colours, URIs, row orders and the golden table are written into the
 scenario files, never read from `design/`, `src-tauri/` or `app/` at run time.
 
+## Phase 2 parity acceptance scenarios
+
+Four scenarios judge GPUI Phase 2's Tauri-parity work. They were written against the
+Phase 1 head (5017f5b), where each one exits 1 at the step named below, after every
+earlier step passes. They are not in `phase1.json`; run them by name.
+
+| Scenario | Requirement | Fails on the Phase 1 head at |
+|---|---|---|
+| `capture-permission-route` | A failed capture while the `permission` report says Automation is not granted switches the same window (same `window_id`, same process) to route `onboarding` with its steps listed and nothing opened. With Automation granted, whether everything is granted or only Accessibility is missing (`fixtures/permissions-accessibility-missing.json`), the failure stays on route `capture`: `view.phase` `failed`, message verbatim, checked a second later. With no report (`capture-view.json`'s failure half) it also stays. Tauri `dist/panel.js` `capture-err`. | "automation missing: the failed capture routes to onboarding" (route stays `capture`) |
+| `copy-dismiss` | After Enter (then Cmd-C on a restarted instance) copies, the Copied Label shows and the panel stays visible with it about 1 s after the key. The panel then hides by itself within about 3 s of the key: `shell.visible` false, route null, `window_id` refuses, `winframe: gone`. The pasteboard holds the URI. | "Enter: the panel hides by itself within ~3 s of the key" |
+| `browser-left-close` | While drilled in, Left goes back and the panel stays. At the top level with a non-empty filter, Left only edits the filter: three Lefts take the caret past its start edge, `x` then types at the start and the panel stays. At the top level with an empty filter, Left closes the panel and opens nothing. Tauri `dist/panel.js` 567-569, `browseBack`. | "empty filter: Left at the top level closes the panel" |
+| `backlink-open` | In the capture view with backlinks, Enter with no row focused copies and opens nothing. On a restarted instance, Tab moves keyboard focus onto a backlink row: the row's own `ListItem` node carries `focused`, and exactly one row does. Enter then opens exactly that row's URI through the core opener (`opened` length 1) and does not copy (the pasteboard keeps its nonce and its change count). | "open: Tab moves focus onto the Beta Post backlink row" (Tab focuses the Copy link button) |
+
+Phase 2 view contract additions these imply, beyond "Phase 1 view-state contract" below:
+
+- **Capture → onboarding.** On a failed capture, the capture path reads the same
+  permission report onboarding reads (`crate::fixtures::path(Fixture::Permission)` in
+  automation builds). It switches the panel to the onboarding route in place only
+  when that report exists and its `automation` is not `"granted"`.
+- **Copy self-dismiss.** After a copy, keep `Copied` visible at least 1 s, then hide
+  the panel the way a dismiss does (about 1.2-1.5 s is the intended window; the
+  probe allows up to about 3 s from the key).
+- **Browser Left.** `MoveLeft` at the top level closes the panel only when the filter
+  text is empty, wherever the caret is.
+- **Backlink rows are focusable.** Each backlink `ListItem` takes keyboard focus with
+  Tab (`focused` = `gpui_focus` or `active_descendant_focus` on that node), and Enter
+  on a focused row opens its URI through the shell's opener instead of copying.
+
 ## Phase 1 view-state contract
 
 What the Phase 1 views must expose for these scenarios to pass. It is derived from

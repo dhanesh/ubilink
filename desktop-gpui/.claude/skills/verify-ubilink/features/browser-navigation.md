@@ -2,7 +2,7 @@
 
 - id: browser-navigation
 - proven: no
-- anchors: probes/browser-select.json, probes/browser-drill.json, probes/fixtures/graph-backlinks.json
+- anchors: probes/browser-select.json, probes/browser-drill.json, probes/browser-left-close.json, probes/fixtures/graph-backlinks.json
 - constraints: linking-manifesto-app:U4
 
 ## What it is
@@ -37,20 +37,25 @@ scenario makes, not a hand-picked subset.
 OUT="$WT/.verify-run/$INSTANCE/scenarios"
 # Final review C1: R7 ([after: R6]) lands `browser-drill`, so at task R6's head
 # only `browser-select` can pass; every other head (TASK empty included) needs both.
-case "$TASK" in R6|T6) SCENARIOS="browser-select" ;; *) SCENARIOS="browser-select browser-drill" ;; esac
+# browser-left-close is a Phase 2 parity scenario (Left closes at an empty top level).
+case "$TASK" in R6|T6) SCENARIOS="browser-select" ;; *) SCENARIOS="browser-select browser-drill browser-left-close" ;; esac
 for name in $SCENARIOS; do
   python3 "$H" scenario --instance "$INSTANCE" --verifier "$VERIFIER" --out "$OUT" --name "$name"
   echo "$name exit $?"
 done
 ```
 
-Expected: both exit 0. `$OUT/browser-select/result.json`'s `verdict` is `"PASS"`;
+Expected: every one exits 0. `$OUT/browser-select/result.json`'s `verdict` is `"PASS"`;
 `transcript.txt` shows PASS for "row 1 selected at open", "row 3 carries the
 selected flag", "row 2 carries the selected flag" and "the opened sink reports row
 2's URI, once". `$OUT/browser-drill/result.json`'s `verdict` is `"PASS"`;
 `transcript.txt` shows PASS for "top level: no trail", "the trail names the
 parent", "the child list is the parent's connections, exactly", "top-level rows are
 gone while drilled" and "row 2 carries the selected flag again".
+`$OUT/browser-left-close/result.json`'s `verdict` is `"PASS"`; `transcript.txt` shows
+PASS for "drilled: still visible on route browser", "filter: still visible on route
+browser", "filter: the filter now reads 'xbe'", "empty filter: Left at the top level
+closes the panel" and "empty filter: window left the screen".
 
 ## Proof
 
@@ -70,8 +75,14 @@ gone while drilled" and "row 2 carries the selected flag again".
 - **Drill out.** "the trail is empty again" and "row 2 carries the selected flag
   again" prove Left returns to the top level with the previous selection restored,
   not just to some default.
+- **Left closes at the top (Phase 2 parity, `browser-left-close`).** Tauri's
+  ArrowLeft (`dist/panel.js` 567-569, `browseBack`): while drilled it goes back and
+  the panel stays; with a non-empty filter it only edits the filter (three Lefts
+  past the caret's start edge, then typing `x` reads `xbe`, panel still visible); at
+  the top level with an empty filter it closes the panel (`shell.visible` false,
+  route null, `window_id` refuses, `winframe: gone`) and opens nothing.
 
-This feature has **two** acceptance scenarios, but factory-conductor's evidence
+This feature has **three** acceptance scenarios, but factory-conductor's evidence
 gate reads exactly one `.verify/<instance>/browser-navigation/<sha>/evidence.json`
 (SKILL.md's "The evidence gate" / `verify_evidence.py record`'s one-record-per-
 feature-per-head shape) — recording each scenario in its own `record` call would
@@ -83,8 +94,8 @@ scenario's exit code (both, except at the first task's head: see Drive it):
 
 ```sh
 python3 "$H" doctor --instance "$INSTANCE"
-REC="$WT/.verify-run/$INSTANCE/record-browser-navigation"
-rm -rf "$REC"; mkdir -p "$REC"
+mkdir -p "$WT/.verify-run/$INSTANCE"
+REC="$(mktemp -d "$WT/.verify-run/$INSTANCE/record-browser-navigation.XXXXXX")"
 RESULT=pass
 for name in $SCENARIOS; do
   R="$OUT/$name"
@@ -96,7 +107,7 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
   --verifier "$VERIFIER" --result "$RESULT" \
   --action "scenario(s) $SCENARIOS (desktop-gpui/probes/<name>.json) on instance $INSTANCE" \
   --observed "$(for name in $SCENARIOS; do printf '%s: %s; ' "$name" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["counts"])' "$OUT/$name/result.json")"; done)" \
-  --side-effect "opened sink grows by exactly the opened row's URI in browser-select; nothing opened in browser-drill (when run); see each scenario's renamed result.json" \
+  --side-effect "opened sink grows by exactly the opened row's URI in browser-select; nothing opened in browser-drill or browser-left-close (when run); see each scenario's renamed result.json" \
   $(for f in "$REC"/*; do printf -- '--artifact %s ' "$f"; done)
 ```
 
@@ -121,3 +132,6 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
   its own fresh copy of `graph-backlinks.json`.
 - Today's stub has no `ListItem` rows and no trail Label at all, so both scenarios
   exit 1 at their first `see` until Phase 1 lands.
+- `browser-left-close` is a Phase 2 parity scenario: on the Phase 1 head (5017f5b)
+  it exits 1 at "empty filter: Left at the top level closes the panel" (Left at the
+  top level does nothing) until Phase 2 lands.

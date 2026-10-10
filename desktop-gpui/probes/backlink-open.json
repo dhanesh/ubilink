@@ -1,0 +1,193 @@
+{
+  "description": "Phase 2 parity: in the capture view, Enter with no backlink row focused copies the captured URI (nothing opened); Tab moves keyboard focus onto a backlink row, and Enter on that row opens exactly that backlink's URI through the core opener without copying",
+  "requirement": "P2-backlink-open (GPUI Phase 2 parity, user decision; Tauri dist/panel.js backlink anchors invoke open_link)",
+  "notes": [
+    "Seeded like backlinks.json: graph-backlinks.json plus capture-subject.json; backlink rows newest first are Gamma Doc, Beta Post, Alpha Paper.",
+    "Copy round first (fresh instance): with no ListItem focused, Enter copies (pasteboard = the subject URI, change count up, Copied shown) and opens nothing. This keeps copy-link.json's contract for the capture view with backlinks present.",
+    "Open round after a restart: key_until presses Tab until the 'Beta Post' row (the second row, so opening row 1 by default cannot pass) carries the focused flag. focused is the dump's gpui_focus or active_descendant_focus (README 'see' state table), so the row's ListItem node itself must be the focused (or active-descendant) node, not a child button. Exactly one ListItem is focused.",
+    "Enter on the focused row opens https://beta.example/two through the core opener (the opened sink holds exactly that one target), does not copy (pasteboard still the nonce, change count unchanged). Copied is not asserted absent afterwards: the panel may close after an open, and an absent check on an empty tree fails by design.",
+    "No assertion is made about whether the panel stays open after the open."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "capture": "capture-subject.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "copy: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce"
+    },
+    {
+      "name": "copy: capture the subject",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "copy: subject captured, backlinks listed",
+      "see": [
+        {
+          "role": "Label",
+          "text": "https://subject.example/note"
+        },
+        {
+          "sequence": {
+            "role": "ListItem",
+            "texts": [
+              "Gamma Doc",
+              "Beta Post",
+              "Alpha Paper"
+            ],
+            "mode": "exact",
+            "deep": true
+          }
+        }
+      ],
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "copy: no backlink row focused",
+      "see": {
+        "role": "ListItem",
+        "state": {
+          "focused": true
+        }
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "copy: Enter",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "copy: a11y Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000
+    },
+    {
+      "name": "copy: pbpaste prints the subject URI, change count higher",
+      "pasteboard": "read",
+      "expect": "https://subject.example/note",
+      "changed": true
+    },
+    {
+      "name": "copy: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance for the open round",
+      "restart": true
+    },
+    {
+      "name": "open: a nonce on the pasteboard first",
+      "pasteboard": "set_nonce"
+    },
+    {
+      "name": "open: capture the subject",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "open: backlinks listed",
+      "see": {
+        "sequence": {
+          "role": "ListItem",
+          "texts": [
+            "Gamma Doc",
+            "Beta Post",
+            "Alpha Paper"
+          ],
+          "mode": "exact",
+          "deep": true
+        }
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "open: Tab moves focus onto the Beta Post backlink row",
+      "key_until": {
+        "role": "ListItem",
+        "text": "Beta Post",
+        "deep": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "max_presses": 8,
+      "route": "capture"
+    },
+    {
+      "name": "open: exactly one backlink row focused",
+      "see": {
+        "role": "ListItem",
+        "state": {
+          "focused": true
+        }
+      },
+      "count": 1,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "open: nothing opened before Enter",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "open: Enter on the focused row",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "open: the opened sink holds exactly the Beta Post URI",
+      "call": "opened",
+      "retry_ms": 3000,
+      "expect": {
+        "": {
+          "len": 1
+        },
+        "0.target": "https://beta.example/two"
+      }
+    },
+    {
+      "name": "open: not copied (pasteboard still the nonce, change count unchanged)",
+      "pasteboard": "read",
+      "expect": "{nonce}",
+      "changed": false
+    }
+  ]
+}

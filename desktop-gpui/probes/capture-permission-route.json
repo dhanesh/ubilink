@@ -1,0 +1,239 @@
+{
+  "description": "Phase 2 parity: a failed capture while the permission report says Automation is not granted switches the same panel window to onboarding (its steps listed, nothing opened); with Automation granted (all granted, or only Accessibility missing) the failure stays on route capture (phase failed, the failure message shown)",
+  "requirement": "P2-capture-permission-route (GPUI Phase 2 parity, Tauri dist/panel.js capture-err handler)",
+  "notes": [
+    "Tauri reference: dist/panel.js onEvent('capture-err'): show the failure, then read the permission report; only `report && !canUseCapture(report)` (Automation not 'granted') routes to onboarding. A transient capture error with Automation granted, or with no report at all, stays on the capture view.",
+    "The report comes from the `permission` fixture, the same file the onboarding view reads (crate::fixtures::path(Fixture::Permission), views/onboarding.rs check_permissions). The capture path must consult that same report; automation builds never run the osascript probe.",
+    "The no-report case (capture fails, no permission fixture loaded: stay on capture, phase failed, message shown) is capture-view.json's second half and is not repeated here; this scenario must not contradict it.",
+    "Round 1 uses permissions-two-missing.json (automation 'denied'): the route switches to onboarding in the SAME window (window_id saved before and compared after) and process, and nothing is opened.",
+    "Round 2 restarts for a fresh instance (restart replays both setup fixtures), THEN loads permissions-all-granted.json so it overrides the replayed two-missing report. 'Stays on capture' is checked after a 1 s settle, so a late async route switch cannot pass it.",
+    "Round 3 restarts again and loads permissions-accessibility-missing.json (accessibility false, automation 'granted'): only Automation decides the route (Tauri canUseCapture, 'Defect 5: capture needs only Automation'), so a missing Accessibility grant alone must NOT route to onboarding. This rules out routing on 'any permission missing' or on Accessibility."
+  ],
+  "setup": {
+    "fixtures": {
+      "capture": "capture-failed.json",
+      "permission": "permissions-two-missing.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "automation missing: hotkey captures (fails)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "automation missing: remember the panel window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid": "window_id"
+      }
+    },
+    {
+      "name": "automation missing: the failed capture routes to onboarding",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "automation missing: onboarding steps listed (Automation, Accessibility)",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "Automation",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Accessibility",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Not granted",
+          "deep": true
+        }
+      ],
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation missing: same window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "name": "automation missing: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "automation missing: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance for the automation-granted round",
+      "restart": true
+    },
+    {
+      "name": "automation granted: load the all-granted report (after the restart's replay)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-all-granted.json"
+      }
+    },
+    {
+      "name": "automation granted: hotkey captures (fails)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "automation granted: the failure message, verbatim",
+      "see": {
+        "role": "Label",
+        "text": "Safari returned no active resource — open something there and try again."
+      },
+      "exact": true,
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation granted: let any late route switch happen",
+      "sleep_ms": 1000
+    },
+    {
+      "name": "automation granted: still on capture, phase failed",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "failed"
+      }
+    },
+    {
+      "name": "automation granted: the failure message is still shown",
+      "see": {
+        "role": "Label",
+        "text": "Safari returned no active resource — open something there and try again."
+      },
+      "exact": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "automation granted: no onboarding steps",
+      "see": {
+        "role": "ListItem",
+        "text": "Automation",
+        "deep": true
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "automation granted: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance for the accessibility-only round",
+      "restart": true
+    },
+    {
+      "name": "accessibility only missing: load the report (automation granted, accessibility not)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-accessibility-missing.json"
+      }
+    },
+    {
+      "name": "accessibility only missing: hotkey captures (fails)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "accessibility only missing: the failure message, verbatim",
+      "see": {
+        "role": "Label",
+        "text": "Safari returned no active resource — open something there and try again."
+      },
+      "exact": true,
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "accessibility only missing: let any late route switch happen",
+      "sleep_ms": 1000
+    },
+    {
+      "name": "accessibility only missing: still on capture, phase failed",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "failed"
+      }
+    },
+    {
+      "name": "accessibility only missing: no onboarding steps",
+      "see": {
+        "role": "ListItem",
+        "text": "Accessibility",
+        "deep": true
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "accessibility only missing: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}
