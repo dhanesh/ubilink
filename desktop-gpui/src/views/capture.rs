@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use gpui_kit::component::{ActiveTheme, Disableable};
 use gpui_kit::prelude::FluentBuilder;
@@ -45,6 +46,12 @@ pub const CAPTURING_TEXT: &str = "Capturing the active resource…";
 
 /// The copied confirmation's text (R2): shown once the URI is on the pasteboard.
 pub const COPIED_TEXT: &str = "Copied";
+
+/// How long the `Copied` confirmation stays up before the panel hides itself (Phase 2
+/// R2; the Tauri panel's `confirmCopy` then `dismiss_panel`). At least 1 s, so the user
+/// sees it (probes/README.md, "Phase 1 view-state contract"), and well inside the 3 s
+/// from the key by which the panel must be gone.
+pub const COPIED_HOLD: Duration = Duration::from_millis(1300);
 
 /// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
 pub const BACKLINKS_HEADING: &str = "Linked to this";
@@ -412,9 +419,12 @@ pub struct CaptureView {
     /// key handler: GPUI dispatches keys from the focused element up its path.
     focus: FocusHandle,
     focused: bool,
-    /// The URI is on the pasteboard: the `Copied` confirmation shows. The panel stays
-    /// open after a copy, so the confirmation stays until the panel next hides.
+    /// The URI is on the pasteboard: the `Copied` confirmation shows, and stays until
+    /// the panel hides itself `COPIED_HOLD` later (Phase 2 R2).
     copied: bool,
+    /// The pending self-dismiss after a copy; dropped (cancelled) with the view, so a
+    /// panel that already hid or switched route is never hidden by a stale copy.
+    _dismiss: Option<Task<()>>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
@@ -464,6 +474,7 @@ impl CaptureView {
             focus: cx.focus_handle(),
             focused: false,
             copied: false,
+            _dismiss: None,
             appearance: FollowAppearance::default(),
             _capture: capture,
         }
@@ -479,6 +490,15 @@ impl CaptureView {
         cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()));
         self.copied = true;
         cx.notify();
+        // Phase 2 R2 (U2: the copy ends the interaction): keep `Copied` up for
+        // `COPIED_HOLD`, then hide the panel as a dismiss does. A second copy restarts
+        // the hold. The task is the view's, so it dies with the view.
+        self._dismiss = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_HOLD).await;
+            if this.upgrade().is_some() {
+                cx.update(|cx| crate::shell::execute(crate::shell::Command::Hide, cx));
+            }
+        }));
         true
     }
 }
@@ -735,8 +755,9 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
-    use super::{is_copy_key, order_by_recency, state, Phase, Tracker};
+    use super::{is_copy_key, order_by_recency, state, Phase, Tracker, COPIED_HOLD};
     use std::sync::Mutex;
+    use std::time::Duration;
     use ubilink_core::{
         AdapterRegistry, LinkGraph, LinkView, PanelBackend, ResourceIdentity, UbilinkService,
     };
@@ -843,6 +864,14 @@ mod tests {
         // Malformed fixtures fail with a message, not a panic.
         assert!(parse_fixture("{}").is_err());
         assert!(parse_fixture("not json").is_err());
+    }
+
+    /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
+    /// and the panel is gone well inside 3 s of the key.
+    #[test]
+    fn copied_hold_meets_the_contract() {
+        assert!(COPIED_HOLD >= Duration::from_secs(1));
+        assert!(COPIED_HOLD <= Duration::from_millis(1500));
     }
 
     /// R2's key model, headless: Enter and ⌘C (and Ctrl-C, as Tauri) copy; other keys
