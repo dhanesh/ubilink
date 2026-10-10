@@ -70,6 +70,8 @@ has() { grep -qF -- "$1" "$B" && echo yes || echo no; }
 expect "bundle: builds desktop-gpui"           yes "$(has 'MANIFEST="$ROOT/desktop-gpui/Cargo.toml"')"
 expect "bundle: no desktop/ (Tauri) paths"     no  "$(grep -qE '\$ROOT/desktop/' "$B" && echo yes || echo no)"
 expect "bundle: never enables a cargo feature" no  "$(grep -vE '^[[:space:]]*#' "$B" | grep -qE -- '--features|--all-features' && echo yes || echo no)"
+expect "bundle: output outside any target dir"  yes "$(has 'OUT="$ROOT/desktop-gpui/bundle"')"
+expect "bundle: output dir is gitignored"     yes "$(git -C "$HERE/.." check-ignore -q desktop-gpui/bundle/x.dmg && echo yes || echo no)"
 expect "bundle: binary path from cargo JSON"   yes "$(has '--message-format=json')"
 expect "bundle: LSUIElement in Info.plist"     yes "$(has '<key>LSUIElement</key><true/>')"
 expect "bundle: verifies LSUIElement"          yes "$(has 'plutil -extract LSUIElement')"

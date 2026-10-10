@@ -15,7 +15,9 @@
 #                            (`make dist` with all six APPLE_* variables — see
 #                            docs/RUNBOOK-release.md)
 #
-# Output: desktop-gpui/target/bundle/. The binary is the path cargo reports for the
+# Output: desktop-gpui/bundle/ (gitignored) — deliberately NOT under a cargo target dir,
+# which a build cache may prune or redirect (a pruned symlinked target/ made a dry run
+# fail at assembly after a full build). The binary is the path cargo reports for the
 # desktop-gpui `ubilink` bin (--message-format=json), never an assumed
 # target/release/ubilink: with a shared CARGO_TARGET_DIR the Tauri crate (desktop/)
 # writes a binary of the same name there.
@@ -33,7 +35,7 @@ VERSION="$(bash "$ROOT/scripts/version.sh")"
 MANIFEST="$ROOT/desktop-gpui/Cargo.toml"
 ENTITLEMENTS="$ROOT/desktop-gpui/packaging/Ubilink.entitlements"
 SRC_ICON="$ROOT/desktop-gpui/packaging/icon.png"
-OUT="$ROOT/desktop-gpui/target/bundle"
+OUT="$ROOT/desktop-gpui/bundle"
 APP="$OUT/$APP_NAME.app"
 BIN=""
 DMG=""

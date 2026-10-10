@@ -14,6 +14,9 @@ dist-ssr/
 # The CI signing artifacts under src-tauri/dist/ ARE generated, so ignore those:
 /src-tauri/dist/
 
+# ── App bundles (scripts/bundle-macos.sh: Ubilink.app + DMG) ──
+/desktop-gpui/bundle/
+
 # ── Tauri build output ──
 /src-tauri/gen/
 /src-tauri/WixTools/

@@ -3,7 +3,7 @@
 How to cut a release of the macOS app. Design: `docs/superpowers/specs/2026-09-14-v0.1-release-design.md`.
 Pipeline: `.github/workflows/release.yml`. Packaging: `scripts/bundle-macos.sh`, which
 builds `Ubilink.app` from the GPUI app (`desktop-gpui/`, release profile, no
-`automation` feature) into `desktop-gpui/target/bundle/`; its entitlements and icon live
+`automation` feature) into `desktop-gpui/bundle/`; its entitlements and icon live
 in `desktop-gpui/packaging/`.
 
 ## One-time setup

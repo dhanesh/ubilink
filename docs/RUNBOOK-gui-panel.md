@@ -33,8 +33,8 @@ Run them: `make test-js` and `cargo test --manifest-path src-tauri/Cargo.toml pa
 re-prompts for Accessibility/Automation each time. For a stable experience:
 
 ```sh
-make bundle     # -> desktop-gpui/target/bundle/Ubilink.app (GPUI app; stable self-signed identity, fixed path)
-open desktop-gpui/target/bundle/Ubilink.app
+make bundle     # -> desktop-gpui/bundle/Ubilink.app (GPUI app; stable self-signed identity, fixed path)
+open desktop-gpui/bundle/Ubilink.app
 ```
 
 Grant Automation to **Ubilink.app** once; re-running `make bundle`
