@@ -13,7 +13,7 @@ use objc2::{msg_send, MainThreadMarker};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSEvent, NSScreen, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::NSString;
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use super::placement::{cursor_from_appkit, Display, Rect};
 
@@ -115,6 +115,30 @@ pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
         });
         PanelFacts { popup, blurred }
     })
+}
+
+/// Move and resize the visible panel to `size` points with its top-left corner at
+/// `top_left` (global top-left points, as `placement`), flipping to AppKit's
+/// bottom-left frame with the primary display's height. Returns whether there was a
+/// panel. GPUI hears of the new size through the window's resize notification and
+/// lays the view out again. Call outside any GPUI update (see `shell::fit_panel`).
+pub fn set_panel_frame(
+    mtm: MainThreadMarker,
+    top_left: (f64, f64),
+    size: (f64, f64),
+    primary_height: f64,
+) -> bool {
+    let Some(w) = visible_panel(mtm) else {
+        return false;
+    };
+    let (x, y) = top_left;
+    let (width, height) = size;
+    let frame = NSRect::new(
+        NSPoint::new(x, primary_height - (y + height)),
+        NSSize::new(width, height),
+    );
+    w.setFrame_display(frame, true);
+    true
 }
 
 /// Automation `window_id` (R6): the panel's CGWindowID (`windowNumber`), what

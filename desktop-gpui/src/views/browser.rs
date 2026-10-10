@@ -1247,7 +1247,7 @@ mod tests {
         assert_eq!(entries[4999].uri, uri("04747"), "row 5000");
 
         // The list's viewport on the panel, and what the virtual list builds in it.
-        let (_, panel_h) = crate::shell::panel::PANEL_SIZE;
+        let panel_h = crate::views::height_for(crate::views::Route::Browser);
         let viewport =
             panel_h as f32 - 2. * f32::from(PAD_Y) - f32::from(HEADER_H) - f32::from(GAP);
         let built = rows_built(viewport, f32::from(ROW_H), entries.len());

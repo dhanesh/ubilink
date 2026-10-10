@@ -102,6 +102,9 @@ struct Panel {
     handle: AnyWindowHandle,
     view: Entity<panel::PanelView>,
     route: Route,
+    /// Where the panel is and how big (`None` when there were no displays to place it
+    /// on). A route switch or a content change refits it from here.
+    placement: Option<placement::Placement>,
 }
 
 /// Owns the OS integrations for the app's lifetime: dropping the tray removes the
@@ -340,8 +343,11 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
         return;
     };
     let (displays, primary_height) = native::displays(mtm);
-    let placement =
-        placement::place_panel(&displays, native::cursor(primary_height), panel::PANEL_SIZE);
+    let placement = placement::place_panel(
+        &displays,
+        native::cursor(primary_height),
+        panel::size_for(route),
+    );
     let opened = gpui_kit::open_window(panel::options(placement), cx, |window, cx| {
         cx.new(|cx| panel::PanelView::new(route, hotkey_at, window, cx))
     });
@@ -360,6 +366,7 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
             handle,
             view,
             route,
+            placement,
         });
         let s = &mut shell.state;
         s.visible = true;
@@ -384,6 +391,68 @@ fn switch_route(route: Route, cx: &mut App) {
     view.update(cx, |v, cx| v.set_route(route, cx));
     cx.update_global::<Shell, _>(|shell, _| shell.state.route = Some(route.as_str().into()));
     log_state(cx);
+    // The same window takes the new route's height (the Tauri panel refit on every
+    // view switch).
+    fit_panel(views_height(route), cx);
+}
+
+fn views_height(route: Route) -> f64 {
+    crate::views::height_for(route)
+}
+
+/// Resize the open panel to `height` points (clamped as `panel::clamp_height`) on the
+/// display it is on: its top stays unless the taller panel would run off the bottom,
+/// and it is cut to the display's usable area (`placement::fit_on`; the Tauri shell's
+/// `resize_panel`). A route switch calls this, and so does a view whose content
+/// changed size (Settings' reset question). No panel, or no change: nothing to do.
+///
+/// The frame is set from a foreground task, never inside this call: AppKit reports
+/// the resize back to GPUI synchronously (windowDidResize), and GPUI handles that by
+/// updating the app, which must not be borrowed at the time. GPUI's own
+/// `Window::resize` defers for the same reason (and keeps the bottom edge, not the
+/// top, which is why it is not used).
+pub fn fit_panel(height: f64, cx: &mut App) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some((handle, Some(current))) = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .map(|p| (p.handle, p.placement))
+    else {
+        return;
+    };
+    let (displays, primary_height) = native::displays(mtm);
+    let Some(next) = placement::refit(
+        &displays,
+        current.display_id,
+        current.global,
+        (current.size.0, panel::clamp_height(height)),
+    ) else {
+        return;
+    };
+    if next == current {
+        return;
+    }
+    cx.update_global::<Shell, _>(|shell, _| {
+        if let Some(p) = shell.panel.as_mut().filter(|p| p.handle == handle) {
+            p.placement = Some(next);
+        }
+    });
+    cx.spawn(async move |cx| {
+        // Still the same panel? (It may have been hidden meanwhile.)
+        let same = cx.update(|cx| {
+            cx.try_global::<Shell>()
+                .and_then(|s| s.panel.as_ref())
+                .is_some_and(|p| p.handle == handle)
+        });
+        if same {
+            if let Some(mtm) = MainThreadMarker::new() {
+                native::set_panel_frame(mtm, next.global, next.size, primary_height);
+            }
+        }
+    })
+    .detach();
 }
 
 fn hide(cx: &mut App) {

@@ -128,6 +128,93 @@ enum Look {
     Danger,
 }
 
+// Settings' layout, in points. The view sets these on its rows, so `content_height`
+// adds up exactly what the view lays out, and the window fits the content (the Tauri
+// panel's `fitWindow`) instead of clipping the adapter grid at a fixed 140 pt.
+const PAD_X: Pixels = spacing::S5;
+const PAD_Y: Pixels = spacing::S2;
+const GAP: Pixels = spacing::S1;
+/// The title row (a 16 pt title's line box).
+const HEADER_H: Pixels = px(26.);
+/// The reset question's row: two 18 pt lines beside its buttons.
+const CONFIRM_H: Pixels = px(40.);
+const CONFIRM_LINE_H: Pixels = px(18.);
+/// The launch-at-login row, and with an explanation (two 16 pt lines) beside it.
+const LOGIN_H: Pixels = px(20.);
+const LOGIN_EXPLAINED_H: Pixels = px(34.);
+const EXPLANATION_LINE_H: Pixels = px(16.);
+/// One adapter switch, and the grid's gap between them.
+const ADAPTER_W: Pixels = px(140.);
+const ADAPTER_H: Pixels = px(16.);
+const ADAPTER_GAP: Pixels = spacing::S2;
+const HINT_H: Pixels = px(18.);
+
+/// What Settings' height depends on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Content {
+    /// How many adapter switches the grid holds.
+    pub adapters: usize,
+    /// The reset question's row is showing.
+    pub confirming_reset: bool,
+    /// The launch-at-login row carries an explanation (or an error) line.
+    pub login_explained: bool,
+}
+
+/// How many adapter switches fit on one grid row of a `panel_w` wide panel.
+pub fn adapter_columns(panel_w: f64) -> usize {
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let inner = panel_w - 2.0 * pt(PAD_X);
+    (((inner + pt(ADAPTER_GAP)) / (pt(ADAPTER_W) + pt(ADAPTER_GAP))).floor() as usize).max(1)
+}
+
+/// Settings' panel height for `content`: padding, the title, the stats and actions
+/// row, the reset question when it shows, the launch-at-login row, every grid row of
+/// adapters and the hint line, with the gaps between them. The shell clamps it
+/// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
+pub fn content_height(content: Content) -> f64 {
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let cols = adapter_columns(crate::shell::panel::PANEL_WIDTH);
+    let rows = content.adapters.div_ceil(cols);
+    let grid = if rows == 0 {
+        0.0
+    } else {
+        rows as f64 * pt(ADAPTER_H) + (rows - 1) as f64 * pt(ADAPTER_GAP)
+    };
+    let login = if content.login_explained {
+        LOGIN_EXPLAINED_H
+    } else {
+        LOGIN_H
+    };
+    let mut parts = vec![
+        pt(HEADER_H),
+        pt(theming::ACCENT_H),
+        pt(login),
+        grid,
+        pt(HINT_H),
+    ];
+    if content.confirming_reset {
+        parts.push(pt(CONFIRM_H));
+    }
+    let gaps = (parts.len() - 1) as f64 * pt(GAP);
+    2.0 * pt(PAD_Y) + parts.iter().sum::<f64>() + gaps
+}
+
+/// This route's row in the router table (`views::TABLE`): the height a freshly shown
+/// Settings needs (no reset question yet).
+pub fn panel_height() -> f64 {
+    let adapters = ubilink_app::list_plugins(crate::app_state::get()).map_or(0, |p| p.len());
+    content_height(Content {
+        adapters,
+        confirming_reset: false,
+        login_explained: login_explained(&login_status()),
+    })
+}
+
+/// Whether the launch-at-login row shows a second line (an explanation or an error).
+fn login_explained(login: &Result<Report, String>) -> bool {
+    login.as_ref().map_or(true, |r| r.explanation.is_some())
+}
+
 const ADAPTERS_HINT: &str =
     "Turn off an app to stop capturing from it. Built-in apps are always on.";
 
@@ -416,6 +503,8 @@ pub struct SettingsView {
     login: Result<Report, String>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
+    /// The content the panel was last fitted to; a change refits it.
+    fitted: Option<Content>,
 }
 
 impl SettingsView {
@@ -428,6 +517,7 @@ impl SettingsView {
             _dialog: Task::ready(()),
             login: login_status().map_err(|e| login_status_error_message(&e)),
             appearance: FollowAppearance::default(),
+            fitted: None,
         }
     }
 
@@ -483,7 +573,14 @@ impl SettingsView {
             .on_click(cx.listener(move |this, _, _, cx| this.set_launch_at_login(!on, cx)))
             .child(LOGIN_SWITCH)
             .child(LAYOUT.font("login_label"));
+        let explained = login_explained(&self.login);
         div()
+            .flex_shrink_0()
+            .min_h(if explained {
+                LOGIN_EXPLAINED_H
+            } else {
+                LOGIN_H
+            })
             .flex()
             .flex_row()
             .items_center()
@@ -507,6 +604,7 @@ impl SettingsView {
                         .flex_1()
                         .min_w_0()
                         .text_size(font_size::META)
+                        .line_height(EXPLANATION_LINE_H)
                         .text_color(if failed {
                             theme.danger
                         } else {
@@ -661,7 +759,8 @@ impl SettingsView {
         let click_app = app.clone();
         div()
             .relative()
-            .w(px(140.))
+            .w(ADAPTER_W)
+            .h(ADAPTER_H)
             .flex_shrink_0()
             // Space/Enter reach this wrapper only while the switch inside it is
             // focused (keys go from the focused element up); see the module doc.
@@ -757,6 +856,18 @@ impl Render for SettingsView {
             (None, Some((m, failed))) => (m.clone(), *failed),
             (None, None) => (ADAPTERS_HINT.to_string(), false),
         };
+        let content = Content {
+            adapters: switches.len(),
+            confirming_reset: self.confirming_reset,
+            login_explained: login_explained(&self.login),
+        };
+        if self.fitted != Some(content) {
+            // Content changed since the panel was sized (the reset question opened or
+            // closed, the login status gained an explanation): refit, after this frame.
+            self.fitted = Some(content);
+            let height = content_height(content);
+            cx.defer(move |cx| crate::shell::fit_panel(height, cx));
+        }
         let login_row = self.login_row(cx);
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
@@ -782,14 +893,16 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
-            .gap(spacing::S1)
-            .px(spacing::S5)
-            .py(spacing::S2)
+            .gap(GAP)
+            .px(PAD_X)
+            .py(PAD_Y)
             .rounded(radius::CARD)
             // The opaque token surface (R14): the panel's blur stays behind the card.
             .bg(surface)
             .child(
                 div()
+                    .h(HEADER_H)
+                    .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .items_baseline()
@@ -818,6 +931,8 @@ impl Render for SettingsView {
             )
             .child(
                 div()
+                    .h(theming::ACCENT_H)
+                    .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -851,6 +966,8 @@ impl Render for SettingsView {
                 this.child(
                     div()
                         .id("settings-reset-confirmation")
+                        .flex_shrink_0()
+                        .min_h(CONFIRM_H)
                         .flex()
                         .flex_row()
                         .items_center()
@@ -864,6 +981,7 @@ impl Render for SettingsView {
                                 .flex_wrap()
                                 .gap_x(spacing::S1)
                                 .text_size(font_size::ROW)
+                                .line_height(CONFIRM_LINE_H)
                                 .child(
                                     div().text_color(foreground).child(text!(
                                         id = "settings-reset-question",
@@ -891,12 +1009,15 @@ impl Render for SettingsView {
                     .flex_row()
                     .flex_wrap()
                     .content_start()
-                    .gap_x(spacing::S2)
-                    .gap_y(spacing::S2)
+                    .gap_x(ADAPTER_GAP)
+                    .gap_y(ADAPTER_GAP)
                     .children(switches),
             )
             .child(
                 div()
+                    .h(HINT_H)
+                    .flex_shrink_0()
+                    .line_height(HINT_H)
                     .truncate()
                     .text_size(font_size::META)
                     .text_color(if failed {
@@ -920,11 +1041,11 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        export_message, export_to, import_from, import_message, list_error_message,
-        login_status_error_message, login_toggle_error_message, reset, reset_message, state,
-        stats_error_message, stats_text, toggle, toggle_message, version_text, LOGIN_SWITCH,
-        NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM,
-        RESET_QUESTION,
+        adapter_columns, content_height, export_message, export_to, import_from, import_message,
+        list_error_message, login_status_error_message, login_toggle_error_message, reset,
+        reset_message, state, stats_error_message, stats_text, toggle, toggle_message,
+        version_text, Content, LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION,
+        RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -947,6 +1068,34 @@ mod tests {
             data_dir: dir,
             hotkeys: Mutex::new(HotkeyReport::default()),
         }
+    }
+
+    /// Parity (Tauri `fitWindow`): Settings' height is its content's, so every adapter
+    /// row shows. 640 pt panel, 20 pt sides, 140 pt switches 8 pt apart: 4 per row.
+    #[test]
+    fn settings_height_fits_every_adapter_row() {
+        assert_eq!(adapter_columns(640.0), 4);
+        assert_eq!(adapter_columns(100.0), 1, "never zero columns");
+        let h = |adapters, confirming_reset, login_explained| {
+            content_height(Content {
+                adapters,
+                confirming_reset,
+                login_explained,
+            })
+        };
+        // pad 8+8, title 26, actions 28, login 20, hint 18, 4 gaps of 4: 124 + grid.
+        assert_eq!(h(0, false, false), 124.0);
+        // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
+        assert_eq!(h(10, false, false), 188.0);
+        // ceil(n / 4) rows: 4 is one row, 5 is two.
+        assert_eq!(h(4, false, false), 124.0 + 16.0);
+        assert_eq!(h(5, false, false), 124.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(8, false, false), h(5, false, false));
+        // The reset question adds its row and a gap; an explanation a second line.
+        assert_eq!(h(10, true, false), 188.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 188.0 + 14.0);
+        // Taller than the old fixed 140 pt once a second row of adapters exists.
+        assert!(h(5, false, false) > 140.0);
     }
 
     #[test]
