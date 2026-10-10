@@ -56,6 +56,36 @@ pub const COPIED_TEXT: &str = "Copied";
 /// from the key by which the panel must be gone.
 pub const COPIED_HOLD: Duration = Duration::from_millis(1300);
 
+// The layout with backlinks, in points. The view sets these, so `content_height` adds
+// up what it lays out, and the panel grows to show every row (the Tauri panel's
+// `fitWindow`) up to `MAX_ROWS`, past which the list scrolls.
+const PAD_Y: Pixels = spacing::S2;
+const GAP: Pixels = spacing::S1;
+/// The one-line name and URI above the backlinks.
+const BODY_LINE_H: Pixels = px(20.);
+const HEADING_LINE_H: Pixels = px(16.);
+const ROW_LINE_H: Pixels = px(18.);
+/// Between the heading and the list, and between rows.
+const ROW_GAP: Pixels = px(2.);
+/// The most backlink rows the panel grows to show; more scroll.
+pub const MAX_ROWS: usize = 8;
+
+/// The capture panel's height with `backlinks` rows: none keeps the route's 140 pt;
+/// otherwise padding, the header, the name line, the heading and the rows (at most
+/// [`MAX_ROWS`]), with their gaps, and never less than 140 pt.
+pub fn content_height(backlinks: usize) -> f64 {
+    let base = crate::shell::panel::PANEL_HEIGHT;
+    if backlinks == 0 {
+        return base;
+    }
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let rows = backlinks.min(MAX_ROWS) as f64;
+    let list = rows * pt(ROW_LINE_H) + (rows - 1.0) * pt(ROW_GAP);
+    let section = pt(HEADING_LINE_H) + pt(ROW_GAP) + list;
+    let h = 2.0 * pt(PAD_Y) + pt(theming::ACCENT_H) + pt(GAP) + pt(BODY_LINE_H) + pt(GAP) + section;
+    h.max(base)
+}
+
 /// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
 pub const BACKLINKS_HEADING: &str = "Linked to this";
 
@@ -466,6 +496,8 @@ pub struct CaptureView {
     _dismiss: Option<Task<()>>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
+    /// The backlink count the panel was last fitted to; a change refits it.
+    fitted: Option<usize>,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
     _capture: Task<()>,
 }
@@ -517,6 +549,7 @@ impl CaptureView {
             copied: false,
             _dismiss: None,
             appearance: FollowAppearance::default(),
+            fitted: None,
             _capture: capture,
         }
     }
@@ -608,7 +641,7 @@ fn backlinks_section(
                 .flex()
                 .flex_row()
                 .items_baseline()
-                .line_height(px(18.))
+                .line_height(ROW_LINE_H)
                 .gap(spacing::S3)
                 .w_full()
                 .min_w_0()
@@ -646,11 +679,11 @@ fn backlinks_section(
         .flex_col()
         .flex_1()
         .min_h_0()
-        .gap(px(2.))
+        .gap(ROW_GAP)
         .child(
             div()
                 .text_size(font_size::META)
-                .line_height(px(16.))
+                .line_height(HEADING_LINE_H)
                 .text_color(muted)
                 .child(text!(BACKLINKS_HEADING)),
         )
@@ -669,7 +702,7 @@ fn backlinks_section(
                         .role(Role::List)
                         .flex()
                         .flex_col()
-                        .gap(px(2.))
+                        .gap(ROW_GAP)
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
@@ -700,6 +733,17 @@ impl Render for CaptureView {
                 .map(|_| cx.focus_handle().tab_stop(true))
                 .collect();
         }
+        let shown = match &self.phase {
+            Phase::Captured { backlinks, .. } => backlinks.len(),
+            _ => 0,
+        };
+        if self.fitted != Some(shown) {
+            // The capture landed with backlinks (or a new one replaced it): the panel
+            // takes the rows' height, after this frame. Unchanged: nothing happens.
+            self.fitted = Some(shown);
+            let height = content_height(shown);
+            cx.defer(move |cx| crate::shell::fit_panel(height, cx));
+        }
         let backlinks = match &self.phase {
             Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
                 Some(backlinks_section(backlinks, &self.rows, window, cx))
@@ -721,7 +765,7 @@ impl Render for CaptureView {
                 .flex()
                 .flex_row()
                 .items_baseline()
-                .line_height(px(20.))
+                .line_height(BODY_LINE_H)
                 .gap(spacing::S3)
                 .min_w_0()
                 .child(
@@ -803,7 +847,7 @@ impl Render for CaptureView {
                 d.justify_center().gap(spacing::S2).p(spacing::S5)
             })
             .when(backlinks.is_some(), |d| {
-                d.gap(spacing::S1).px(spacing::S5).py(spacing::S2)
+                d.gap(GAP).px(spacing::S5).py(PAD_Y)
             })
             .rounded(radius::CARD)
             // The opaque token surface (R14): the panel's blur stays behind the card.
@@ -892,7 +936,8 @@ mod tests {
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
     use super::{
-        is_copy_key, key_action, order_by_recency, state, KeyAction, Phase, Tracker, COPIED_HOLD,
+        content_height, is_copy_key, key_action, order_by_recency, state, KeyAction, Phase,
+        Tracker, COPIED_HOLD, MAX_ROWS,
     };
     use std::sync::Mutex;
     use std::time::Duration;
@@ -1006,6 +1051,19 @@ mod tests {
 
     /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
     /// and the panel is gone well inside 3 s of the key.
+    /// Parity (Tauri `fitWindow`): the panel shows every backlink row, up to
+    /// MAX_ROWS, past which the list scrolls; without backlinks it stays 140 pt.
+    #[test]
+    fn capture_height_fits_its_backlinks() {
+        assert_eq!(content_height(0), 140.0);
+        // pad 8+8, header 28, gap 4, name line 20, gap 4, heading 16, gap 2: 90 + rows.
+        assert_eq!(content_height(1), 140.0, "one row fits the old panel");
+        assert_eq!(content_height(3), 90.0 + 3.0 * 18.0 + 2.0 * 2.0);
+        assert!(content_height(3) > 140.0, "the third row used to be cut");
+        assert_eq!(content_height(4), 90.0 + 4.0 * 18.0 + 3.0 * 2.0);
+        assert_eq!(content_height(MAX_ROWS + 5), content_height(MAX_ROWS));
+    }
+
     #[test]
     fn copied_hold_meets_the_contract() {
         assert!(COPIED_HOLD >= Duration::from_secs(1));
