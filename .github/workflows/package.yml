@@ -7,11 +7,13 @@ on:
   pull_request:
     paths:
       - "scripts/**"
-      - "desktop/**"
-      # The app compiles in ubilink-core and embeds the frontend, so changes there
-      # can break the universal release build just as surely as desktop/ changes.
+      - "desktop-gpui/**"
+      # The app compiles in ubilink-core and ubilink-app and embeds the design
+      # tokens (design/ubilink-tokens.json, include_str!), so changes there can break
+      # the universal release build just as surely as desktop-gpui/ changes.
       - "src-tauri/**"
-      - "dist/**"
+      - "app/**"
+      - "design/**"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/**"
@@ -41,7 +43,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: desktop
+          workspaces: desktop-gpui
 
       - name: Script tests
         run: make test-scripts
@@ -53,6 +55,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ubilink-dmg-dry-run
-          path: desktop/target/bundle/*.dmg
+          path: desktop-gpui/bundle/*.dmg
           if-no-files-found: error
           retention-days: 7

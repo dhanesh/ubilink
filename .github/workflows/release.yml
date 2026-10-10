@@ -1,7 +1,8 @@
 # Release pipeline (spec §4; runbook: docs/RUNBOOK-release.md).
 #   verify ─┬─ build-app ─────────┬─ draft-release   (tags only)
 #           └─ sign-integrations ─┘
-# - A tag must equal the app version (desktop/Cargo.toml): vX.Y.Z or vX.Y.Z-rc.N.
+# - A tag must equal the app version (desktop-gpui/Cargo.toml, the shipped GPUI app):
+#   vX.Y.Z or vX.Y.Z-rc.N.
 # - build-app is notarized when all six APPLE_* secrets exist in the `release`
 #   environment; an rc tag or a manual run may produce an UNNOTARIZED dry-run DMG; a
 #   final tag without credentials FAILS (scripts/release-mode.sh).
@@ -98,7 +99,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ubilink-dmg
-          path: desktop/target/bundle/*.dmg
+          path: desktop-gpui/bundle/*.dmg
           if-no-files-found: error
 
   sign-integrations:
