@@ -1,7 +1,7 @@
 ---
 name: verify-ubilink
 description: >-
-  Prove a change to ubilink-next (the GPUI macOS menu-bar app in desktop-gpui/: tray,
+  Prove a change to ubilink (the GPUI macOS menu-bar app in desktop-gpui/: tray,
   pop-up panel, capture / browser / settings / onboarding views) works by launching
   isolated automation instances, driving them through the automation socket the way the
   hotkeys and tray do, and recording SHA-bound evidence (state JSON, the accessibility
@@ -13,7 +13,7 @@ description: >-
 
 # verify-ubilink
 
-ubilink-next is the GPUI rewrite of the ubilink desktop app: a menu-bar (accessory) app
+ubilink (binary `ubilink`) is the native GPUI desktop app: a menu-bar (accessory) app
 with no Dock icon whose global hotkeys and tray open one pop-up, blurred panel that
 routes between the `capture`, `browser`, `settings` and `onboarding` views. A user
 touches it through hotkeys, the tray and the keyboard inside the panel. An agent cannot
@@ -102,7 +102,7 @@ What `launch` does, in order:
      running now. This is how a crashed verifier's orphans get cleaned up. The waiting
      `launch` reclaims the lease:
      - it stops the holder's instances by their recorded pids, each only after checking
-       that pid still runs our ubilink-next binary
+       that pid still runs our ubilink binary
      - it removes their claims
      - it writes `.verify-run/reclaims/<time>-<verifier>.json` under the holder's run
        directory
@@ -118,7 +118,7 @@ What `launch` does, in order:
 
    The decision rules are unit-tested: `python3 "$SKILL"/scripts/test_ubilink_instance.py`.
 3. Builds the automation binary with probe.py's `build_binary` and clones the produced
-   executable to `.verify-run/$INSTANCE/ubilink-next-automation`. The build is
+   executable to `.verify-run/$INSTANCE/ubilink-automation`. The build is
    `cargo build --locked --features automation` in the warm shared target dir
    (`$CARGO_TARGET_DIR` when exported, else `~/Library/Caches/ubilink-probe/target`),
    held under its target lock. `launch` prints
@@ -134,7 +134,7 @@ What `launch` does, in order:
    - `UBILINK_SKIP_HOTKEYS=1`, with every other `UBILINK_*` variable from your shell
      dropped
 
-**No network port.** ubilink-next opens no TCP port and has no login, so there is no
+**No network port.** ubilink opens no TCP port and has no login, so there is no
 port to claim with `verify_evidence.py port` and no auth session to keep apart. The
 automation socket plays the port's role: `$TMPDIR/ubilink-<uid>/vf-$INSTANCE-<hash>/auto.sock`,
 with `UBILINK_INSTANCE` set to `vf-$INSTANCE-<6 hex of the run dir>`, so two run

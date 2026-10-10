@@ -10,7 +10,7 @@ instead of fast chaos.
 Every change — human or agent — must pass the single verifier before it lands:
 
 ```sh
-make verify              # fmt-check + clippy(-D warnings) + all crate tests + JS + spec
+make verify              # fmt-check + clippy(-D warnings) + all crate tests + script tests + release-clean + spec
 make verify LOCKED=--locked   # exactly what CI runs (pins the committed lockfiles)
 ```
 
@@ -19,18 +19,19 @@ target on every PR and every push to `main`, so "green locally" means "green in
 CI". If `make verify` is red, the change is not done — full stop. (`make check`
 is an alias for `make verify`.)
 
-Fast inner-loop targets while iterating: `make test` (core + registry + JS, skips
-the heavy Tauri build), `make test-desktop`, `make fmt` (auto-format).
+Fast inner-loop targets while iterating: `make test` (core + registry + app +
+script tests, skips the heavy GPUI build), `make test-gpui` (the GPUI app),
+`make fmt` (auto-format).
 
 ## House style (enforced, not aspirational)
 
-- **Formatting:** `cargo fmt` — checked by `verify-fmt` for all three crates. `make fmt`
-  fixes the core and registry; for the desktop crate run
-  `cargo fmt --manifest-path desktop/Cargo.toml`.
+- **Formatting:** `cargo fmt` — checked by `verify-fmt` for all four crates
+  (core, registry, app, desktop-gpui); `make fmt` fixes them all.
 - **Lints:** `cargo clippy --all-targets -- -D warnings` — warnings are errors.
-- **Crate boundaries are load-bearing.** `ubilink-core` (`src-tauri/`) is
-  deliberately Tauri-free and network-free (constraint S2). `registry/` and
-  `desktop/` are separate crates for that reason — keep logic in the core (unit-
+- **Crate boundaries are load-bearing.** `ubilink-core` (`src-tauri/`; the
+  directory keeps its pre-GPUI name) is deliberately GUI-free and network-free
+  (constraint S2). `registry/`, `app/` and `desktop-gpui/` are separate crates for
+  that reason — keep logic in the core or the GUI-free `app/` command layer (unit-
   tested headlessly) and keep the GUI/broker-server shells thin. See
   `README.md` § Architecture and `DECISIONS.md`.
 - **Comments explain *why*, tied to constraints.** Match the surrounding density:
@@ -78,7 +79,7 @@ made concrete by the rails above:
 | **Human gate** | External/irreversible actions (`git push`, network, `gh`) require approval, as do `make bundle` (imports a signing cert into the keychain), `make run*`/`cargo run`, destructive `git stash`/`git branch` forms, and edits to `.github/**`, `Makefile`, `.claude/**` (the gate itself); `rm -rf`/`-fr` and force-push (`--force*`, `-f`, `+refspec`) are denied outright | `.claude/settings.json`, PR review |
 
 **Proving a desktop-gpui change works.** Tests passing is not verification for
-ubilink-next (the GPUI app in `desktop-gpui/`). Its verify skill launches isolated
+ubilink (the GPUI app in `desktop-gpui/`). Its verify skill launches isolated
 automation instances, drives them and records SHA-bound evidence under `.verify/`:
 `desktop-gpui/.claude/skills/verify-ubilink/SKILL.md`, with one recipe per feature
 in its `features/` folder. Claude Code lists it once a session works on files under

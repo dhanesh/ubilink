@@ -1,5 +1,5 @@
 //! The three global hotkeys (R4): ⌘⇧K capture, ⌘⇧L browser, ⌘⇧, settings — the same
-//! bindings as the Tauri shell (desktop/src/main.rs `hotkey_shortcuts`).
+//! bindings as the deleted Tauri shell had (its `hotkey_shortcuts`).
 //!
 //! TN4: global-hotkey 0.8 uses Carbon `RegisterEventHotKey` with a handler on the
 //! application event target, so the manager must be created on the main thread once
@@ -79,7 +79,7 @@ pub fn skip_requested(value: Option<&str>) -> bool {
 pub fn register() -> Registration {
     let routes = bindings().iter().map(|(_, hk, r)| (hk.id(), *r)).collect();
     if skip_requested(std::env::var(SKIP_ENV).ok().as_deref()) {
-        eprintln!("[ubilink-next] {SKIP_ENV}=1: global hotkeys not registered");
+        eprintln!("[ubilink] {SKIP_ENV}=1: global hotkeys not registered");
         return Registration {
             manager: None,
             routes,
@@ -93,7 +93,7 @@ pub fn register() -> Registration {
         Ok(m) => m,
         Err(e) => {
             let msg = format!("hotkey manager unavailable: {e}");
-            eprintln!("[ubilink-next] {msg}");
+            eprintln!("[ubilink] {msg}");
             return Registration {
                 manager: None,
                 routes,
@@ -110,7 +110,7 @@ pub fn register() -> Registration {
         .collect();
     let report = fold(&results);
     if let Some(err) = &report.error {
-        eprintln!("[ubilink-next] hotkey registration issue: {err}");
+        eprintln!("[ubilink] hotkey registration issue: {err}");
     }
     Registration {
         manager: Some(manager),

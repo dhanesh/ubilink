@@ -1,7 +1,7 @@
 # R2 (agent-ready-rails): green-CI ground truth. Runs the SAME verifier as
 # `make verify` on every PR and every push to main, so an ordinary change can't
-# land unverified. macOS runner because the product is macOS-only — the desktop
-# crate uses osascript, TCC/ApplicationServices FFI, window-vibrancy, and the
+# land unverified. macOS runner because the product is macOS-only — the app uses
+# osascript, TCC/ApplicationServices FFI, GPUI's Metal renderer and AppKit, and the
 # sandbox-exec net jail, none of which build/run on Linux. LOCKED=--locked pins
 # the committed lockfiles for reproducibility.
 #
@@ -55,21 +55,20 @@ jobs:
       - name: Confirm full Xcode is selected (needed for GPUI's Metal shaders)
         run: xcodebuild -version
 
-      # Cache the (heavy) Tauri and GPUI dependency trees so desktop/desktop-gpui
-      # builds don't cold-start; app/ is lightweight but shares the cache call.
+      # Cache the (heavy) GPUI dependency tree so desktop-gpui builds don't
+      # cold-start; the light crates share the cache call.
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             src-tauri
             registry
-            desktop
             desktop-gpui
             app
 
       # "22" resolves to the latest 22.x; the sandbox tests need >= 22.13 for
       # `node --permission`.
-      - name: Set up Node (test-js + the sandbox tests spawn `node --permission`)
+      - name: Set up Node (the plugin sandbox tests spawn `node --permission`)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"

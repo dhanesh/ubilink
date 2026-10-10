@@ -7,7 +7,7 @@ section for each version as that release's notes.
 
 ## [0.1.0] - unreleased
 
-The first public release: a macOS menu-bar-less app that copies a link to whatever
+The first public release: a native macOS menu-bar app that copies a link to whatever
 you're looking at and keeps a two-way graph of the links you make.
 
 ### Added
@@ -22,6 +22,17 @@ you're looking at and keeps a two-way graph of the links you make.
   runs with your permissions (see `docs/SUPPORTED-APPS.md`).
 - **Permission onboarding** for macOS Automation and Accessibility.
 - A universal (Apple silicon + Intel), notarized DMG.
+
+### Changed
+- Ubilink is now a native app built with GPUI: one process, no web view, a native
+  blurred pop-up panel and a menu-bar icon. It keeps the name, bundle id
+  (`org.dhanesh.ubilink`) and data folder of the earlier web-view build, so an
+  existing link graph, adapter settings and `adapters.json` carry over unchanged.
+
+### Removed
+- The Tauri web-view app and its web panel. The packaged app, the DMG and the release
+  workflow now build the GPUI app; the release binary is checked to carry no test
+  automation channel.
 
 ### Security
 - One link-validation policy for capture, import and open: dangerous schemes

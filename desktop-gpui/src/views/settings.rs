@@ -142,7 +142,7 @@ pub fn toggle(state: &ubilink_app::AppState, app: &str, enabled: bool) -> (Strin
     (toggle_message(app, enabled, &result), result.is_err())
 }
 
-/// The stats Label, worded as the Tauri settings view does (B1):
+/// The stats Label, worded as the Tauri settings view was (B1):
 /// `5 links · 3 connections`, `1 link · 1 connection`, `0 links · 0 connections`.
 pub fn stats_text(stats: &GraphStats) -> String {
     fn plural(n: i64) -> &'static str {
@@ -159,6 +159,14 @@ pub fn stats_text(stats: &GraphStats) -> String {
         stats.links,
         plural(stats.links)
     )
+}
+
+/// The version Label, `Ubilink <version>` (B1: the Tauri panel's Settings footer,
+/// `renderVersion`), so a bug report can name the build. The crate version is the app
+/// version (scripts/version.sh reads this crate's Cargo.toml), and the RC checklist in
+/// docs/RUNBOOK-release.md checks it on the released app.
+pub fn version_text() -> String {
+    format!("Ubilink {}", env!("CARGO_PKG_VERSION"))
 }
 
 /// The stats Label when the counts cannot be read (U3).
@@ -741,6 +749,13 @@ impl Render for SettingsView {
                             .text_size(font_size::META)
                             .text_color(theme.muted_foreground)
                             .child(text!(id = "settings-adapters-heading", "App adapters")),
+                    )
+                    .child(
+                        div()
+                            .ml_auto()
+                            .text_size(font_size::META)
+                            .text_color(theme.muted_foreground)
+                            .child(text!(id = "settings-version", version_text())),
                     ),
             )
             .child(
@@ -849,7 +864,7 @@ mod tests {
     use super::{
         export_message, export_to, import_from, import_message, list_error_message,
         login_status_error_message, login_toggle_error_message, reset, reset_message, state,
-        stats_error_message, stats_text, toggle, toggle_message, LOGIN_SWITCH,
+        stats_error_message, stats_text, toggle, toggle_message, version_text, LOGIN_SWITCH,
         NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM,
         RESET_QUESTION,
     };
@@ -861,10 +876,8 @@ mod tests {
     use ubilink_core::{AdapterRegistry, GraphStats, LinkGraph, PanelBackend, UbilinkService};
 
     fn temp_state(tag: &str) -> AppState {
-        let dir = std::env::temp_dir().join(format!(
-            "ubilink-next-settings-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ubilink-settings-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         AppState {
@@ -955,6 +968,25 @@ mod tests {
         assert_eq!(s(0, 0), "0 links · 0 connections");
         assert_eq!(s(1, 1), "1 link · 1 connection");
         assert!(stats_error_message("poisoned").contains("Reopen Settings"));
+    }
+
+    /// B1: Settings names the build as the Tauri panel did, `Ubilink <version>`, and
+    /// that version is the app version in this crate's Cargo.toml [package].
+    #[test]
+    fn settings_version_label_names_the_app_version() {
+        let toml = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+            .expect("read desktop-gpui/Cargo.toml");
+        let package = toml
+            .split("\n[")
+            .find(|section| section.starts_with("[package]") || section.starts_with("package]"))
+            .expect("a [package] section");
+        let version = package
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("version = \""))
+            .and_then(|v| v.strip_suffix('"'))
+            .expect("a [package] version");
+        assert_eq!(version_text(), format!("Ubilink {version}"));
+        assert!(!version.is_empty());
     }
 
     /// R11: export to a path, empty the graph, import that file: the counts are back.

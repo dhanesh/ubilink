@@ -833,3 +833,57 @@ keep it that way.
   -- …`) fails if any of them changes, so no task can weaken the proof it is
   judged against. The two sockets, the verb allowlist and the exit-code contract
   this decision records are exactly what that frozen baseline fixes in place.
+
+## D24 — GPUI app replaces the Tauri app (Phase 2b cutover)
+
+**Date:** 2026-10-10 · **Constraints:** U1, U2, U3, U4, S1, S2, O1, O4 · **Source:** GPUI
+Phase 2 parity spec (`docs/superpowers/specs/2026-10-10-gpui-phase2-parity.md`, D1:
+the attended Phase 2b scope), branch `factory/gpui-phase2b`
+
+Phase 2a closed the last parity gaps between the GPUI panel and the Tauri one and
+recorded the release app's budget (`docs/PERFORMANCE.md`). Phase 2b makes the GPUI app
+the product and deletes the Tauri app. This supersedes D22's "ships beside `desktop/`"
+and D23's data-dir bullet (`org.ubilink.next`); both entries stay as written, as history.
+
+- **What.** `desktop-gpui/` is the only app. It ships as **Ubilink.app**: executable
+  `ubilink`, bundle id `org.dhanesh.ubilink`, a menu-bar utility (`LSUIElement`).
+  `scripts/bundle-macos.sh` builds it in all three modes (dev, dry-run, release; D21),
+  folding in the old `bundle-next.sh`, and writes to `desktop-gpui/bundle/`, outside any
+  cargo target dir. `desktop-gpui/Cargo.toml` is the single version source
+  (`scripts/version.sh`, `check-version.sh`). The Cargo package keeps the name
+  `ubilink-next`, so the committed `Cargo.lock` and `--locked` builds are unchanged.
+- **Why.** The measured case D22 made (one native process, no second WebKit process,
+  under half the binary size, 0.0% idle CPU), now with all four views and the Phase 2
+  parity behaviours proven by probes on the running app. Keeping two shells meant two
+  sets of hotkey, permission and packaging code with one of them unproven by the
+  harness.
+- **Identity and data dir are shared, on purpose.** The GPUI app took over the Tauri
+  app's name, bundle id and data dir (`~/Library/Application Support/org.dhanesh.ubilink`,
+  Tauri's `app_data_dir()` layout, with the same file names: `ubilink-graph.sqlite`,
+  `plugins-state.json`, `adapters.json`). An existing user's graph, adapter switches and
+  custom adapters carry over with no migration (nothing has been released yet, so this
+  covers development builds of the Tauri app).
+  Data a developer made under the Phase 0-2a identity (`org.ubilink.next`) is not
+  migrated. Because the default is now the user's real graph, `paths::data_dir()` stays
+  the one resolver, probes and the verify skill always set `UBILINK_DATA_DIR`, and a
+  named automation instance refuses to start without an absolute one.
+- **The shipped binary is checked, not just the build.** `release-clean` (D23) proves a
+  fresh release build carries no automation token; `bundle-macos.sh`'s `verify_outputs`
+  now runs the same token list over the binary it actually packaged, and still requires
+  Metal and refuses WebKit, so a stale Tauri `ubilink` in a shared target dir cannot be
+  bundled by mistake.
+- **What was deleted.** `desktop/` (the Tauri shell: `#[tauri::command]` wrappers,
+  `tauri.conf.json`, its icons and capabilities) and `dist/` (the no-build web panel and
+  its `node --test` suites: `panel-state`, `browse-state`, `wiring`). Their make targets
+  (`build-desktop`, `test-desktop`, `test-js`, `run-ui`, `run-desktop`, `bundle-next`) and
+  CI cache/path entries went with them; `build-next` became `build-gpui`, and `make run`
+  now opens the bundled GPUI app and says that it uses the real data dir. The Node
+  toolchain stays: ubilink-core's plugin sandbox tests spawn `node --permission` (D1).
+  The last commit with both trees is `ee80e70`; the Tauri-parity citations left in
+  comments, probe scenarios and the verify skill (`dist/panel.js:567`,
+  "moved verbatim from `desktop/src/main.rs`") refer to that commit.
+- **What remains attended.** The probes stub out what would touch the host (O4), so a
+  person still checks, on a real Mac (`docs/RUNBOOK-gui-panel.md`): the real login-item
+  registration (SMAppService), the native save and open dialogs, VoiceOver, live
+  capture per app, the recorded performance budget, a real hotkey press and a second
+  display; and the RC checklist in `docs/RUNBOOK-release.md` on the notarized DMG.

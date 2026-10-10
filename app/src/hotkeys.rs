@@ -1,8 +1,7 @@
 //! Defect 1/2's hotkey-report machinery. `HotkeyReport` and `build_hotkey_report`
 //! are pure data/folding — no `tauri_plugin_global_shortcut` type appears, so they
-//! moved here. `register_hotkeys` (which DOES touch `GlobalShortcutExt`) and
-//! `hotkey_shortcuts` (which constructs `tauri_plugin_global_shortcut::Shortcut`
-//! values) stay in `desktop/src/main.rs` — see that file's comments.
+//! moved here. Registering the hotkeys needs the GUI runtime, so it lives in the app
+//! shell (`desktop-gpui/src/shell/hotkeys.rs`), as it did in the deleted Tauri shell.
 
 use serde::Serialize;
 

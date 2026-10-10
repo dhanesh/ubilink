@@ -5,18 +5,16 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 pass=0
 fail=0
 
-# mk DIR DESKTOP_VER CORE_VER REGISTRY_VER CHANGELOG_VER TAURI_SETS_VERSION(yes|no)
+# mk DIR GPUI_VER CORE_VER REGISTRY_VER APP_VER CHANGELOG_VER
+# desktop-gpui/Cargo.toml is the source of truth.
 mk() {
-  mkdir -p "$1/desktop" "$1/src-tauri" "$1/registry"
-  printf '[package]\nname = "d"\nversion = "%s"\n\n[dependencies]\ntauri = { version = "2" }\n' "$2" >"$1/desktop/Cargo.toml"
+  mkdir -p "$1/desktop-gpui" "$1/src-tauri" "$1/registry" "$1/app"
+  # A dependency `version = "…"` after [package], so version.sh must read [package].
+  printf '[package]\nname = "g"\nversion = "%s"\n\n[dependencies]\ngpui-kit = { version = "=0.7.0" }\n' "$2" >"$1/desktop-gpui/Cargo.toml"
   printf '[package]\nname = "c"\nversion = "%s"\n' "$3" >"$1/src-tauri/Cargo.toml"
   printf '[package]\nname = "r"\nversion = "%s"\n' "$4" >"$1/registry/Cargo.toml"
-  printf '# Changelog\n\n## [%s] - unreleased\n\n- x\n' "$5" >"$1/CHANGELOG.md"
-  if [ "$6" = yes ]; then
-    printf '{"productName":"U","version":"%s"}\n' "$2" >"$1/desktop/tauri.conf.json"
-  else
-    printf '{"productName":"U"}\n' >"$1/desktop/tauri.conf.json"
-  fi
+  printf '[package]\nname = "a"\nversion = "%s"\n' "$5" >"$1/app/Cargo.toml"
+  printf '# Changelog\n\n## [%s] - unreleased\n\n- x\n' "$6" >"$1/CHANGELOG.md"
 }
 
 # expect NAME WANT_EXIT DIR [STDERR_SUBSTRING]
@@ -37,19 +35,28 @@ expect() {
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
-mk "$T/ok" 0.1.0 0.1.0 0.1.0 0.1.0 no
+mk "$T/ok" 0.1.0 0.1.0 0.1.0 0.1.0 0.1.0
 expect "all agree" 0 "$T/ok"
-mk "$T/core" 0.1.0 0.0.1 0.1.0 0.1.0 no
-expect "core version differs" 1 "$T/core" "src-tauri/Cargo.toml is 0.0.1, expected 0.1.0"
-mk "$T/reg" 0.1.0 0.1.0 0.2.0 0.1.0 no
+mk "$T/core" 0.1.0 0.0.1 0.1.0 0.1.0 0.1.0
+expect "core version differs" 1 "$T/core" "src-tauri/Cargo.toml is 0.0.1, expected 0.1.0 (from desktop-gpui/Cargo.toml)"
+mk "$T/reg" 0.1.0 0.1.0 0.2.0 0.1.0 0.1.0
 expect "registry version differs" 1 "$T/reg" "registry/Cargo.toml is 0.2.0, expected 0.1.0"
-mk "$T/cl" 0.1.0 0.1.0 0.1.0 0.0.9 no
+mk "$T/app" 0.1.0 0.1.0 0.1.0 0.3.0 0.1.0
+expect "app version differs" 1 "$T/app" "app/Cargo.toml is 0.3.0, expected 0.1.0"
+mk "$T/cl" 0.1.0 0.1.0 0.1.0 0.1.0 0.0.9
 expect "changelog has no section for the version" 1 "$T/cl" "CHANGELOG.md has no '## [0.1.0]' section"
-mk "$T/tc" 0.1.0 0.1.0 0.1.0 0.1.0 yes
-expect "tauri.conf.json sets a version" 1 "$T/tc" "must not set \"version\""
+# A stray desktop/ (the deleted Tauri crate) is not consulted: its version cannot fail
+# the check or become the app version.
+mk "$T/stray" 0.2.0 0.2.0 0.2.0 0.2.0 0.2.0
+mkdir -p "$T/stray/desktop"
+printf '[package]\nname = "d"\nversion = "0.1.0"\n' >"$T/stray/desktop/Cargo.toml"
+expect "a stray desktop/ crate is ignored" 0 "$T/stray"
 
-# version.sh reads [package], not a dependency's `version = "2"`.
+# version.sh reads desktop-gpui's [package], not a dependency's `version = "=0.7.0"`,
+# and not another crate's — the core is 0.0.1 in $T/core.
 if [ "$(bash "$HERE/version.sh" "$T/ok")" = "0.1.0" ]; then pass=$((pass + 1)); else echo "FAIL: version.sh app version"; fail=$((fail + 1)); fi
+if [ "$(bash "$HERE/version.sh" "$T/core")" = "0.1.0" ]; then pass=$((pass + 1)); else echo "FAIL: version.sh reads desktop-gpui, not src-tauri"; fail=$((fail + 1)); fi
+if [ "$(bash "$HERE/version.sh" "$T/stray")" = "0.2.0" ]; then pass=$((pass + 1)); else echo "FAIL: version.sh reads desktop-gpui, not desktop"; fail=$((fail + 1)); fi
 if [ "$(bash "$HERE/version.sh" "$T/core" src-tauri/Cargo.toml)" = "0.0.1" ]; then pass=$((pass + 1)); else echo "FAIL: version.sh other toml"; fail=$((fail + 1)); fi
 
 echo "test-check-version: $pass passed, $fail failed"

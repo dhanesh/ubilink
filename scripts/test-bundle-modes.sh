@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Tests for scripts/release-mode.sh: how a build picks its signing mode, and the
-# tag/version check (run by `make test-scripts`).
+# Tests for scripts/release-mode.sh (how a build picks its signing mode, the
+# tag/version check) and for the parts of scripts/bundle-macos.sh that run before any
+# build: mode/credential refusal, and that it packages the GPUI app (run by
+# `make test-scripts`). Never runs dev mode — that imports a signing identity.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 pass=0
@@ -43,6 +45,67 @@ expect "tag differs"             1 "$(check_tag refs/tags/v0.2.0 0.1.0)"
 expect "non-rc suffix refused"   1 "$(check_tag refs/tags/v0.1.0-beta 0.1.0)"
 expect "dots are literal"        1 "$(check_tag refs/tags/v0x1x0 0.1.0)"
 expect "branch ref refused"      1 "$(check_tag refs/heads/main 0.1.0)"
+
+# bundle_refusal MODE N → "<exit> <reason found: yes|no>"; MODE must fail before building.
+bundle_refusal() {
+  local mode="$1" n="$2" want="$3" i=0 v envs=() err rc
+  for v in "${ALL[@]}"; do
+    if [ "$i" -lt "$n" ]; then envs+=("$v=x"); else envs+=("$v="); fi
+    i=$((i + 1))
+  done
+  err="$(env "${envs[@]}" bash "$HERE/bundle-macos.sh" "$mode" 2>&1 >/dev/null)"
+  rc=$?
+  if printf '%s' "$err" | grep -qF -- "$want"; then echo "$rc yes"; else echo "$rc no"; fi
+}
+
+expect "bundle: unknown mode refused"        "1 yes" "$(bundle_refusal bogus 0 "unknown mode 'bogus'")"
+expect "bundle: release without credentials" "1 yes" "$(bundle_refusal release 0 "needs all 6 APPLE_* variables (0 set)")"
+expect "bundle: release, partial credentials" "1 yes" "$(bundle_refusal release 4 "needs all 6 APPLE_* variables (4 set)")"
+
+# Static: the shipped bundle is the GPUI app, built without the automation feature, as a
+# menu-bar app, from assets under desktop-gpui/packaging/ — and bundle-next.sh is gone
+# (folded into bundle-macos.sh's dev mode).
+B="$HERE/bundle-macos.sh"
+has() { grep -qF -- "$1" "$B" && echo yes || echo no; }
+expect "bundle: builds desktop-gpui"           yes "$(has 'MANIFEST="$ROOT/desktop-gpui/Cargo.toml"')"
+expect "bundle: no desktop/ (Tauri) paths"     no  "$(grep -qE '\$ROOT/desktop/' "$B" && echo yes || echo no)"
+expect "bundle: never enables a cargo feature" no  "$(grep -vE '^[[:space:]]*#' "$B" | grep -qE -- '--features|--all-features' && echo yes || echo no)"
+expect "bundle: output outside any target dir"  yes "$(has 'OUT="$ROOT/desktop-gpui/bundle"')"
+expect "bundle: output dir is gitignored"     yes "$(git -C "$HERE/.." check-ignore -q desktop-gpui/bundle/x.dmg && echo yes || echo no)"
+expect "bundle: binary path from cargo JSON"   yes "$(has '--message-format=json')"
+expect "bundle: LSUIElement in Info.plist"     yes "$(has '<key>LSUIElement</key><true/>')"
+expect "bundle: verifies LSUIElement"          yes "$(has 'plutil -extract LSUIElement')"
+expect "bundle: entitlements file exists"      yes "$([ -f "$HERE/../desktop-gpui/packaging/Ubilink.entitlements" ] && echo yes || echo no)"
+expect "bundle: icon exists"                   yes "$([ -f "$HERE/../desktop-gpui/packaging/icon.png" ] && echo yes || echo no)"
+expect "bundle-next.sh folded into bundle-macos.sh" no "$([ -e "$HERE/bundle-next.sh" ] && echo yes || echo no)"
+
+# The shipped binary is scanned for the automation channel's tokens (S1/TN1), with the
+# same list as probe.py release-clean (parsed, not imported), from verify_outputs.
+py_tokens="$(python3 -I - "$HERE/probe.py" <<'PY'
+import ast, sys
+tree = ast.parse(open(sys.argv[1]).read())
+for node in tree.body:
+    if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "_AUTOMATION_TOKENS" for t in node.targets):
+        print(" ".join(ast.literal_eval(node.value)))
+PY
+)"
+sh_tokens="$(sed -n 's/^AUTOMATION_TOKENS=(\(.*\))$/\1/p' "$B")"
+expect "bundle: token list equals probe.py's _AUTOMATION_TOKENS" "$py_tokens" "$sh_tokens"
+expect "bundle: token list is not empty"        yes "$([ -n "$sh_tokens" ] && echo yes || echo no)"
+expect "bundle: verify_outputs runs the scan"   yes "$(awk '/^verify_outputs\(\) \{/,/^}/' "$B" | grep -qE '^[[:space:]]*check_no_automation "\$exe"' && echo yes || echo no)"
+# Behaviour: the scan function itself, lifted out of the script, on two fake binaries.
+SCAN="$(mktemp -d)"
+{
+  echo 'die() { echo "die: $*" >&2; exit 1; }'
+  grep -E '^AUTOMATION_TOKENS=' "$B"
+  awk '/^check_no_automation\(\) \{/,/^}/' "$B"
+  echo 'check_no_automation "$1"'
+} >"$SCAN/scan.sh"
+printf 'GPUI\0Metal\0ubilink\0' >"$SCAN/clean"
+printf 'GPUI\0\1\2/tmp/ubilink-501/x/auto.sock\0trigger_hotkey\0' >"$SCAN/dirty"
+expect "bundle: scan passes a clean binary"     0 "$(bash "$SCAN/scan.sh" "$SCAN/clean" 2>/dev/null; echo $?)"
+expect "bundle: scan refuses an automation binary" "1 yes" "$(err="$(bash "$SCAN/scan.sh" "$SCAN/dirty" 2>&1)"; rc=$?; printf '%s' "$err" | grep -qF 'auto.sock trigger_hotkey' && echo "$rc yes" || echo "$rc no")"
+rm -r "$SCAN"
 
 echo "test-bundle-modes: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
