@@ -30,6 +30,7 @@
 pub mod a11y_spike;
 pub mod browser;
 pub mod capture;
+pub mod layout;
 pub mod onboarding;
 pub mod settings;
 pub mod theming;

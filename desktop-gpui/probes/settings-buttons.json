@@ -1,0 +1,93 @@
+{
+  "description": "Parity: Settings' action buttons are one height, as the Tauri panel's .set-btn were: Import and Reset… are as tall as Export, and so are the reset confirmation's Delete everything and Cancel.",
+  "requirement": "P2-settings-buttons (GPUI Phase 2b parity, Tauri ee80e70:dist/panel.css .set-btn, dist/index.html set-export/set-import/set-reset)",
+  "notes": [
+    "Heights are the buttons' measured bounds (view.layout.<name>_button.h, views/layout.rs), compared against Export's in the same state read.",
+    "Export keeps its accent look (the R14 accent sample, theming.json); only the heights must agree.",
+    "Fails on the instrumentation commit (before the fix) at 'Import is as tall as Export' (24 vs 28 pt)."
+  ],
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "settings is drawn and measured",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "window_verified": true,
+        "route": "settings",
+        "view.layout.viewport.h": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "Import is as tall as Export",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.import_button.h": {
+          "eq": {
+            "path": "view.layout.export_button.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "Reset… is as tall as Export",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.reset_button.h": {
+          "eq": {
+            "path": "view.layout.export_button.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "Tab to Reset",
+      "key_until": {
+        "role": "Button",
+        "text": "Reset",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "ask to reset",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "the confirmation's buttons are as tall as Export",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.reset_confirm_button.h": {
+          "eq": {
+            "path": "view.layout.export_button.h"
+          }
+        },
+        "view.layout.reset_cancel_button.h": {
+          "eq": {
+            "path": "view.layout.export_button.h"
+          }
+        }
+      }
+    }
+  ]
+}

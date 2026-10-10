@@ -1,0 +1,70 @@
+{
+  "description": "Parity: in the Launch at login row the status text (Enabled) is the same text size as the Launch at login label, not larger.",
+  "requirement": "P2-settings-login-text (GPUI Phase 2b parity, Tauri ee80e70:dist/panel.css .set-pill/.set-sub at --fs-meta)",
+  "notes": [
+    "The Tauri settings view had no launch-at-login row; its nearest equivalents, the status pill (.set-pill) and the row's sub line (.set-sub), used --fs-meta (12 px). The GPUI row uses font_size::META for both texts.",
+    "Sizes are measured, not declared: view.layout.login_label.font_px and view.layout.login_status.font_px are the text sizes GPUI resolves for each text's element at prepaint (views/layout.rs).",
+    "Fails on the instrumentation commit (before the fix) at 'Enabled is the label's size' (14 vs 11.375 px)."
+  ],
+  "setup": {
+    "fixtures": {
+      "login_item": "login-item-enabled.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "settings is drawn and measured",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "window_verified": true,
+        "route": "settings",
+        "view.layout.viewport.h": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "the status shows",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login"
+        },
+        {
+          "role": "Label",
+          "text": "Enabled",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Enabled is the label's size",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.login_status.font_px": {
+          "eq": {
+            "path": "view.layout.login_label.font_px"
+          }
+        },
+        "view.layout.login_label.font_px": {
+          "eq": 12
+        }
+      }
+    }
+  ]
+}

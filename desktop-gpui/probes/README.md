@@ -224,6 +224,13 @@ If a step names a display the host lacks, the result is ENV-BLOCKED, not FAIL.
   `number`, `bool`, `null`), `matches` (regex search) and `exists`. All operators in
   one object must hold.
 
+In a `call` step's `expect`, the operand of `eq`, `ne`, `lt`, `le`, `gt` or `ge` may be
+`{"path": "<dot path>"}`: the value at that path in the **same** result, read when the
+check runs. This compares two live measurements in one state read, for example
+`"view.layout.last_adapter.bottom": {"le": {"path": "view.layout.viewport.h"}}`. A
+path that is missing never passes, and a failure prints both values. Anywhere else
+(`see` state flags, `pasteboard`, `file`) a path operand is a scenario error.
+
 ### Text matching (`see`, `ocr`, the `text` operator)
 
 Both sides are NFKC-normalised (this turns `…` into `...`), casefolded and

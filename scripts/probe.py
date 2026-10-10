@@ -1904,8 +1904,27 @@ def is_matcher(spec) -> bool:
     return isinstance(spec, dict) and bool(spec) and all(k in _OPS for k in spec)
 
 
-def validate_matcher(spec, where: str):
+# Operators whose operand may be `{"path": "<dot path>"}`: another value of the same
+# result, read when the check runs (`check_expect`), so one step can compare two
+# live measurements ("the last toggle's bottom <= the viewport's height").
+_PATH_OPS = ("eq", "ne", "lt", "le", "gt", "ge")
+
+
+def _is_path_ref(operand) -> bool:
+    return isinstance(operand, dict) and set(operand) == {"path"}
+
+
+def validate_matcher(spec, where: str, allow_path: bool = False):
     if is_matcher(spec):
+        for op, operand in spec.items():
+            if _is_path_ref(operand):
+                if not allow_path or op not in _PATH_OPS:
+                    raise ScenarioError(
+                        f"{where}: a {{\"path\": ...}} operand is only allowed in a call's "
+                        f"expect, with {', '.join(_PATH_OPS)}"
+                    )
+                if not _nonblank(operand["path"]):
+                    raise ScenarioError(f"{where}: path names a non-empty dot path")
         for op in ("text", "contains", "not_contains"):
             # "" is a substring of everything: the check would pass vacuously.
             if op in spec and spec[op] == "":
@@ -1925,8 +1944,22 @@ def match_value(actual, spec) -> bool:
     if is_matcher(spec):
         if actual is _MISSING:
             return spec.get("exists") is False and len(spec) == 1
+        # An unresolved `{"path": ...}` operand (or one whose path was missing) never
+        # passes: there was nothing to compare against.
+        if any(_is_path_ref(o) or o is _MISSING for o in spec.values()):
+            return False
         return all(_OPS[op](actual, operand) for op, operand in spec.items())
     return actual is not _MISSING and actual == spec
+
+
+def resolve_paths(result, spec):
+    """`spec` with each `{"path": p}` operand replaced by `result`'s value at `p`
+    (`_MISSING` when absent, which `match_value` never passes)."""
+    if not is_matcher(spec):
+        return spec
+    return {
+        op: get_path(result, o["path"]) if _is_path_ref(o) else o for op, o in spec.items()
+    }
 
 
 def resolve_saved(obj, saved: dict):
@@ -1947,8 +1980,17 @@ def check_expect(result, expect: dict) -> list:
     misses = []
     for path, spec in expect.items():
         actual = get_path(result, path)
-        if not match_value(actual, spec):
-            misses.append((path, spec, "<missing>" if actual is _MISSING else actual))
+        resolved = resolve_paths(result, spec)
+        if not match_value(actual, resolved):
+            shown = spec
+            if resolved is not spec:
+                vals = {
+                    o["path"]: ("<missing>" if resolved[op] is _MISSING else resolved[op])
+                    for op, o in spec.items()
+                    if _is_path_ref(o)
+                }
+                shown = {"expect": spec, "paths": vals}
+            misses.append((path, shown, "<missing>" if actual is _MISSING else actual))
     return misses
 
 
@@ -2413,7 +2455,7 @@ def validate_step(step, where: str) -> str:
         if "args" in step and not isinstance(step["args"], dict):
             raise ScenarioError(f"{where}: args must be an object")
         for path, spec in (step.get("expect") or {}).items():
-            validate_matcher(spec, f"{where}: expect[{path!r}]")
+            validate_matcher(spec, f"{where}: expect[{path!r}]", allow_path=True)
         if "save" in step:
             sv = step["save"]
             if not isinstance(sv, dict) or not sv or not all(

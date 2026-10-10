@@ -65,6 +65,7 @@
 //! user (the same pattern as `onboarding.rs`'s step buttons). The Export and Import
 //! buttons use the same wrapper for Enter/Space.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -77,6 +78,7 @@ use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
 
+use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
@@ -92,6 +94,12 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
+    /// Measured places and text sizes (`views::layout`): `viewport`, `last_adapter`,
+    /// the action buttons (`export_button`, `import_button`, `reset_button`, and while
+    /// the reset question shows `reset_confirm_button`, `reset_cancel_button`), and the
+    /// launch-at-login `login_label` / `login_status` text sizes.
+    #[serde(default)]
+    pub layout: BTreeMap<String, serde_json::Value>,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -100,11 +108,15 @@ pub fn state() -> super::ViewState {
         view: Route::Settings.as_str().into(),
         phase: "ready".into(),
         theme_samples: SAMPLES.get(),
+        layout: LAYOUT.get(),
     })
 }
 
 /// The newest settings view's theme sample regions (R14), written at prepaint.
 static SAMPLES: Samples = Samples::new();
+
+/// The newest settings view's measured layout (`views::layout`), written at prepaint.
+static LAYOUT: Layout = Layout::new();
 
 /// How an action button looks.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -365,6 +377,18 @@ fn export_file_name() -> String {
 /// An automation build never opens a real file dialog on the host (O4).
 const NO_FIXTURE: &str = "no {kind} fixture loaded";
 
+/// The `layout` key an action button's measured bounds are reported under.
+fn layout_key(id: &'static str) -> &'static str {
+    match id {
+        "settings-export" => "export_button",
+        "settings-import" => "import_button",
+        "settings-reset" => "reset_button",
+        "settings-reset-confirm" => "reset_confirm_button",
+        "settings-reset-cancel" => "reset_cancel_button",
+        other => other,
+    }
+}
+
 /// Space or Enter with no modifiers: the keys that activate a focused switch.
 fn is_activation_key(keystroke: &Keystroke) -> bool {
     (keystroke.key == "space" || keystroke.key == "enter") && !keystroke.modifiers.modified()
@@ -438,14 +462,26 @@ impl SettingsView {
                 }
             }))
             .child(
+                // The visible label is the view's own text (below), so its size is the
+                // view's to choose and to measure; the switch keeps the accessible name.
                 Switch::new("launch-at-login")
                     .small()
-                    .label(LOGIN_SWITCH)
+                    .accessibility_label(LOGIN_SWITCH)
                     .checked(on)
                     .on_click(
                         cx.listener(|this, next: &bool, _, cx| this.set_launch_at_login(*next, cx)),
                     ),
             );
+        let label = div()
+            .id("launch-at-login-label")
+            .relative()
+            .flex_shrink_0()
+            .text_sm()
+            .text_color(foreground)
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| this.set_launch_at_login(!on, cx)))
+            .child(LOGIN_SWITCH)
+            .child(LAYOUT.font("login_label"));
         div()
             .flex()
             .flex_row()
@@ -453,12 +489,15 @@ impl SettingsView {
             .gap(spacing::S2)
             .text_size(font_size::ROW)
             .child(switch)
+            .child(label)
             .when_some(status, |this, status| {
                 this.child(
                     div()
+                        .relative()
                         .flex_shrink_0()
                         .text_color(foreground)
-                        .child(text!(id = "settings-login-status", status)),
+                        .child(text!(id = "settings-login-status", status))
+                        .child(LAYOUT.font("login_status")),
                 )
             })
             .when_some(explanation, |this, explanation| {
@@ -575,6 +614,7 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .relative()
             .flex_shrink_0()
             .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if is_activation_key(&event.keystroke) {
@@ -597,6 +637,7 @@ impl SettingsView {
                     d.child(button)
                 }
             })
+            .child(LAYOUT.bounds(layout_key(id)))
             .into_any_element()
     }
 
@@ -605,13 +646,20 @@ impl SettingsView {
         cx.notify();
     }
 
-    fn adapter_switch(&self, plugin: &PluginView, cx: &mut Context<Self>) -> AnyElement {
+    /// `last`: the grid's last switch, whose place the layout reports (`last_adapter`).
+    fn adapter_switch(
+        &self,
+        plugin: &PluginView,
+        last: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let app: SharedString = plugin.app.clone().into();
         let enabled = plugin.enabled;
         let locked = plugin.builtin;
         let key_app = app.clone();
         let click_app = app.clone();
         div()
+            .relative()
             .w(px(140.))
             .flex_shrink_0()
             // Space/Enter reach this wrapper only while the switch inside it is
@@ -636,6 +684,7 @@ impl SettingsView {
                         this.set_enabled(&click_app, *next, cx)
                     })),
             )
+            .when(last, |d| d.child(LAYOUT.bounds("last_adapter")))
             .into_any_element()
     }
 }
@@ -647,12 +696,14 @@ impl Render for SettingsView {
             window.focus(&self.focus, cx);
         }
         SAMPLES.clear();
+        LAYOUT.clear();
         self.appearance.ensure(window, cx);
         let (switches, list_error) = match ubilink_app::list_plugins(crate::app_state::get()) {
             Ok(plugins) => (
                 plugins
                     .iter()
-                    .map(|p| self.adapter_switch(p, cx))
+                    .enumerate()
+                    .map(|(i, p)| self.adapter_switch(p, i + 1 == plugins.len(), cx))
                     .collect::<Vec<_>>(),
                 None,
             ),
