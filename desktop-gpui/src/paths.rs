@@ -23,7 +23,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub const DATA_DIR_ENV: &str = "UBILINK_DATA_DIR";
-/// The bundle id the default data dir is named after (Info.plist, bundle-next.sh).
+/// The bundle id the default data dir is named after (Info.plist, scripts/bundle-macos.sh).
 pub const BUNDLE_ID: &str = "org.dhanesh.ubilink";
 
 /// Where this process keeps its data. Not created here: the store that first writes
