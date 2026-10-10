@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# Build Ubilink.app — and, for the dist modes, a DMG — with Apple's own tools only
-# (no tauri-cli: Tauri embeds the frontend at compile time, so the binary is
-# self-contained). Design: docs/superpowers/specs/2026-09-14-v0.1-release-design.md §3.
+# Build Ubilink.app — and, for the dist modes, a DMG — from the GPUI app (desktop-gpui/)
+# with Apple's own tools only. Since GPUI Phase 2b the GPUI app IS the shipped app:
+# executable `ubilink`, bundle id org.dhanesh.ubilink, a menu-bar utility (LSUIElement).
+# It is always built in the release profile with default features, so the `automation`
+# test channel never reaches a bundle (`python3 scripts/probe.py release-clean` proves
+# the same build is clean). Design: docs/superpowers/specs/2026-09-14-v0.1-release-design.md §3.
 #
 #   bundle-macos.sh dev      host-arch app signed with a stable self-signed identity, so
 #                            macOS keeps Accessibility/Automation grants across rebuilds
-#                            (what `make bundle` runs)
+#                            (what `make bundle` runs; it replaced bundle-next.sh)
 #   bundle-macos.sh dry-run  universal app + DMG, hardened runtime, ad-hoc signed, named
 #                            …-UNNOTARIZED.dmg (`make dist` without Apple credentials)
 #   bundle-macos.sh release  universal app + DMG, Developer ID, notarized and stapled
 #                            (`make dist` with all six APPLE_* variables — see
 #                            docs/RUNBOOK-release.md)
+#
+# Output: desktop-gpui/target/bundle/. The binary is the path cargo reports for the
+# desktop-gpui `ubilink` bin (--message-format=json), never an assumed
+# target/release/ubilink: with a shared CARGO_TARGET_DIR the Tauri crate (desktop/)
+# writes a binary of the same name there.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,9 +30,10 @@ APP_NAME="Ubilink"
 EXE="ubilink"
 BUNDLE_ID="org.dhanesh.ubilink"
 VERSION="$(bash "$ROOT/scripts/version.sh")"
-ENTITLEMENTS="$ROOT/desktop/Ubilink.entitlements"
-SRC_ICON="$ROOT/desktop/icons/icon.png"
-OUT="$ROOT/desktop/target/bundle"
+MANIFEST="$ROOT/desktop-gpui/Cargo.toml"
+ENTITLEMENTS="$ROOT/desktop-gpui/packaging/Ubilink.entitlements"
+SRC_ICON="$ROOT/desktop-gpui/packaging/icon.png"
+OUT="$ROOT/desktop-gpui/target/bundle"
 APP="$OUT/$APP_NAME.app"
 BIN=""
 DMG=""
@@ -49,22 +58,52 @@ case "$MODE" in
   *) die "unknown mode '$MODE' (expected dev, dry-run or release)" ;;
 esac
 
+# cargo_build_bin OUT_COPY [CARGO_ARGS…] — build the desktop-gpui release binary and
+# copy it to OUT_COPY at once, so a parallel build into a shared target dir cannot swap
+# it before it is bundled. The path is cargo's own `executable` report for the `ubilink`
+# bin. No --features: `automation` stays off in everything this script ships.
+cargo_build_bin() {
+  local copy="$1" json="$WORK/cargo-$RANDOM.json" exe
+  shift
+  # --locked: desktop-gpui/Cargo.lock is committed; ship exactly that pinned GPUI stack.
+  # stdout goes to a file (not a pipe) so a failed build fails here, by its own status.
+  cargo build --release --locked --message-format=json-render-diagnostics \
+    --manifest-path "$MANIFEST" "$@" >"$json" || die "cargo build failed ($*)"
+  exe="$(python3 -c '
+import json, sys
+exe = ""
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        m = json.loads(line)
+    except ValueError:
+        continue
+    t = m.get("target") or {}
+    if m.get("reason") == "compiler-artifact" and t.get("name") == "ubilink" \
+            and "bin" in (t.get("kind") or []) and m.get("executable"):
+        exe = m["executable"]
+print(exe)
+' "$json")"
+  [ -n "$exe" ] && [ -x "$exe" ] || die "cargo reported no ubilink executable ($*)"
+  cp "$exe" "$copy"
+}
+
 build_binary() {
   if [ "$MODE" = dev ]; then
     log "building the release binary for this Mac…"
-    cargo build --release --manifest-path "$ROOT/desktop/Cargo.toml"
-    BIN="$ROOT/desktop/target/release/$EXE"
+    BIN="$WORK/$EXE"
+    cargo_build_bin "$BIN"
   else
-    local t
+    local t slices=()
     for t in aarch64-apple-darwin x86_64-apple-darwin; do
       log "building for ${t}…"
-      cargo build --release --locked --target "$t" --manifest-path "$ROOT/desktop/Cargo.toml"
+      cargo_build_bin "$WORK/$EXE-$t" --target "$t"
+      slices+=("$WORK/$EXE-$t")
     done
-    mkdir -p "$OUT"
     BIN="$WORK/$EXE-universal"
-    lipo -create -output "$BIN" \
-      "$ROOT/desktop/target/aarch64-apple-darwin/release/$EXE" \
-      "$ROOT/desktop/target/x86_64-apple-darwin/release/$EXE"
+    lipo -create -output "$BIN" "${slices[@]}"
   fi
   [ -x "$BIN" ] || die "binary not found at $BIN"
 }
@@ -101,6 +140,9 @@ assemble_app() {
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>10.15</string>
+  <!-- A menu-bar utility: no Dock icon, no app menu, from the very first frame of
+       launch (main.rs re-asserts the Accessory policy after GPUI resets it). -->
+  <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Shown on the Automation (Apple Events) prompt when Ubilink scripts another app. -->
   <key>NSAppleEventsUsageDescription</key>
@@ -260,12 +302,18 @@ make_dmg() {
 
 verify_outputs() {
   log "verifying…"
-  local exe="$APP/Contents/MacOS/$EXE" archs ents keys nkeys entval plist="$APP/Contents/Info.plist"
+  local exe="$APP/Contents/MacOS/$EXE" archs libs ents keys nkeys entval plist="$APP/Contents/Info.plist"
   if [ "$MODE" != dev ]; then
     archs="$(lipo -archs "$exe")"
     case " $archs " in *" arm64 "*) ;; *) die "no arm64 slice (have: $archs)" ;; esac
     case " $archs " in *" x86_64 "*) ;; *) die "no x86_64 slice (have: $archs)" ;; esac
   fi
+  # The GPUI app, not the Tauri one (both build a binary named `ubilink`): GPUI renders
+  # through Metal and links no WebKit; Tauri's webview is WebKit. Version and plist
+  # checks alone would pass for either binary.
+  libs="$(otool -L "$exe")" || die "otool could not read $exe"
+  case "$libs" in *WebKit.framework*) die "$exe links WebKit — that is the Tauri app, not desktop-gpui" ;; esac
+  case "$libs" in *Metal.framework*) ;; *) die "$exe does not link Metal — not the GPUI app" ;; esac
   codesign --verify --deep --strict --verbose=2 "$APP"
   # `|| die` (rather than letting `set -e` abort silently) so a codesign failure here
   # is reported by name, distinct from the entitlements-content checks below.
@@ -282,8 +330,12 @@ verify_outputs() {
   entval="$(printf '%s' "$ents" | plutil -extract 'com\.apple\.security\.automation\.apple-events' raw -o - - 2>/dev/null || true)"
   [ "$entval" = true ] ||
     die "com.apple.security.automation.apple-events entitlement must be true, got: ${entval:-none}"
+  [ "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = "$BUNDLE_ID" ] ||
+    die "Info.plist bundle id is not $BUNDLE_ID"
   [ "$(plutil -extract CFBundleShortVersionString raw -o - "$plist")" = "$VERSION" ] ||
     die "Info.plist version is not $VERSION"
+  [ "$(plutil -extract LSUIElement raw -o - "$plist" 2>/dev/null)" = true ] ||
+    die "Info.plist LSUIElement is not true (Ubilink is a menu-bar app)"
   plutil -extract NSAppleEventsUsageDescription raw -o - "$plist" >/dev/null ||
     die "Info.plist has no NSAppleEventsUsageDescription"
   if [ -n "$DMG" ]; then hdiutil verify "$DMG" >/dev/null; fi
