@@ -44,6 +44,11 @@ in `desktop-gpui/packaging/`.
 3. **Settings → Rules → Rulesets → New tag ruleset:** target `v*`; restrict creation,
    update and deletion to maintainers.
 4. **Settings → Security → Private vulnerability reporting:** enable (used by `SECURITY.md`).
+5. **Homebrew tap** (`.github/workflows/homebrew-tap.yml`):
+   - Generate an ed25519 key pair.
+   - Add the public half to `dhanesh/homebrew-tap` → Settings → Deploy keys, with **write access**.
+   - Create an environment `homebrew-tap` here, limited to tag pattern `v*`, with secret `HOMEBREW_TAP_DEPLOY_KEY` set to the private half.
+   - The key can push only to the tap.
 
 ## Cutting a release
 
@@ -60,6 +65,10 @@ in `desktop-gpui/packaging/`.
 4. **Final:** set the CHANGELOG heading's date (`## [X.Y.Z] - YYYY-MM-DD`) via a PR,
    then `git tag -a vX.Y.Z -m "Ubilink X.Y.Z" && git push origin vX.Y.Z`. A final tag
    **fails** without the Apple secrets. Review the draft release and **Publish** it.
+5. **Homebrew:** publishing runs `homebrew-tap.yml`, which works as follows:
+   - It downloads the notarized DMG, checks its hash against `SHA256SUMS`, and commits the new `version` and `sha256` to `Casks/ubilink.rb` in `dhanesh/homebrew-tap`.
+   - A published prerelease updates the cask only while the cask is on a prerelease, so an rc never replaces a stable version.
+   - Check with `brew update && brew info --cask dhanesh/tap/ubilink`.
 
 ## RC checklist
 
