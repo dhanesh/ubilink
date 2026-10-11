@@ -57,10 +57,11 @@
 //! what failed and what to do (U3).
 //!
 //! Permissions (rc.4, the Tauri panel's Settings › Permissions, `dist/index.html`
-//! `set-auto` / `set-open-perms`), the first section: an `Automation` row with the
-//! purpose `Read the active app's link.` and a status Label, exactly `Allowed`, `Not
-//! allowed` or `Not checked yet` ([`automation_status_text`]); and an `Open permission
-//! setup…` Button that switches the panel to onboarding. The status comes from the
+//! `set-auto` / `set-open-perms`), the first section, under a `Permissions` heading
+//! line like `App adapters`'s: an `Automation` row with the purpose `Read the active
+//! app's link.` and a status Label, exactly `Allowed`, `Not allowed` or `Not checked
+//! yet` ([`automation_status_text`]); and an `Open permission setup…` Button that
+//! switches the panel to onboarding. The status comes from the
 //! check onboarding uses (`onboarding::check_permissions`: the `permission` fixture,
 //! or a release build's live probe), run off the main thread each time Settings is
 //! shown, so it never blocks a frame; it reads `Checking…` until it answers.
@@ -160,7 +161,7 @@ const ADAPTER_W: Pixels = px(140.);
 const ADAPTER_H: Pixels = px(16.);
 const ADAPTER_GAP: Pixels = spacing::S2;
 const HINT_H: Pixels = px(18.);
-/// The `App adapters` heading line above the grid.
+/// A section heading line (`Permissions`, `App adapters`).
 const SECTION_H: Pixels = px(16.);
 
 /// What Settings' height depends on.
@@ -181,7 +182,8 @@ pub fn adapter_columns(panel_w: f64) -> usize {
     (((inner + pt(ADAPTER_GAP)) / (pt(ADAPTER_W) + pt(ADAPTER_GAP))).floor() as usize).max(1)
 }
 
-/// Settings' panel height for `content`: padding, the title, the Permissions row, the
+/// Settings' panel height for `content`: padding, the title, the Permissions heading
+/// and row, the
 /// stats and actions row, the reset question when it shows, the launch-at-login row, every grid row of
 /// adapters under their heading and the hint line, with the gaps between them. The shell clamps it
 /// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
@@ -201,7 +203,8 @@ pub fn content_height(content: Content) -> f64 {
     };
     let mut parts = vec![
         pt(HEADER_H),
-        // The Permissions row (rc.4).
+        // The Permissions heading and row (rc.4).
+        pt(SECTION_H),
         pt(theming::CONTROL_H),
         pt(theming::CONTROL_H),
         pt(login),
@@ -597,8 +600,20 @@ impl SettingsView {
         cx.defer(|cx| crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx));
     }
 
-    /// The Permissions section (rc.4): heading, the Automation row's name, purpose and
-    /// status, and the button that opens onboarding.
+    /// A section's heading line (`Permissions`, `App adapters`): one muted meta line.
+    fn section_heading(id: &'static str, text: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .h(SECTION_H)
+            .flex_shrink_0()
+            .line_height(SECTION_H)
+            .text_size(font_size::META)
+            .text_color(cx.theme().muted_foreground)
+            .child(text!(id = id, text))
+            .into_any_element()
+    }
+
+    /// The Permissions section's row (rc.4), under its heading: the Automation row's
+    /// name, purpose and status, and the button that opens onboarding.
     fn permissions_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let button = self.action_button(
             "settings-open-permissions",
@@ -623,16 +638,6 @@ impl SettingsView {
             .flex_row()
             .items_center()
             .gap(spacing::S2)
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .text_size(font_size::META)
-                    .text_color(theme.muted_foreground)
-                    .child(text!(
-                        id = "settings-permissions-heading",
-                        PERMISSIONS_HEADING
-                    )),
-            )
             .child(
                 div()
                     .flex_shrink_0()
@@ -1046,7 +1051,11 @@ impl Render for SettingsView {
             cx.defer(move |cx| crate::shell::fit_panel(height, cx));
         }
         let login_row = self.login_row(cx);
+        let permissions_heading =
+            Self::section_heading("settings-permissions-heading", PERMISSIONS_HEADING, cx);
         let permissions_row = self.permissions_row(cx);
+        let adapters_heading =
+            Self::section_heading("settings-adapters-heading", "App adapters", cx);
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
@@ -1102,6 +1111,7 @@ impl Render for SettingsView {
                             .child(text!(id = "settings-version", version_text())),
                     ),
             )
+            .child(permissions_heading)
             .child(permissions_row)
             .child(
                 div()
@@ -1173,15 +1183,7 @@ impl Render for SettingsView {
                 )
             })
             .child(login_row)
-            .child(
-                div()
-                    .h(SECTION_H)
-                    .flex_shrink_0()
-                    .line_height(SECTION_H)
-                    .text_size(font_size::META)
-                    .text_color(theme.muted_foreground)
-                    .child(text!(id = "settings-adapters-heading", "App adapters")),
-            )
+            .child(adapters_heading)
             .child(
                 // The grid's scroll box, wrapped so its own place can be measured (a
                 // canvas inside it would scroll with the switches).
@@ -1281,19 +1283,19 @@ mod tests {
                 login_explained,
             })
         };
-        // pad 8+8, title 24, permissions 24 and actions 24 (D26: macOS's 24 pt
-        // controls), login 20, the App adapters heading 16, hint 18, 6 gaps of 4:
-        // 166 + grid.
-        assert_eq!(h(0, false, false), 166.0);
+        // pad 8+8, title 24, the Permissions heading 16 and row 24, actions 24 (D26:
+        // macOS's 24 pt controls), login 20, the App adapters heading 16, hint 18, 7
+        // gaps of 4: 186 + grid.
+        assert_eq!(h(0, false, false), 186.0);
         // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
-        assert_eq!(h(10, false, false), 230.0);
+        assert_eq!(h(10, false, false), 250.0);
         // ceil(n / 4) rows: 4 is one row, 5 is two.
-        assert_eq!(h(4, false, false), 166.0 + 16.0);
-        assert_eq!(h(5, false, false), 166.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(4, false, false), 186.0 + 16.0);
+        assert_eq!(h(5, false, false), 186.0 + 16.0 + 8.0 + 16.0);
         assert_eq!(h(8, false, false), h(5, false, false));
         // The reset question adds its row and a gap; an explanation up to three lines.
-        assert_eq!(h(10, true, false), 230.0 + 40.0 + 4.0);
-        assert_eq!(h(10, false, true), 230.0 + 30.0);
+        assert_eq!(h(10, true, false), 250.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 250.0 + 30.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
     }
