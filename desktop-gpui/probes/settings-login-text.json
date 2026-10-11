@@ -4,7 +4,7 @@
   "notes": [
     "The Tauri settings view had no launch-at-login row; its nearest equivalents, the status pill (.set-pill) and the row's sub line (.set-sub), used --fs-meta (12 px). The GPUI row uses font_size::META for both texts.",
     "Sizes are measured, not declared: view.layout.login_label.font_px and view.layout.login_status.font_px are the text sizes GPUI resolves for each text's element at prepaint (views/layout.rs).",
-    "Must fail on the instrumentation commit (before the fix) at 'Enabled is the label's size' (14 vs 11.375 px)."
+    "Must fail before the fix at 'not registered: the status is the label's size' (14 vs 11.38 px); the same check is repeated once the switch shows Enabled (login-item-enabled.json starts not registered, so Space registers it, as launch-at-login.json does)."
   ],
   "setup": {
     "fixtures": {
@@ -36,11 +36,63 @@
       }
     },
     {
-      "name": "the status shows",
+      "name": "not registered: the status shows",
       "see": [
         {
           "role": "Switch",
           "text": "Launch at login"
+        },
+        {
+          "role": "Label",
+          "text": "Not registered",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "not registered: the status is the label's size",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.login_status.font_px": {
+          "eq": {
+            "path": "view.layout.login_label.font_px"
+          }
+        },
+        "view.layout.login_label.font_px": {
+          "eq": 12
+        }
+      }
+    },
+    {
+      "name": "Tab to Launch at login",
+      "key_until": {
+        "role": "Switch",
+        "text": "Launch at login",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "turn it on",
+      "call": "key",
+      "args": {
+        "keys": "space"
+      }
+    },
+    {
+      "name": "enabled: the status shows",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Launch at login",
+          "state": {
+            "toggled": true
+          }
         },
         {
           "role": "Label",

@@ -1983,7 +1983,7 @@ def check_expect(result, expect: dict) -> list:
         resolved = resolve_paths(result, spec)
         if not match_value(actual, resolved):
             shown = spec
-            if resolved is not spec:
+            if is_matcher(spec) and any(_is_path_ref(o) for o in spec.values()):
                 vals = {
                     o["path"]: ("<missing>" if resolved[op] is _MISSING else resolved[op])
                     for op, o in spec.items()
