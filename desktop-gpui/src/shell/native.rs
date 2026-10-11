@@ -85,8 +85,28 @@ pub fn activation_policy(mtm: MainThreadMarker) -> NSApplicationActivationPolicy
 pub struct PanelFacts {
     /// An NSPanel with the non-activating style at NSPopUpWindowLevel: GPUI's PopUp.
     pub popup: bool,
-    /// An NSVisualEffectView sits in the content view: GPUI's Blurred background.
-    pub blurred: bool,
+    /// The material behind GPUI's content (D26).
+    pub material: Material,
+}
+
+/// The material a visible subview of the panel's content view provides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Material {
+    /// An NSGlassEffectView: Liquid Glass, macOS 26+ ([`apply_glass`]).
+    Glass,
+    /// An NSVisualEffectView: GPUI's `Blurred` background, the fallback.
+    Vibrancy,
+    None,
+}
+
+impl Material {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Material::Glass => "glass",
+            Material::Vibrancy => "vibrancy",
+            Material::None => "none",
+        }
+    }
 }
 
 /// The app's visible GPUI panel window, if any. The shell has one panel at a time,
@@ -181,19 +201,91 @@ pub fn restore_panel_after_dialog(mtm: MainThreadMarker, number: isize) {
     }
 }
 
-/// Inspect the app's visible GPUI panel window, if any.
+/// Inspect the app's visible GPUI panel window, if any. The material is read from
+/// the content view's visible subviews: glass wins over a (hidden or not) vibrancy view.
 pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
     let effect_class = AnyClass::get(c"NSVisualEffectView")?;
+    let glass_class = AnyClass::get(c"NSGlassEffectView");
     visible_panel(mtm).map(|w| {
         let popup = w.level() == POPUP_WINDOW_LEVEL
             && w.styleMask()
                 .contains(NSWindowStyleMask::NonactivatingPanel);
-        let blurred = w.contentView().is_some_and(|v| {
-            let subs = v.subviews();
-            (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(effect_class))
-        });
-        PanelFacts { popup, blurred }
+        let shown = |class: &AnyClass| {
+            w.contentView().is_some_and(|v| {
+                let subs = v.subviews();
+                (0..subs.count()).any(|i| {
+                    let s = subs.objectAtIndex(i);
+                    s.isKindOfClass(class) && !s.isHidden()
+                })
+            })
+        };
+        let material = if glass_class.is_some_and(shown) {
+            Material::Glass
+        } else if shown(effect_class) {
+            Material::Vibrancy
+        } else {
+            Material::None
+        };
+        PanelFacts { popup, material }
     })
+}
+
+/// NSViewWidthSizable | NSViewHeightSizable.
+const SIZABLE: usize = 2 | 16;
+/// NSWindowBelow, for `addSubview:positioned:relativeTo:`.
+const WINDOW_BELOW: isize = -1;
+
+/// D26: give panel `number` Liquid Glass. On macOS 26+ (NSGlassEffectView exists) an
+/// NSGlassEffectView with the panel's corner radius goes to the bottom of the content
+/// view's subviews, where GPUI put its NSVisualEffectView for the `Blurred`
+/// background, and that view is hidden (not removed: GPUI keeps a pointer to it). GPUI's
+/// own view, the accessibility adapter on the content view and the window are left
+/// alone. Returns the material the panel now has; on older systems it keeps vibrancy.
+pub fn apply_glass(mtm: MainThreadMarker, number: isize, corner_radius: f64) -> Material {
+    let Some(content) = window_numbered(mtm, number).and_then(|w| w.contentView()) else {
+        return Material::None;
+    };
+    let Some(effect_class) = AnyClass::get(c"NSVisualEffectView") else {
+        return Material::None;
+    };
+    let subs = content.subviews();
+    let blur = (0..subs.count())
+        .map(|i| subs.objectAtIndex(i))
+        .find(|s| s.isKindOfClass(effect_class));
+    let Some(glass_class) = AnyClass::get(c"NSGlassEffectView") else {
+        return if blur.is_some() {
+            Material::Vibrancy
+        } else {
+            Material::None
+        };
+    };
+    let has_glass = (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(glass_class));
+    if !has_glass {
+        let bounds = content.bounds();
+        // SAFETY: NSGlassEffectView is an NSView subclass (macOS 26 SDK): alloc +
+        // initWithFrame: return a retained instance; setAutoresizingMask: and
+        // setCornerRadius: take an NSUInteger and a CGFloat; addSubview:positioned:
+        // relativeTo: takes a view, an NSWindowOrderingMode and nil. Main thread (mtm).
+        unsafe {
+            let glass: objc2::rc::Allocated<AnyObject> = msg_send![glass_class, alloc];
+            let glass: Option<Retained<AnyObject>> = msg_send![glass, initWithFrame: bounds];
+            let Some(glass) = glass else {
+                return Material::Vibrancy;
+            };
+            let _: () = msg_send![&*glass, setAutoresizingMask: SIZABLE];
+            let _: () = msg_send![&*glass, setCornerRadius: corner_radius];
+            let _: () = msg_send![
+                &*content,
+                addSubview: &*glass,
+                positioned: WINDOW_BELOW,
+                relativeTo: Option::<&AnyObject>::None
+            ];
+        }
+    }
+    if let Some(blur) = blur {
+        blur.setHidden(true);
+    }
+    Material::Glass
 }
 
 /// One `NSColor` class colour (`controlAccentColor`, ...) in sRGB under the current

@@ -270,6 +270,10 @@ fn prewarm(cx: &mut App) {
     let opened = gpui_kit::open_window(panel::prewarm_options(&displays), cx, |window, cx| {
         cx.new(|cx| panel::PanelView::prewarm(window, cx))
     });
+    // Warm the glass view too, so the first real show does not load it.
+    if let Some(n) = native::newest_panel_number(mtm) {
+        native::apply_glass(mtm, n, panel::CORNER_RADIUS);
+    }
     match opened {
         // The close runs as a foreground task, i.e. after this run-loop turn's Core
         // Animation commit, which is the expensive part being warmed.
@@ -432,10 +436,14 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
             return;
         }
     };
-    // Read back what AppKit actually built (the window is ordered front synchronously
-    // by GPUI's open), so the state reports facts rather than the request.
-    let facts = native::inspect_panel(mtm);
+    // D26: Liquid Glass behind the content (macOS 26+; vibrancy before). Then read
+    // back what AppKit actually built (the window is ordered front synchronously by
+    // GPUI's open), so the state reports facts rather than the request.
     let number = native::newest_panel_number(mtm);
+    if let Some(n) = number {
+        native::apply_glass(mtm, n, panel::CORNER_RADIUS);
+    }
+    let facts = native::inspect_panel(mtm);
     cx.update_global::<Shell, _>(|shell, _| {
         shell.panel = Some(Panel {
             handle,
@@ -506,7 +514,7 @@ pub fn fit_panel(height: f64, cx: &mut App) {
         current.display_id,
         current.global,
         // The nominal width, not the current one: a narrow display may have cut it.
-        (panel::PANEL_WIDTH, panel::clamp_height(height)),
+        (panel::PANEL_WIDTH, panel::window_height(height)),
     ) else {
         return;
     };

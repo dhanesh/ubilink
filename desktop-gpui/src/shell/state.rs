@@ -15,7 +15,7 @@
 use objc2_app_kit::NSApplicationActivationPolicy;
 use serde::{Deserialize, Serialize};
 
-use super::native::PanelFacts;
+use super::native::{Material, PanelFacts};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ShellState {
@@ -31,8 +31,12 @@ pub struct ShellState {
     pub hotkey_error: Option<String>,
     /// "popup" for a `WindowKind::PopUp` NSPanel at NSPopUpWindowLevel.
     pub window_kind: String,
-    /// "blurred" when the panel carries an NSVisualEffectView behind GPUI's content.
+    /// "blurred" when the panel carries a translucent material (glass or vibrancy)
+    /// behind GPUI's content.
     pub background: String,
+    /// D26: which material: "glass" (an NSGlassEffectView, macOS 26+), "vibrancy" (an
+    /// NSVisualEffectView, older systems) or "none"; "unknown" until read back.
+    pub material: String,
     /// True once `window_kind`/`background` were read back from a live panel.
     pub window_verified: bool,
     /// `NSApp.activationPolicy`, read back: "accessory", "regular" or "prohibited".
@@ -53,6 +57,7 @@ impl Default for ShellState {
             hotkey_error: None,
             window_kind: "unknown".into(),
             background: "unknown".into(),
+            material: "unknown".into(),
             window_verified: false,
             // "unknown" until read back, so a state that never queried AppKit can't pass
             // for accessory.
@@ -86,7 +91,13 @@ impl ShellState {
     /// Record what AppKit reports for a live panel.
     pub fn record_panel(&mut self, facts: PanelFacts) {
         self.window_kind = if facts.popup { "popup" } else { "other" }.into();
-        self.background = if facts.blurred { "blurred" } else { "opaque" }.into();
+        self.background = if facts.material == Material::None {
+            "opaque"
+        } else {
+            "blurred"
+        }
+        .into();
+        self.material = facts.material.as_str().into();
         self.window_verified = true;
     }
 }
@@ -120,23 +131,40 @@ mod tests {
             ("unknown", "unknown")
         );
         assert!(!s.window_verified);
+        assert_eq!(s.material, "unknown");
         s.record_panel(PanelFacts {
             popup: true,
-            blurred: true,
+            material: Material::Glass,
         });
         assert_eq!(
-            (s.window_kind.as_str(), s.background.as_str()),
-            ("popup", "blurred")
+            (
+                s.window_kind.as_str(),
+                s.background.as_str(),
+                s.material.as_str()
+            ),
+            ("popup", "blurred", "glass")
+        );
+        s.record_panel(PanelFacts {
+            popup: true,
+            material: Material::Vibrancy,
+        });
+        assert_eq!(
+            (s.background.as_str(), s.material.as_str()),
+            ("blurred", "vibrancy")
         );
         assert!(s.window_verified);
         // A panel AppKit built differently must not pass for popup/blurred.
         s.record_panel(PanelFacts {
             popup: false,
-            blurred: false,
+            material: Material::None,
         });
         assert_eq!(
-            (s.window_kind.as_str(), s.background.as_str()),
-            ("other", "opaque")
+            (
+                s.window_kind.as_str(),
+                s.background.as_str(),
+                s.material.as_str()
+            ),
+            ("other", "opaque", "none")
         );
     }
 
@@ -153,6 +181,7 @@ mod tests {
             hotkey_error: None,
             window_kind: "popup".into(),
             background: "blurred".into(),
+            material: "glass".into(),
             window_verified: true,
             activation_policy: "accessory".into(),
             visible: true,
@@ -165,6 +194,7 @@ mod tests {
         assert_eq!(v["hotkey_error"], serde_json::Value::Null);
         assert_eq!(v["window_kind"], "popup");
         assert_eq!(v["background"], "blurred");
+        assert_eq!(v["material"], "glass");
         assert_eq!(v["activation_policy"], "accessory");
         assert_eq!(v["route"], "capture");
         assert_eq!(v["display_id"], 1);

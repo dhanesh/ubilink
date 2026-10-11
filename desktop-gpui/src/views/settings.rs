@@ -175,7 +175,7 @@ pub fn adapter_columns(panel_w: f64) -> usize {
 /// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
 pub fn content_height(content: Content) -> f64 {
     let pt = |p: Pixels| f64::from(f32::from(p));
-    let cols = adapter_columns(crate::shell::panel::PANEL_WIDTH);
+    let cols = adapter_columns(crate::shell::panel::CARD_WIDTH);
     let rows = content.adapters.div_ceil(cols);
     let grid = if rows == 0 {
         0.0
@@ -1130,9 +1130,11 @@ mod tests {
     }
 
     /// Parity (Tauri `fitWindow`): Settings' height is its content's, so every adapter
-    /// row shows. 640 pt panel, 20 pt sides, 140 pt switches 8 pt apart: 4 per row.
+    /// row shows. 632 pt card (the 640 pt panel inside its 4 pt glass frame, D26), 20
+    /// pt sides, 140 pt switches 8 pt apart: 4 per row.
     #[test]
     fn settings_height_fits_every_adapter_row() {
+        assert_eq!(adapter_columns(crate::shell::panel::CARD_WIDTH), 4);
         assert_eq!(adapter_columns(640.0), 4);
         assert_eq!(adapter_columns(100.0), 1, "never zero columns");
         let h = |adapters, confirming_reset, login_explained| {
