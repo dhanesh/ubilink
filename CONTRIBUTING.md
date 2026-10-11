@@ -28,9 +28,8 @@ script tests, skips the heavy GPUI build), `make test-gpui` (the GPUI app),
 - **Formatting:** `cargo fmt` — checked by `verify-fmt` for all four crates
   (core, registry, app, desktop-gpui); `make fmt` fixes them all.
 - **Lints:** `cargo clippy --all-targets -- -D warnings` — warnings are errors.
-- **Crate boundaries are load-bearing.** `ubilink-core` (`src-tauri/`; the
-  directory keeps its pre-GPUI name) is deliberately GUI-free and network-free
-  (constraint S2). `registry/`, `app/` and `desktop-gpui/` are separate crates for
+- **Crate boundaries are load-bearing.** `ubilink-core` (`core/`) is deliberately GUI-free
+  and network-free (constraint S2). `registry/`, `app/` and `desktop-gpui/` are separate crates for
   that reason — keep logic in the core or the GUI-free `app/` command layer (unit-
   tested headlessly) and keep the GUI/broker-server shells thin. See
   `README.md` § Architecture and `DECISIONS.md`.

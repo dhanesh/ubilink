@@ -1,8 +1,8 @@
 # ubilink — build / test / run
 #
 # Four standalone Rust crates (no workspace):
-#   • src-tauri/    — ubilink-core lib + the `ubilink-sign` CLI (the directory keeps its
-#                     old name; the crate depends on no Tauri crate)
+#   • core/         — ubilink-core lib + the `ubilink-sign` CLI (GUI-free; named
+#                     `src-tauri/` until D25)
 #   • registry/     — the `ubilink-registry` service (separate crate; S2 keeps a server
 #                     out of the core)
 #   • app/          — ubilink-app, the GUI-free command layer the desktop app calls (R3);
@@ -23,7 +23,7 @@ CARGO    ?= cargo
 # (reproducible, no silent dep drift). Empty locally for dev ergonomics.
 LOCKED   ?=
 PYTHON   ?= python3
-CORE     := src-tauri/Cargo.toml
+CORE     := core/Cargo.toml
 REGISTRY := registry/Cargo.toml
 # R3 (GPUI Phase 0 plan, task 3): the GUI-free command layer the desktop app calls.
 # Lightweight like CORE/REGISTRY (no tauri*/gpui* in its tree — see

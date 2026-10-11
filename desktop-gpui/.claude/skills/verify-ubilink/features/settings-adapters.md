@@ -77,7 +77,7 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
   the harness's separate `restart` command (SKILL.md's "Proving persistence"
   section is for hand-written `call` sequences only); a verifier never issues
   `restart` by hand for this feature.
-- `adapters.json` is cross-checked against `src-tauri/src/adapters.default.json` by
+- `adapters.json` is cross-checked against `core/src/adapters.default.json` by
   `scripts/probe.py fixtures --check` (outside this skill); this scenario takes the
   fixture's adapter list as given rather than re-deriving it.
 - Today's stub has no `Switch` nodes at all, so `scenario --name settings-adapters`

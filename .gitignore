@@ -1,5 +1,5 @@
 # ── Rust ──
-/src-tauri/target/
+/core/target
 **/target/
 *.rs.bk
 *.pdb
@@ -7,17 +7,11 @@
 # ── Node (the plugin sandbox host) ──
 node_modules/
 *.local
-# The CI signing artifacts under src-tauri/dist/ are generated:
-/src-tauri/dist/
+# The CI signing artifacts under core/dist/ are generated:
+/core/dist/
 
 # ── App bundles (scripts/bundle-macos.sh: Ubilink.app + DMG) ──
 /desktop-gpui/bundle/
-
-# ── Leftovers of the deleted Tauri app (D24) ──
-# desktop/ is gone from the tree, but a checkout that built it still has its
-# generated output on disk; keep that out of `git status` until it is deleted.
-/desktop/gen/
-/desktop/WixTools/
 
 # ── Editors / OS ──
 .DS_Store

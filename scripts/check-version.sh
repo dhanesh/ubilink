@@ -8,7 +8,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${1:-$(cd "$HERE/.." && pwd)}"
 v="$(bash "$HERE/version.sh" "$ROOT")"
 fail=0
-for toml in src-tauri/Cargo.toml registry/Cargo.toml app/Cargo.toml; do
+for toml in core/Cargo.toml registry/Cargo.toml app/Cargo.toml; do
   got="$(bash "$HERE/version.sh" "$ROOT" "$toml")"
   if [ "$got" != "$v" ]; then
     echo "check-version: $toml is $got, expected $v (from desktop-gpui/Cargo.toml)" >&2

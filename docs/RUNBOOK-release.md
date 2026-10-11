@@ -48,7 +48,7 @@ in `desktop-gpui/packaging/`.
 ## Cutting a release
 
 1. **Bump the version** in `desktop-gpui/Cargo.toml` (the source of truth — the shipped
-   GPUI app), `src-tauri/Cargo.toml`, `registry/Cargo.toml` and `app/Cargo.toml`; run
+   GPUI app), `core/Cargo.toml`, `registry/Cargo.toml` and `app/Cargo.toml`; run
    `cargo check --manifest-path <each>/Cargo.toml` to update the lockfiles; add a
    `## [X.Y.Z] - unreleased` section to `CHANGELOG.md`. `make verify` (`verify-version`)
    fails if any of these disagree. Merge via a PR.

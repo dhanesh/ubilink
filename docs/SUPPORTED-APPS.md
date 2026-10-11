@@ -2,7 +2,7 @@
 
 Live capture (Cmd/Ctrl+Shift+K) works for any app that has a **declarative adapter**.
 Adapters are data, not code — adding an app is a JSON entry, no recompile (B3). The
-built-ins ship in `src-tauri/src/adapters.default.json`; you extend them with a user
+built-ins ship in `core/src/adapters.default.json`; you extend them with a user
 file (see below).
 
 ## Built-in adapters (seed set)

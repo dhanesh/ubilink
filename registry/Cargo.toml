@@ -22,5 +22,5 @@ name = "ubilink-registry"
 path = "src/bin/ubilink-registry.rs"
 
 [dependencies]
-ubilink-core = { path = "../src-tauri" }
+ubilink-core = { path = "../core" }
 serde_json = "1"

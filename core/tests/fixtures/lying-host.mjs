@@ -5,7 +5,7 @@
 // subverted host logic it shares a realm with (without learning the nonce is
 // not even required here). The core must derive the recheck verdict from its
 // OWN broker decision, never from what the host reports.
-// Used by src-tauri/tests/sandbox.rs::recheck_verdict_comes_from_the_broker.
+// Used by core/tests/sandbox.rs::recheck_verdict_comes_from_the_broker.
 
 import fs from 'node:fs';
 import { createInterface } from 'node:readline';

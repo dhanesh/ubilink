@@ -24,6 +24,6 @@ name = "ubilink_app"
 path = "src/lib.rs"
 
 [dependencies]
-ubilink-core = { path = "../src-tauri" }
+ubilink-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

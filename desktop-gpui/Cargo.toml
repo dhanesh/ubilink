@@ -27,7 +27,7 @@ default = []
 automation = []
 
 [dependencies]
-ubilink-core = { path = "../src-tauri" }
+ubilink-core = { path = "../core" }
 # The GUI-free command logic both shells call (R3/T4). Added in Phase 0 because
 # Phase 1 may not edit this file (spec O5) and its views call ubilink-app,
 # including the open_link_with / open_settings_with opener seam (R6, O4). A path

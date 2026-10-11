@@ -6,7 +6,7 @@
 // separate `node --permission` process and drives the IPC protocol, so the test
 // IS the architectural proof rather than a mock of it.
 //
-// Run: cd src-tauri && cargo test
+// Run: cd core && cargo test
 
 use serde_json::json;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use std::time::Duration;
 use ubilink_core::{FocusedResource, Manifest, Session};
 
 fn repo_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR = .../ubilink/src-tauri ; repo root is its parent.
+    // CARGO_MANIFEST_DIR = .../ubilink/core ; repo root is its parent.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()

@@ -101,7 +101,7 @@ host will run in:
 
 ```sh
 # need >= 15 GB free first. Safe to free once CARGO_TARGET_DIR is set: the per-crate target dirs
-#   rm -rf src-tauri/target registry/target app/target desktop-gpui/target
+#   rm -rf core/target registry/target app/target desktop-gpui/target
 # Never seed or merge the shared dir by copying other target dirs (that caused E0463).
 export CARGO_TARGET_DIR="$HOME/Library/Caches/ubilink-probe/target"
 export CARGO_INCREMENTAL=0
@@ -120,7 +120,7 @@ find "$CARGO_TARGET_DIR"/{debug,release} -maxdepth 2 -name '*ubilink*' -exec rm 
 
 Check free disk space first: the shared target dir needs at least 15 GB free before
 it is warmed. Once `CARGO_TARGET_DIR` is exported, the old per-crate target dirs
-(`src-tauri/target`, `registry/target`, `app/target`, `desktop-gpui/target`) are no longer used and are safe to remove to make room. Never
+(`core/target`, `registry/target`, `app/target`, `desktop-gpui/target`) are no longer used and are safe to remove to make room. Never
 seed or merge the shared dir by copying in another target dir's contents — mixing
 build metadata from different target dirs this way is what caused E0463 in an
 earlier run.

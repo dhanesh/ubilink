@@ -26,7 +26,7 @@ and tested, and is coming to the app in a later release.
 
 | Layer | Tech | Why |
 |-------|------|-----|
-| Core | **Rust** (`src-tauri/`, ubilink-core) | OS automation, the link graph, the capability broker — the trusted domain; no GUI crate in its tree |
+| Core | **Rust** (`core/`, ubilink-core) | OS automation, the link graph, the capability broker — the trusted domain; no GUI crate in its tree |
 | Commands | **Rust** (`app/`, ubilink-app) | the GUI-free command layer the app calls; no GPUI crate in its tree |
 | UI | **Native GPUI** (`desktop-gpui/`) | the macOS menu-bar app: hotkey panel, link browser, settings, onboarding (binary `ubilink`, Ubilink.app) ([D22](DECISIONS.md), [D24](DECISIONS.md)) |
 | Plugins | **Separate-process JS sandbox** | third-party integrations run with **no ambient fs/child** access (and, on macOS, no network); all privileged access is broker-mediated |
@@ -80,24 +80,24 @@ Built and tested:
   app in GPUI Phase 2b, keeping its name, bundle id and data dir ([D24](DECISIONS.md)).
 - ✅ Declarative macOS app adapters (7 browsers, Finder, Bear, Things3), extensible
   with your own `adapters.json`; every `osascript` call is bounded (15 s) —
-  `src-tauri/src/adapters_config.rs`, `src-tauri/src/live_capture.rs`,
+  `core/src/adapters_config.rs`, `core/src/live_capture.rs`,
   [`docs/SUPPORTED-APPS.md`](docs/SUPPORTED-APPS.md)
 - ✅ Link validation: one policy for capture, import and open (scheme deny-list,
-  local-only `file:`), and openers that never go through a shell — `src-tauri/src/api.rs`,
-  `src-tauri/src/adapter.rs`
+  local-only `file:`), and openers that never go through a shell — `core/src/api.rs`,
+  `core/src/adapter.rs`
 - ✅ Bidirectional SQLite link graph (backlinks, idempotent, concurrent-safe,
-  versioned atomic migrations) — `src-tauri/src/graph.rs`
-- ✅ Resource identity + confidence-gated link re-resolution — `src-tauri/src/resource.rs`
-- ✅ Plugin sandbox + capability broker (the security keystone) — `src-tauri/src/sandbox.rs`,
-  `src-tauri/src/broker.rs`, `plugins/`
+  versioned atomic migrations) — `core/src/graph.rs`
+- ✅ Resource identity + confidence-gated link re-resolution — `core/src/resource.rs`
+- ✅ Plugin sandbox + capability broker (the security keystone) — `core/src/sandbox.rs`,
+  `core/src/broker.rs`, `plugins/`
 - ✅ Signed integrations (ed25519 over the full manifest, schema gate, downgrade
   protection), the `ubilink-sign` CLI and a CI signing workflow —
-  `src-tauri/src/integrations.rs`, `src-tauri/src/release.rs`
+  `core/src/integrations.rs`, `core/src/release.rs`
 - ✅ Integration registry service (std-only HTTP, per-id publisher ownership, bounded
   requests) — `registry/`
 - ✅ Capability matrix derived from the adapter registry, published as
   [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) and drift-guarded by a test —
-  `src-tauri/src/capabilities.rs`
+  `core/src/capabilities.rs`
 - ✅ GUI-free command layer the app calls — `app/`
 
 Not done yet:

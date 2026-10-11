@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: 60
     defaults:
       run:
-        working-directory: src-tauri
+        working-directory: core
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -148,7 +148,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-bundles
-          path: src-tauri/dist/*.signed.json
+          path: core/dist/*.signed.json
           if-no-files-found: error
 
   draft-release:

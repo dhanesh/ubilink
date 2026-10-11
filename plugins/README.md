@@ -42,7 +42,7 @@ A plugin exports `async function run({ probe, caps })`:
 ```
 ┌────────────────────────┐         IPC: newline-delimited JSON        ┌──────────────────────────────────┐
 │  Rust core (TRUSTED)   │  ────────────  stdin/stdout  ───────────►  │ sandbox-exec jail (macOS)         │
-│  src-tauri/            │   nonce (1st line, once) · load · invoke   │  node --permission (UNTRUSTED)    │
+│  core/                 │   nonce (1st line, once) · load · invoke   │  node --permission (UNTRUSTED)    │
 │  • reads bundle+manifest                                            │  env = {} · cwd = /               │
 │    from disk (full fs) │  ◄── "<nonce> " + cap_request / result ──  │  plugins/runtime/plugin-host.mjs  │
 │  • drops frames w/o the│  ─── cap_response (allow/deny) ──────────►  │  • loads plugin SOURCE via data:  │
@@ -60,7 +60,7 @@ over the pipe; the host loads it via a `data:` URL import, which touches no
 filesystem and so needs zero fs grants. Verified: code loaded this way still
 cannot `fs.readFile`.
 
-## What is guaranteed (each item has a hostile-plugin test in `src-tauri/tests/sandbox.rs`)
+## What is guaranteed (each item has a hostile-plugin test in `core/tests/sandbox.rs`)
 
 | Guarantee | Enforced by | Test |
 |-----------|-------------|------|
@@ -140,9 +140,9 @@ Examples:
 | `examples/hostile/`       | attacker: frame forgery, env/signal probes, native writes, DoS, focused-resource disclosure incl. a stdin tap (`probe.mode`) |
 | `examples/hang/`          | never returns (timeout fixture) |
 | `../schema/integration.manifest.schema.json` | manifest JSON Schema (RT-6) |
-| `../src-tauri/src/broker.rs` | the capability broker (decide/revoke) |
-| `../src-tauri/src/sandbox.rs` | spawns + jails the host, owns the authenticated IPC, deadlines |
-| `../src-tauri/tests/sandbox.rs` | end-to-end proof (E8/E9) against a real `node` |
+| `../core/src/broker.rs` | the capability broker (decide/revoke) |
+| `../core/src/sandbox.rs` | spawns + jails the host, owns the authenticated IPC, deadlines |
+| `../core/tests/sandbox.rs` | end-to-end proof (E8/E9) against a real `node` |
 
 ## Residual risk and follow-ups
 
@@ -165,7 +165,7 @@ Examples:
 ## Run the proof
 
 ```
-cd src-tauri && cargo test --test sandbox
+cd core && cargo test --test sandbox
 # fail-closed escape demonstration:
 cargo test fail_closed -- --nocapture --test-threads=1
 ```
