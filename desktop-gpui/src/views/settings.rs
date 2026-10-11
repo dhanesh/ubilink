@@ -453,12 +453,18 @@ pub fn export_dir_in(home: &Path) -> PathBuf {
     }
 }
 
-/// The user's export folder ([`export_dir_in`] of `$HOME`).
-fn export_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    export_dir_in(&home)
+/// The user's export folder ([`export_dir_in`] of `$HOME`), or why there is none.
+fn export_dir() -> Result<PathBuf, String> {
+    home_from(std::env::var_os("HOME")).map(|home| export_dir_in(&home))
+}
+
+/// `$HOME` as an absolute folder. Unset, empty or relative is refused: writing an
+/// export relative to wherever the app happened to start would lose it.
+pub fn home_from(home: Option<OsString>) -> Result<PathBuf, String> {
+    match home.map(PathBuf::from) {
+        Some(h) if h.is_absolute() => Ok(h),
+        _ => Err("couldn't find your home folder ($HOME is not set to an absolute path)".into()),
+    }
 }
 
 /// The command that shows `path` selected in a Finder window (the Tauri app's
@@ -645,7 +651,8 @@ impl SettingsView {
             let e = NO_FIXTURE.replace("{kind}", "export_path");
             return self.show(export_message(&Err(e)), cx);
         }
-        let result = ubilink_app::export_graph(crate::app_state::get(), &export_dir());
+        let result =
+            export_dir().and_then(|dir| ubilink_app::export_graph(crate::app_state::get(), &dir));
         if let Ok(path) = &result {
             let (program, args) = reveal_command(Path::new(path));
             // Best effort, as Tauri's: the file is written whether or not Finder opens.
@@ -1089,11 +1096,12 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        adapter_columns, content_height, export_dir_in, export_message, export_to, import_from,
-        import_message, list_error_message, login_status_error_message, login_toggle_error_message,
-        reset, reset_message, reveal_command, state, stats_error_message, stats_text, toggle,
-        toggle_message, version_text, Content, LOGIN_SWITCH, NOT_FOUND_EXPLANATION,
-        REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
+        adapter_columns, content_height, export_dir_in, export_message, export_to, home_from,
+        import_from, import_message, list_error_message, login_status_error_message,
+        login_toggle_error_message, reset, reset_message, reveal_command, state,
+        stats_error_message, stats_text, toggle, toggle_message, version_text, Content,
+        LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL,
+        RESET_CONFIRM, RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -1156,6 +1164,18 @@ mod tests {
         std::fs::create_dir_all(home.join("Downloads")).unwrap();
         assert_eq!(export_dir_in(&home), home.join("Downloads"));
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// No usable $HOME: refuse rather than write somewhere relative.
+    #[test]
+    fn export_refuses_a_missing_or_relative_home() {
+        assert!(home_from(None).is_err());
+        assert!(home_from(Some("".into())).is_err());
+        assert!(home_from(Some("Users/x".into())).is_err());
+        assert_eq!(
+            home_from(Some("/Users/x".into())),
+            Ok(std::path::PathBuf::from("/Users/x"))
+        );
     }
 
     /// The reveal is `open -R <path>` as one argv (no shell), whatever the path holds.
