@@ -29,6 +29,7 @@
 //! key-up click does not open the pane a second time for a real keyboard user.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
@@ -194,9 +195,28 @@ pub fn read_report(path: &Path) -> Result<Report, String> {
     })
 }
 
-/// Read the current permission state (see the module doc for where it comes from).
+/// Set once a permission check, or the start-up probe, says Automation is granted.
+/// From then on, opening capture never checks again in this session, so onboarding
+/// cannot come back for a user who is set up ([`capture_open_needs_onboarding`]).
+static AUTOMATION_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+/// Remember a check that says Automation is granted (never forgets one).
+fn note_check(confirmed: &AtomicBool, check: &Result<Report, String>) {
+    if matches!(check, Ok(report) if report.granted(Permission::Automation)) {
+        confirmed.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Read the current permission state (see the module doc for where it comes from):
+/// the one check onboarding, Settings' Permissions row and the capture paths share.
 /// May block (the release osascript probe): call it off the main thread.
-fn check_permissions() -> Result<Report, String> {
+pub(crate) fn check_permissions() -> Result<Report, String> {
+    let check = read_permissions();
+    note_check(&AUTOMATION_CONFIRMED, &check);
+    check
+}
+
+fn read_permissions() -> Result<Report, String> {
     if let Some(path) = crate::fixtures::path(crate::fixtures::Fixture::Permission) {
         return read_report(&path);
     }
@@ -227,6 +247,38 @@ pub fn capture_failure_needs_onboarding(check: &Result<Report, String>) -> bool 
 /// May block (the release osascript probe): call it off the main thread.
 pub fn failed_capture_routes_here() -> bool {
     capture_failure_needs_onboarding(&check_permissions())
+}
+
+/// rc.4: does opening capture (the hotkey, the tray's Capture, a reopen) take the
+/// user here instead of capturing? The Tauri panel showed onboarding until Automation
+/// was granted (`refreshPermissions`); here the rule is checked when capture opens,
+/// so nothing pops up at launch:
+/// - Automation already confirmed this session (`confirmed`): never; `check` is not
+///   even run, so a set-up user pays nothing per capture.
+/// - Otherwise run `check`: only a report that says Automation is not granted routes
+///   here ([`capture_failure_needs_onboarding`]'s rule). A report that says granted
+///   sets `confirmed`; a failed check (no report) lets the capture run.
+pub fn capture_open_needs_onboarding(
+    confirmed: &AtomicBool,
+    check: impl FnOnce() -> Result<Report, String>,
+) -> bool {
+    if confirmed.load(Ordering::Relaxed) {
+        return false;
+    }
+    let check = check();
+    note_check(confirmed, &check);
+    capture_failure_needs_onboarding(&check)
+}
+
+/// [`capture_open_needs_onboarding`] on this session's state: confirmed when the
+/// start-up probe (a release build's) or any earlier check said granted, else the
+/// same report this view shows. May block (the release osascript probe, only until
+/// Automation is confirmed): call it off the main thread.
+pub fn opening_capture_routes_here() -> bool {
+    if crate::app_state::startup_automation() == ubilink_core::PermissionState::Granted {
+        AUTOMATION_CONFIRMED.store(true, Ordering::Relaxed);
+    }
+    capture_open_needs_onboarding(&AUTOMATION_CONFIRMED, read_permissions)
 }
 
 /// Open `p`'s System Settings pane through the core's launcher, wrapped in the
@@ -540,9 +592,12 @@ mod tests {
     // Not `super::*`: that would re-import gpui-kit's `test` macro (pulled in
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::{
-        capture_failure_needs_onboarding, read_report, recheck_message, state, status_text,
-        steps_after, Permission, Report, ALL_SET, GRANTED, NOT_GRANTED, UNKNOWN,
+        capture_failure_needs_onboarding, capture_open_needs_onboarding, read_report,
+        recheck_message, state, status_text, steps_after, Permission, Report, ALL_SET, GRANTED,
+        NOT_GRANTED, UNKNOWN,
     };
     use Permission::{Accessibility, Automation};
 
@@ -600,6 +655,34 @@ mod tests {
         assert!(!capture_failure_needs_onboarding(&report(false, "granted")));
         // No report: stay on the capture view with its failure.
         assert!(!capture_failure_needs_onboarding(&Err("no report".into())));
+    }
+
+    #[test]
+    fn opening_capture_routes_to_onboarding_until_automation_is_confirmed() {
+        let confirmed = AtomicBool::new(false);
+        // Not granted (denied, or never asked): onboarding, and nothing remembered.
+        assert!(capture_open_needs_onboarding(&confirmed, || report(
+            false, "denied"
+        )));
+        assert!(capture_open_needs_onboarding(&confirmed, || report(
+            true,
+            "not_determined"
+        )));
+        assert!(!confirmed.load(Ordering::Relaxed));
+        // No report: capture runs (its own failure route still applies).
+        assert!(!capture_open_needs_onboarding(&confirmed, || Err(
+            "no report".into()
+        )));
+        // Accessibility alone never routes.
+        assert!(!capture_open_needs_onboarding(&confirmed, || report(
+            false, "granted"
+        )));
+        // That check said granted: from now on the check is not even run, and a
+        // stale not-granted report cannot bring onboarding back.
+        assert!(confirmed.load(Ordering::Relaxed));
+        assert!(!capture_open_needs_onboarding(&confirmed, || {
+            panic!("a confirmed session must not check again")
+        }));
     }
 
     #[test]

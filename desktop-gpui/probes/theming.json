@@ -7,13 +7,13 @@
     "Same pid: the probe's own child process is still the one it launched (process: unchanged). Same window id: saved per view before the first switch.",
     "Screenshots go to ~/Library/Caches/ubilink-probe/shots/<run>/theming-<view>-<mode>.png (path printed at the end). Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL.",
     "Each reported region must be at least 24 x 24 pt (STATE_REGION_MIN_PT, ruling R-q), so a view cannot point the probe at a token-coloured swatch painted for it.",
-    "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions; and the accent."
+    "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions (loaded just before onboarding: with Automation not granted, opening capture goes to onboarding instead, rc.4; capture and the browser open with all granted); and the accent."
   ],
   "setup": {
     "graph": "graph-ranking.json",
     "fixtures": {
       "capture": "capture-ok.json",
-      "permission": "permissions-two-missing.json",
+      "permission": "permissions-all-granted.json",
       "accent": "accent-blue.json"
     }
   },
@@ -281,6 +281,14 @@
     {
       "name": "browser/dark: screenshot recorded",
       "screenshot": "browser-dark"
+    },
+    {
+      "name": "onboarding: two permissions missing (loaded here: capture opens to onboarding while Automation is not granted, rc.4)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-two-missing.json"
+      }
     },
     {
       "name": "onboarding: open",

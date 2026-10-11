@@ -510,6 +510,24 @@ impl CaptureView {
         // already reads `capturing` (render-first, TN1).
         let generation = lock().begin();
         let capture = cx.spawn(async move |this, cx| {
+            // rc.4 (the Tauri panel's onboarding-until-Automation): while Automation is
+            // not confirmed this session, a report saying it is not granted takes the
+            // same panel to onboarding instead of capturing, so the capture's osascript
+            // never runs (`onboarding::capture_open_needs_onboarding`). Once confirmed,
+            // this answers at once without checking. The first frame already drew
+            // `capturing` (render-first).
+            let to_onboarding = cx
+                .background_executor()
+                .spawn(async { super::onboarding::opening_capture_routes_here() })
+                .await;
+            if to_onboarding {
+                if lock().generation == generation {
+                    cx.update(|cx| {
+                        crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx)
+                    });
+                }
+                return;
+            }
             let phase = run_capture(cx).await;
             let failed = matches!(phase, Phase::Failed { .. });
             let settled = this
