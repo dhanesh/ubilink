@@ -61,6 +61,8 @@ node_modules/
 .windsurfrules
 AGENTS.md
 CLAUDE.md
+# Except the root one: it carries the repo's UI rules (D26), not personal settings.
+!/CLAUDE.md
 GEMINI.md
 
 # Python bytecode from running scripts/test_probe.py (unittest imports the module).
