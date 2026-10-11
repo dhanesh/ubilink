@@ -10,9 +10,13 @@ Follow [asset installation](../assets.md) when implementing this theme. Download
 | --- | --- | --- | --- | --- |
 | <code>Inter</code> (free) | brand, ui, editorial, data | 500, 600 | <code>"Sidebar Inter", sans-serif</code> | Download and load [Inter](https://rsms.me/inter/) in the app. |
 
+> **Ubilink (D26):** superseded. The app uses the system font (`.SystemUIFont`, SF); nothing is downloaded or embedded.
+
 ### Icons
 
 Selected: [Lucide](https://lucide.dev/guide/react/getting-started), outlined. Install and wire the selected free pack (React: <code>lucide-react</code>); reuse it if already installed. Use the official adapter for other frameworks.
+
+> **Ubilink (D26):** superseded. `lucide-react` does not apply: the app is GPUI, and the icon set comes from gpui-kit's registered `Assets`.
 
 Preserve icon size, color, weight, style, and accessible names. Match the selected style only where the pack supports it; Lucide’s official pack supplies outlines, so report a filled-style gap rather than claiming exact filled artwork. Keep existing package versions and add only missing packages using the receiving project’s package manager.
 

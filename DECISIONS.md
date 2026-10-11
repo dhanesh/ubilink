@@ -1004,6 +1004,7 @@ values. `CLAUDE.md` says so.
   | Checked switch, caret | the accent, moved to 3:1 on the card only if needed |
   | Focus ring | AppKit's colour, its alpha raised to 3:1 |
   | Selected row | AppKit's selection fill with white text |
+  | Switch thumb | white, or black where white is under 3:1 on the checked track |
 
   Automation builds may take an `accent` fixture, through the same re-theme path;
   release builds read only the system.
@@ -1028,9 +1029,10 @@ values. `CLAUDE.md` says so.
 
 | Value | AppKit | Used | Why |
 |---|---|---|---|
-| secondaryLabel, light | black 0.50 (4.00:1) | black 0.54 (4.61:1) | AA 4.5:1 for 12–13 pt text |
+| secondaryLabel, light | black 0.50 (4.00:1) | black 0.55 (4.74:1 on the card, 4.62:1 on a hovered row) | AA 4.5:1 for 12–13 pt text; 0.54 was 4.49:1 on a hovered row |
 | systemRed as text, light | #ff383c (3.57:1) | #ee0005 (4.53:1) | AA |
-| destructive button fill, both modes | systemRed (white text 3.57 / 3.43:1) | #ee0005 (4.53:1) | AA |
+| destructive button fill, both modes | systemRed (white text 3.57 / 3.43:1) | #ee0005 (4.53:1); hover #d60004 (5.44:1), pressed #bd0004 (6.63:1) | AA |
+| switch thumb on a checked light-accent track | white (dark mode: orange 2.57, green 2.43, yellow 1.58:1) | black where white is under 3:1 (orange 8.16:1); black also clears the off track (6.92 / 3.94:1) | AA 3:1 non-text |
 | systemGreen as text, light | #34c759 (2.22:1) | #24883d (4.50:1) | AA |
 | systemOrange as text, light | #ff8d28 (2.31:1) | #be5900 (4.55:1) | AA (`warning`; no view uses it yet) |
 | primary button fill (blue accent) | controlAccentColor #007aff (white 4.02:1) | #0072ef (4.51:1) | AA; the switch keeps #007aff (4.02:1 ≥ 3:1) |
@@ -1051,8 +1053,9 @@ in both modes. The exceptions are decorative separators (above) and disabled con
 | Pair | Light | Dark |
 |---|---|---|
 | label on card | 15.13 | 12.27 |
-| secondaryLabel on card | 4.61 | 5.92 |
-| secondaryLabel on underPage | 4.52 | (label 11.06) |
+| secondaryLabel on card | 4.74 | 5.92 |
+| secondaryLabel on underPage | 4.65 | (label 11.06) |
+| secondaryLabel on a hovered row (rowHover) | 4.62 | 5.35 |
 | danger text | 4.53 | 4.86 |
 | success text | 4.50 | 8.25 |
 | warning text | 4.55 | 7.47 |
@@ -1064,7 +1067,8 @@ in both modes. The exceptions are decorative separators (above) and disabled con
 | text field edge on card | 3.03 | 3.13 |
 | switch off track on card | 3.03 | 3.13 |
 | switch on (#007aff) on card | 4.02 | 4.15 |
-| switch thumb on the on track | 4.02 | 4.02 |
+| switch thumb on the on track (blue: white) | 4.02 | 4.02 |
+| switch thumb (white) on the off track | 3.03 | 5.33 |
 | focus ring on card | 4.02 | 4.15 |
 | orange accent: black on #f7821b button | 8.16 | 8.16 |
 | orange accent: switch #eb7208 / #f7821b on card | 3.02 | 6.48 |
@@ -1073,10 +1077,20 @@ in both modes. The exceptions are decorative separators (above) and disabled con
 
 - **Icons in views.** The icon set is now registered, but no view uses an icon yet.
 - **SF optical tracking and per-style line heights.** GPUI exposes neither.
-- **Not exercised live.** The accent notification path is wired but was not triggered
-  by changing System Settings during the run. The probe drives the same re-theme path
-  through the `accent` fixture.
+- **Partly exercised live.** The probe drives the real observer → shell inbox →
+  re-theme path by posting `NSSystemColorsDidChangeNotification` in-process
+  (`post_colors_changed`, automation only). It also checks the live theme colours
+  after an accent fixture loads. Up to three notifications per change are coalesced
+  into one re-theme. Nobody changed the accent in System Settings during a run, so
+  the distributed notifications and AppKit's own posting are untested.
 - **Selected-row tint when the window is not key.** AppKit's
   unemphasized selection colour is not used; the panel is key while shown.
 - **Shadow.** The glass and its window shadow are AppKit's; no extra card shadow is
   drawn.
+- **Dialogs need an opaque surface.** The theme background is transparent (alpha 0),
+  so a gpui-component Dialog drawn on `background` would be see-through. The a11y
+  spike's Dialog is one example. Any future Dialog must paint the card colour
+  (`theming::surface`).
+- **Status colours on other surfaces.** danger, success and warning are AA on the
+  card only (danger is 4.19:1 on the under-page surface). No view puts a status line
+  anywhere else; `theme::tests::text_on_every_surface_meets_aa` pins this.
