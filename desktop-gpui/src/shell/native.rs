@@ -13,12 +13,14 @@ use objc2::{msg_send, MainThreadMarker};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSEvent, NSScreen, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::NSString;
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use super::placement::{cursor_from_appkit, Display, Rect};
 
 /// NSPopUpWindowLevel (kCGPopUpMenuWindowLevel), the level GPUI gives `WindowKind::PopUp`.
 const POPUP_WINDOW_LEVEL: isize = 101;
+/// NSNormalWindowLevel: where a file dialog opens.
+const NORMAL_WINDOW_LEVEL: isize = 0;
 
 /// Every display in global top-left points, primary first (AppKit lists the menu-bar
 /// screen first), plus the primary's height for the cursor flip.
@@ -93,13 +95,90 @@ pub struct PanelFacts {
 /// one (Task 6 saw this live: `window_id` right after `resign_key` found the closing
 /// panel). NSApp lists windows oldest first, so the newest visible NSPanel is the
 /// current one; callers that need "is a panel open at all" ask the shell first.
+///
+/// File dialogs (NSSavePanel, and NSOpenPanel below it) are NSPanels too; they are
+/// never ours, so they are skipped even while one is newer and on screen.
 fn visible_panel(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     let panel_class = AnyClass::get(c"NSPanel")?;
+    let dialog_class = AnyClass::get(c"NSSavePanel");
     let windows = NSApplication::sharedApplication(mtm).windows();
     (0..windows.count())
         .rev()
         .map(|i| windows.objectAtIndex(i))
-        .find(|w| w.isVisible() && w.isKindOfClass(panel_class))
+        .find(|w| {
+            w.isVisible()
+                && w.isKindOfClass(panel_class)
+                && !dialog_class.is_some_and(|c| w.isKindOfClass(c))
+        })
+}
+
+/// Whether Ubilink is the active (frontmost) app.
+pub fn app_is_active(mtm: MainThreadMarker) -> bool {
+    NSApplication::sharedApplication(mtm).isActive()
+}
+
+/// Give up being the active app: the app that was active before Ubilink becomes
+/// active again. Ubilink is an accessory app, so this is what puts the user's
+/// keystrokes back where they were after a file dialog activated it.
+pub fn deactivate_app(mtm: MainThreadMarker) {
+    let app = NSApplication::sharedApplication(mtm);
+    if app.isActive() {
+        app.deactivate();
+    }
+}
+
+/// The newest visible panel's window number, read right after the shell opens one,
+/// so later calls act on exactly that window (never a file dialog, never a closing
+/// predecessor).
+pub fn newest_panel_number(mtm: MainThreadMarker) -> Option<isize> {
+    visible_panel(mtm).map(|w| w.windowNumber())
+}
+
+/// The app's window whose `windowNumber` is `number`, if it still exists.
+fn window_numbered(mtm: MainThreadMarker, number: isize) -> Option<Retained<NSWindow>> {
+    let windows = NSApplication::sharedApplication(mtm).windows();
+    (0..windows.count())
+        .map(|i| windows.objectAtIndex(i))
+        .find(|w| w.windowNumber() == number)
+}
+
+/// Settings' Import (release builds): before a file dialog opens, drop panel `number`
+/// to the normal window level, so the dialog (ordered front after it, at the normal
+/// level) is not hidden under a pop-up-level panel. Returns whether it was there.
+pub fn lower_panel_for_dialog(mtm: MainThreadMarker, number: isize) -> bool {
+    window_numbered(mtm, number)
+        .map(|w| w.setLevel(NORMAL_WINDOW_LEVEL))
+        .is_some()
+}
+
+/// Close every open file dialog (NSSavePanel and its NSOpenPanel subclass) as if the
+/// user pressed Cancel: the panel that opened it is going away or changing route.
+/// Call outside any GPUI update (the dialog's completion handler runs inside).
+pub fn cancel_file_dialogs(mtm: MainThreadMarker) {
+    let Some(dialog_class) = AnyClass::get(c"NSSavePanel") else {
+        return;
+    };
+    let windows = NSApplication::sharedApplication(mtm).windows();
+    let dialogs: Vec<_> = (0..windows.count())
+        .map(|i| windows.objectAtIndex(i))
+        .filter(|w| w.isVisible() && w.isKindOfClass(dialog_class))
+        .collect();
+    for d in dialogs {
+        // SAFETY: -[NSSavePanel cancel:] takes a nullable sender; the receiver is an
+        // NSSavePanel (checked above), on the main thread (proven by `mtm`).
+        unsafe {
+            let _: () = msg_send![&*d, cancel: Option::<&AnyObject>::None];
+        }
+    }
+}
+
+/// The dialog is gone: panel `number` goes back to its pop-up level and takes key
+/// status again, so Tab and Escape reach it. Call outside any GPUI update.
+pub fn restore_panel_after_dialog(mtm: MainThreadMarker, number: isize) {
+    if let Some(w) = window_numbered(mtm, number).filter(|w| w.isVisible()) {
+        w.setLevel(POPUP_WINDOW_LEVEL);
+        w.makeKeyWindow();
+    }
 }
 
 /// Inspect the app's visible GPUI panel window, if any.
@@ -115,6 +194,27 @@ pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
         });
         PanelFacts { popup, blurred }
     })
+}
+
+/// Move and resize panel `number` to `size` points with its top-left corner at
+/// `top_left` (global top-left points, as `placement`), flipped to AppKit's
+/// bottom-left frame (`placement::appkit_origin`). Returns whether the panel was
+/// there. GPUI hears of the new size through the window's resize notification and
+/// lays the view out again. Call outside any GPUI update (see `shell::fit_panel`).
+pub fn set_panel_frame(
+    mtm: MainThreadMarker,
+    number: isize,
+    top_left: (f64, f64),
+    size: (f64, f64),
+    primary_height: f64,
+) -> bool {
+    let Some(w) = window_numbered(mtm, number) else {
+        return false;
+    };
+    let (x, y) = super::placement::appkit_origin(top_left, size, primary_height);
+    let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(size.0, size.1));
+    w.setFrame_display(frame, true);
+    true
 }
 
 /// Automation `window_id` (R6): the panel's CGWindowID (`windowNumber`), what

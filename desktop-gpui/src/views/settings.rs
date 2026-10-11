@@ -65,8 +65,9 @@
 //! user (the same pattern as `onboarding.rs`'s step buttons). The Export and Import
 //! buttons use the same wrapper for Enter/Space.
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::switch::Switch;
@@ -77,6 +78,8 @@ use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
 
+use super::escape::{self, EscapeAction, EscapeState};
+use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
@@ -92,6 +95,13 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
+    /// Measured places and text sizes (`views::layout`): `viewport`, the adapter
+    /// grid's scroll box (`adapters_box`) and its last switch (`last_adapter`),
+    /// the action buttons (`export_button`, `import_button`, `reset_button`, and while
+    /// the reset question shows `reset_confirm_button`, `reset_cancel_button`), and the
+    /// launch-at-login `login_label` / `login_status` text sizes.
+    #[serde(default)]
+    pub layout: BTreeMap<String, serde_json::Value>,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -100,11 +110,15 @@ pub fn state() -> super::ViewState {
         view: Route::Settings.as_str().into(),
         phase: "ready".into(),
         theme_samples: SAMPLES.get(),
+        layout: LAYOUT.get(),
     })
 }
 
 /// The newest settings view's theme sample regions (R14), written at prepaint.
 static SAMPLES: Samples = Samples::new();
+
+/// The newest settings view's measured layout (`views::layout`), written at prepaint.
+static LAYOUT: Layout = Layout::new();
 
 /// How an action button looks.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +127,96 @@ enum Look {
     /// The view's accent (primary) action, and its R14 accent sample.
     Accent,
     Danger,
+}
+
+// Settings' layout, in points. The view sets these on its rows, so `content_height`
+// adds up exactly what the view lays out, and the window fits the content (the Tauri
+// panel's `fitWindow`) instead of clipping the adapter grid at a fixed 140 pt.
+const PAD_X: Pixels = spacing::S5;
+const PAD_Y: Pixels = spacing::S2;
+const GAP: Pixels = spacing::S1;
+/// The title row (a 16 pt title's line box).
+const HEADER_H: Pixels = px(26.);
+/// The reset question's row: two 18 pt lines beside its buttons.
+const CONFIRM_H: Pixels = px(40.);
+const CONFIRM_LINE_H: Pixels = px(18.);
+/// The launch-at-login row, and with an explanation beside it: up to three 16 pt
+/// lines (the not-found explanation wraps to three beside the switch and status).
+const LOGIN_H: Pixels = px(20.);
+const LOGIN_EXPLAINED_H: Pixels = px(50.);
+const EXPLANATION_LINE_H: Pixels = px(16.);
+/// One adapter switch, and the grid's gap between them.
+const ADAPTER_W: Pixels = px(140.);
+const ADAPTER_H: Pixels = px(16.);
+const ADAPTER_GAP: Pixels = spacing::S2;
+const HINT_H: Pixels = px(18.);
+/// A plain or danger action button's side padding (the Tauri `--pad-control`, 14 px).
+const BUTTON_PAD_X: Pixels = px(14.);
+
+/// What Settings' height depends on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Content {
+    /// How many adapter switches the grid holds.
+    pub adapters: usize,
+    /// The reset question's row is showing.
+    pub confirming_reset: bool,
+    /// The launch-at-login row carries an explanation (or an error) line.
+    pub login_explained: bool,
+}
+
+/// How many adapter switches fit on one grid row of a `panel_w` wide panel.
+pub fn adapter_columns(panel_w: f64) -> usize {
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let inner = panel_w - 2.0 * pt(PAD_X);
+    (((inner + pt(ADAPTER_GAP)) / (pt(ADAPTER_W) + pt(ADAPTER_GAP))).floor() as usize).max(1)
+}
+
+/// Settings' panel height for `content`: padding, the title, the stats and actions
+/// row, the reset question when it shows, the launch-at-login row, every grid row of
+/// adapters and the hint line, with the gaps between them. The shell clamps it
+/// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
+pub fn content_height(content: Content) -> f64 {
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let cols = adapter_columns(crate::shell::panel::PANEL_WIDTH);
+    let rows = content.adapters.div_ceil(cols);
+    let grid = if rows == 0 {
+        0.0
+    } else {
+        rows as f64 * pt(ADAPTER_H) + (rows - 1) as f64 * pt(ADAPTER_GAP)
+    };
+    let login = if content.login_explained {
+        LOGIN_EXPLAINED_H
+    } else {
+        LOGIN_H
+    };
+    let mut parts = vec![
+        pt(HEADER_H),
+        pt(theming::ACCENT_H),
+        pt(login),
+        grid,
+        pt(HINT_H),
+    ];
+    if content.confirming_reset {
+        parts.push(pt(CONFIRM_H));
+    }
+    let gaps = (parts.len() - 1) as f64 * pt(GAP);
+    2.0 * pt(PAD_Y) + parts.iter().sum::<f64>() + gaps
+}
+
+/// This route's row in the router table (`views::TABLE`): the height a freshly shown
+/// Settings needs (no reset question yet).
+pub fn panel_height() -> f64 {
+    let adapters = ubilink_app::list_plugins(crate::app_state::get()).map_or(0, |p| p.len());
+    content_height(Content {
+        adapters,
+        confirming_reset: false,
+        login_explained: login_explained(&login_status()),
+    })
+}
+
+/// Whether the launch-at-login row shows its explanation (or error) line, up to three lines.
+fn login_explained(login: &Result<Report, String>) -> bool {
+    login.as_ref().map_or(true, |r| r.explanation.is_some())
 }
 
 const ADAPTERS_HINT: &str =
@@ -339,31 +443,55 @@ mod sm_app_service {
     }
 }
 
-/// Where a release build's save dialog starts: Downloads (the Tauri app's export
-/// folder), else home.
-fn export_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+/// Where a release build's Export writes, as the Tauri app's did: `home`'s Downloads
+/// folder, else `home` itself.
+pub fn export_dir_in(home: &Path) -> PathBuf {
     let downloads = home.join("Downloads");
     if downloads.is_dir() {
         downloads
     } else {
-        home
+        home.to_path_buf()
     }
 }
 
-/// The save dialog's suggested name, stamped like the Tauri app's export file.
-fn export_file_name() -> String {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("ubilink-export-{stamp}.json")
+/// The user's export folder ([`export_dir_in`] of `$HOME`), or why there is none.
+fn export_dir() -> Result<PathBuf, String> {
+    home_from(std::env::var_os("HOME")).map(|home| export_dir_in(&home))
+}
+
+/// `$HOME` as an absolute folder. Unset, empty or relative is refused: writing an
+/// export relative to wherever the app happened to start would lose it.
+pub fn home_from(home: Option<OsString>) -> Result<PathBuf, String> {
+    match home.map(PathBuf::from) {
+        Some(h) if h.is_absolute() => Ok(h),
+        _ => Err("couldn't find your home folder ($HOME is not set to an absolute path)".into()),
+    }
+}
+
+/// The command that shows `path` selected in a Finder window (the Tauri app's
+/// `open -R <path>` after an export): a program and its argv, never a shell line, so
+/// the path is one argument whatever it contains.
+pub fn reveal_command(path: &Path) -> (&'static str, Vec<OsString>) {
+    (
+        "/usr/bin/open",
+        vec![OsString::from("-R"), path.as_os_str().into()],
+    )
 }
 
 /// An automation build never opens a real file dialog on the host (O4).
 const NO_FIXTURE: &str = "no {kind} fixture loaded";
+
+/// The `layout` key an action button's measured bounds are reported under.
+fn layout_key(id: &'static str) -> &'static str {
+    match id {
+        "settings-export" => "export_button",
+        "settings-import" => "import_button",
+        "settings-reset" => "reset_button",
+        "settings-reset-confirm" => "reset_confirm_button",
+        "settings-reset-cancel" => "reset_cancel_button",
+        other => other,
+    }
+}
 
 /// Space or Enter with no modifiers: the keys that activate a focused switch.
 fn is_activation_key(keystroke: &Keystroke) -> bool {
@@ -384,13 +512,15 @@ pub struct SettingsView {
     focused: bool,
     /// Reset was pressed and the confirmation is showing; nothing is deleted yet.
     confirming_reset: bool,
-    /// The open save/open dialog, if any; dropped (cancelled) with the view.
+    /// The open file dialog's task, if any; dropped (cancelled) with the view.
     _dialog: Task<()>,
     /// Launch at login: the status last read (on show) or reported by the last
     /// register/unregister, or the error line to show instead (U3).
     login: Result<Report, String>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
+    /// The content the panel was last fitted to; a change refits it.
+    fitted: Option<Content>,
 }
 
 impl SettingsView {
@@ -403,6 +533,7 @@ impl SettingsView {
             _dialog: Task::ready(()),
             login: login_status().map_err(|e| login_status_error_message(&e)),
             appearance: FollowAppearance::default(),
+            fitted: None,
         }
     }
 
@@ -438,27 +569,50 @@ impl SettingsView {
                 }
             }))
             .child(
+                // The visible label is the view's own text (below), so its size is the
+                // view's to choose and to measure; the switch keeps the accessible name.
                 Switch::new("launch-at-login")
                     .small()
-                    .label(LOGIN_SWITCH)
+                    .accessibility_label(LOGIN_SWITCH)
                     .checked(on)
                     .on_click(
                         cx.listener(|this, next: &bool, _, cx| this.set_launch_at_login(*next, cx)),
                     ),
             );
+        let label = div()
+            .id("launch-at-login-label")
+            .relative()
+            .flex_shrink_0()
+            .text_color(foreground)
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| this.set_launch_at_login(!on, cx)))
+            .child(LOGIN_SWITCH)
+            .child(LAYOUT.font("login_label"));
+        let explained = login_explained(&self.login);
         div()
+            .flex_shrink_0()
+            .min_h(if explained {
+                LOGIN_EXPLAINED_H
+            } else {
+                LOGIN_H
+            })
             .flex()
             .flex_row()
             .items_center()
             .gap(spacing::S2)
-            .text_size(font_size::ROW)
+            // The label, its status and the explanation share one size: the Tauri
+            // settings' meta size (`.set-pill`, `.set-sub`: --fs-meta).
+            .text_size(font_size::META)
             .child(switch)
+            .child(label)
             .when_some(status, |this, status| {
                 this.child(
                     div()
+                        .relative()
                         .flex_shrink_0()
                         .text_color(foreground)
-                        .child(text!(id = "settings-login-status", status)),
+                        .child(text!(id = "settings-login-status", status))
+                        .child(LAYOUT.font("login_status")),
                 )
             })
             .when_some(explanation, |this, explanation| {
@@ -467,6 +621,7 @@ impl SettingsView {
                         .flex_1()
                         .min_w_0()
                         .text_size(font_size::META)
+                        .line_height(EXPLANATION_LINE_H)
                         .text_color(if failed {
                             theme.danger
                         } else {
@@ -483,26 +638,34 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Export: to the `export_path` fixture if set, else where a save dialog says.
+    /// Export: to the `export_path` fixture if set; else, as the Tauri app did, no
+    /// dialog: `ubilink_app::export_graph` writes a stamped file into Downloads (or
+    /// home), Finder reveals it, and the hint line names the path.
     fn export(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = fixtures::path(Fixture::ExportPath) {
             let result = export_to(crate::app_state::get(), &path);
             return self.show(export_message(&result), cx);
         }
         if cfg!(feature = "automation") {
+            // O4: an automation build never writes to the host's Downloads or opens
+            // Finder; a probe loads an `export_path` fixture.
             let e = NO_FIXTURE.replace("{kind}", "export_path");
             return self.show(export_message(&Err(e)), cx);
         }
-        let chosen = cx.prompt_for_new_path(&export_dir(), Some(&export_file_name()));
-        self._dialog = cx.spawn(async move |this, cx| {
-            let result = match chosen.await {
-                Ok(Ok(Some(path))) => export_to(crate::app_state::get(), &path),
-                Ok(Ok(None)) => return,
-                Ok(Err(e)) => Err(format!("couldn't open the save dialog: {e}")),
-                Err(_) => return,
-            };
-            let _ = this.update(cx, |view, cx| view.show(export_message(&result), cx));
-        });
+        let result =
+            export_dir().and_then(|dir| ubilink_app::export_graph(crate::app_state::get(), &dir));
+        if let Ok(path) = &result {
+            let (program, args) = reveal_command(Path::new(path));
+            // Best effort, as Tauri's: the file is written whether or not Finder opens.
+            // `open` returns at once; reap it off the main thread so no zombie stays.
+            match std::process::Command::new(program).args(args).spawn() {
+                Ok(mut child) => {
+                    std::thread::spawn(move || child.wait());
+                }
+                Err(e) => eprintln!("[ubilink] couldn't reveal the export in Finder: {e}"),
+            }
+        }
+        self.show(export_message(&result), cx);
     }
 
     /// Import: from the `import_path` fixture if set, else the file an open dialog picks.
@@ -515,6 +678,11 @@ impl SettingsView {
             let e = NO_FIXTURE.replace("{kind}", "import_path");
             return self.show(import_message(&Err(e)), cx);
         }
+        // The shell fronts the dialog (activates the app, lowers the panel) and
+        // refuses a second one while it is up; see `shell::begin_file_dialog`.
+        if !crate::shell::begin_file_dialog(cx) {
+            return;
+        }
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -522,16 +690,21 @@ impl SettingsView {
             prompt: Some("Import".into()),
         });
         self._dialog = cx.spawn(async move |this, cx| {
-            let result = match chosen.await {
-                Ok(Ok(Some(paths))) => match paths.first() {
-                    Some(path) => import_from(crate::app_state::get(), path),
-                    None => return,
-                },
-                Ok(Ok(None)) => return,
-                Ok(Err(e)) => Err(format!("couldn't open the file dialog: {e}")),
-                Err(_) => return,
+            let answer = chosen.await;
+            // Every way out (a file, Cancel or Escape, an error) restores the panel.
+            // If this view goes away first (a route switch, a hide), the shell has
+            // already closed the dialog and restored the panel, and this task is gone.
+            cx.update(|cx| crate::shell::end_file_dialog(true, cx));
+            let result = match answer {
+                Ok(Ok(Some(paths))) => paths
+                    .first()
+                    .map(|path| import_from(crate::app_state::get(), path)),
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(e)) => Some(Err(format!("couldn't open the file dialog: {e}"))),
             };
-            let _ = this.update(cx, |view, cx| view.show(import_message(&result), cx));
+            if let Some(result) = result {
+                let _ = this.update(cx, |view, cx| view.show(import_message(&result), cx));
+            }
         });
     }
 
@@ -575,6 +748,7 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .relative()
             .flex_shrink_0()
             .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if is_activation_key(&event.keystroke) {
@@ -584,10 +758,20 @@ impl SettingsView {
                 }
             }))
             .map(|d| {
+                // One height for every action button, as the Tauri panel's `.set-btn`
+                // (6 pt + 14 pt padding around 13 pt text: 28 pt). Export keeps its
+                // accent look and wider padding (the R14 accent sample needs the fill).
                 let button = match look {
                     Look::Accent => theming::accent_button(id),
-                    Look::Plain => Button::new(id).small(),
-                    Look::Danger => Button::new(id).small().danger(),
+                    Look::Plain => Button::new(id)
+                        .small()
+                        .h(theming::ACCENT_H)
+                        .px(BUTTON_PAD_X),
+                    Look::Danger => Button::new(id)
+                        .small()
+                        .danger()
+                        .h(theming::ACCENT_H)
+                        .px(BUTTON_PAD_X),
                 }
                 .label(label)
                 .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)));
@@ -597,6 +781,7 @@ impl SettingsView {
                     d.child(button)
                 }
             })
+            .child(LAYOUT.bounds(layout_key(id)))
             .into_any_element()
     }
 
@@ -605,14 +790,22 @@ impl SettingsView {
         cx.notify();
     }
 
-    fn adapter_switch(&self, plugin: &PluginView, cx: &mut Context<Self>) -> AnyElement {
+    /// `last`: the grid's last switch, whose place the layout reports (`last_adapter`).
+    fn adapter_switch(
+        &self,
+        plugin: &PluginView,
+        last: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let app: SharedString = plugin.app.clone().into();
         let enabled = plugin.enabled;
         let locked = plugin.builtin;
         let key_app = app.clone();
         let click_app = app.clone();
         div()
-            .w(px(140.))
+            .relative()
+            .w(ADAPTER_W)
+            .h(ADAPTER_H)
             .flex_shrink_0()
             // Space/Enter reach this wrapper only while the switch inside it is
             // focused (keys go from the focused element up); see the module doc.
@@ -636,6 +829,7 @@ impl SettingsView {
                         this.set_enabled(&click_app, *next, cx)
                     })),
             )
+            .when(last, |d| d.child(LAYOUT.bounds("last_adapter")))
             .into_any_element()
     }
 }
@@ -647,12 +841,14 @@ impl Render for SettingsView {
             window.focus(&self.focus, cx);
         }
         SAMPLES.clear();
+        LAYOUT.clear();
         self.appearance.ensure(window, cx);
         let (switches, list_error) = match ubilink_app::list_plugins(crate::app_state::get()) {
             Ok(plugins) => (
                 plugins
                     .iter()
-                    .map(|p| self.adapter_switch(p, cx))
+                    .enumerate()
+                    .map(|(i, p)| self.adapter_switch(p, i + 1 == plugins.len(), cx))
                     .collect::<Vec<_>>(),
                 None,
             ),
@@ -705,33 +901,53 @@ impl Render for SettingsView {
             (None, Some((m, failed))) => (m.clone(), *failed),
             (None, None) => (ADAPTERS_HINT.to_string(), false),
         };
+        let content = Content {
+            adapters: switches.len(),
+            confirming_reset: self.confirming_reset,
+            login_explained: login_explained(&self.login),
+        };
+        if self.fitted != Some(content) {
+            // Content changed since the panel was sized (the reset question opened or
+            // closed, the login status gained an explanation): refit, after this frame.
+            self.fitted = Some(content);
+            let height = content_height(content);
+            cx.defer(move |cx| crate::shell::fit_panel(height, cx));
+        }
         let login_row = self.login_row(cx);
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
         div()
             .track_focus(&self.focus)
-            // Escape closes an open reset confirmation (Tauri) without deleting.
+            // Escape closes an open reset confirmation without deleting, else
+            // dismisses the panel (Tauri, `views::escape`).
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.confirming_reset
-                    && event.keystroke.key == "escape"
-                    && !event.keystroke.modifiers.modified()
-                {
-                    this.cancel_reset(window, cx);
-                    cx.stop_propagation();
+                if !escape::is_escape(&event.keystroke) {
+                    return;
                 }
+                let state = EscapeState {
+                    confirming_reset: this.confirming_reset,
+                    ..EscapeState::default()
+                };
+                match escape::escape_action(Route::Settings, state) {
+                    EscapeAction::CloseConfirmation => this.cancel_reset(window, cx),
+                    _ => escape::dismiss_panel(window, cx),
+                }
+                cx.stop_propagation();
             }))
             .size_full()
             .flex()
             .flex_col()
-            .gap(spacing::S1)
-            .px(spacing::S5)
-            .py(spacing::S2)
+            .gap(GAP)
+            .px(PAD_X)
+            .py(PAD_Y)
             .rounded(radius::CARD)
             // The opaque token surface (R14): the panel's blur stays behind the card.
             .bg(surface)
             .child(
                 div()
+                    .h(HEADER_H)
+                    .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .items_baseline()
@@ -760,6 +976,8 @@ impl Render for SettingsView {
             )
             .child(
                 div()
+                    .h(theming::ACCENT_H)
+                    .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -793,6 +1011,8 @@ impl Render for SettingsView {
                 this.child(
                     div()
                         .id("settings-reset-confirmation")
+                        .flex_shrink_0()
+                        .min_h(CONFIRM_H)
                         .flex()
                         .flex_row()
                         .items_center()
@@ -806,6 +1026,7 @@ impl Render for SettingsView {
                                 .flex_wrap()
                                 .gap_x(spacing::S1)
                                 .text_size(font_size::ROW)
+                                .line_height(CONFIRM_LINE_H)
                                 .child(
                                     div().text_color(foreground).child(text!(
                                         id = "settings-reset-question",
@@ -824,21 +1045,35 @@ impl Render for SettingsView {
             })
             .child(login_row)
             .child(
+                // The grid's scroll box, wrapped so its own place can be measured (a
+                // canvas inside it would scroll with the switches).
                 div()
-                    .id("settings-adapters")
+                    .relative()
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .content_start()
-                    .gap_x(spacing::S2)
-                    .gap_y(spacing::S2)
-                    .children(switches),
+                    .child(
+                        div()
+                            .id("settings-adapters")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .content_start()
+                            .gap_x(ADAPTER_GAP)
+                            .gap_y(ADAPTER_GAP)
+                            .children(switches),
+                    )
+                    .child(LAYOUT.bounds("adapters_box")),
             )
             .child(
                 div()
+                    .h(HINT_H)
+                    .flex_shrink_0()
+                    .line_height(HINT_H)
                     .truncate()
                     .text_size(font_size::META)
                     .text_color(if failed {
@@ -862,11 +1097,12 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        export_message, export_to, import_from, import_message, list_error_message,
-        login_status_error_message, login_toggle_error_message, reset, reset_message, state,
-        stats_error_message, stats_text, toggle, toggle_message, version_text, LOGIN_SWITCH,
-        NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL, RESET_CONFIRM,
-        RESET_QUESTION,
+        adapter_columns, content_height, export_dir_in, export_message, export_to, home_from,
+        import_from, import_message, list_error_message, login_status_error_message,
+        login_toggle_error_message, reset, reset_message, reveal_command, state,
+        stats_error_message, stats_text, toggle, toggle_message, version_text, Content,
+        LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL,
+        RESET_CONFIRM, RESET_QUESTION,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -889,6 +1125,73 @@ mod tests {
             data_dir: dir,
             hotkeys: Mutex::new(HotkeyReport::default()),
         }
+    }
+
+    /// Parity (Tauri `fitWindow`): Settings' height is its content's, so every adapter
+    /// row shows. 640 pt panel, 20 pt sides, 140 pt switches 8 pt apart: 4 per row.
+    #[test]
+    fn settings_height_fits_every_adapter_row() {
+        assert_eq!(adapter_columns(640.0), 4);
+        assert_eq!(adapter_columns(100.0), 1, "never zero columns");
+        let h = |adapters, confirming_reset, login_explained| {
+            content_height(Content {
+                adapters,
+                confirming_reset,
+                login_explained,
+            })
+        };
+        // pad 8+8, title 26, actions 28, login 20, hint 18, 4 gaps of 4: 124 + grid.
+        assert_eq!(h(0, false, false), 124.0);
+        // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
+        assert_eq!(h(10, false, false), 188.0);
+        // ceil(n / 4) rows: 4 is one row, 5 is two.
+        assert_eq!(h(4, false, false), 124.0 + 16.0);
+        assert_eq!(h(5, false, false), 124.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(8, false, false), h(5, false, false));
+        // The reset question adds its row and a gap; an explanation up to three lines.
+        assert_eq!(h(10, true, false), 188.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 188.0 + 30.0);
+        // Taller than the old fixed 140 pt once a second row of adapters exists.
+        assert!(h(5, false, false) > 140.0);
+    }
+
+    /// Export as the Tauri app did: into Downloads when there is one, else home.
+    #[test]
+    fn export_goes_to_downloads_else_home() {
+        let home = std::env::temp_dir().join(format!("ubilink-export-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(export_dir_in(&home), home, "no Downloads: home");
+        std::fs::create_dir_all(home.join("Downloads")).unwrap();
+        assert_eq!(export_dir_in(&home), home.join("Downloads"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// No usable $HOME: refuse rather than write somewhere relative.
+    #[test]
+    fn export_refuses_a_missing_or_relative_home() {
+        assert!(home_from(None).is_err());
+        assert!(home_from(Some("".into())).is_err());
+        assert!(home_from(Some("Users/x".into())).is_err());
+        assert_eq!(
+            home_from(Some("/Users/x".into())),
+            Ok(std::path::PathBuf::from("/Users/x"))
+        );
+    }
+
+    /// The reveal is `open -R <path>` as one argv (no shell), whatever the path holds.
+    #[test]
+    fn reveal_is_open_dash_r_with_the_path_as_one_argument() {
+        let path = std::path::Path::new("/Users/x/Downloads/a b; rm -rf ~ $(x).json");
+        let (program, args) = reveal_command(path);
+        assert_eq!(program, "/usr/bin/open");
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-R"),
+                path.as_os_str().to_os_string()
+            ]
+        );
     }
 
     #[test]

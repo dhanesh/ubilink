@@ -31,6 +31,8 @@ JSON, fixtures, `theme/`, `login_item.rs`, `automation/store.rs`); each Phase 1 
 - [resource-budget](resource-budget.md) — the release app idles light, stays under its footprint, and ships under its size budget
 - [panel-hotkey](panel-hotkey.md) — hotkey-to-first-frame stays under its latency budget with the real views in place
 - [panel-dismiss](panel-dismiss.md) — capture and browser hide on loss of key status; settings and onboarding don't
+- [escape-dismiss](escape-dismiss.md) — Escape backs out one step (mark, filter, reset question), then dismisses the panel
+- [panel-layout](panel-layout.md) — the panel fits Settings' and capture's content; Settings' buttons and login texts match
 
 ## Uncovered Manifold constraints (backlog)
 

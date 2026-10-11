@@ -25,12 +25,36 @@ use super::Route;
 use crate::theme::tokens::radius;
 use crate::views;
 
-/// Panel size in points: the Tauri panel's (its tauri.conf.json, 640x140; deleted in D24).
-pub const PANEL_SIZE: (f64, f64) = (640.0, 140.0);
+/// Panel width in points: the Tauri panel's (its tauri.conf.json, 640; deleted in D24).
+pub const PANEL_WIDTH: f64 = 640.0;
+
+/// The height capture, browser and onboarding open at: the Tauri window's configured
+/// 640x140. Each route's height comes from the router (`views::height_for`); Settings
+/// fits its content (`views::settings::panel_height`).
+pub const PANEL_HEIGHT: f64 = 140.0;
+
+/// The Tauri shell's `resize_panel` clamp: no route is shorter or taller than this
+/// (a display's usable area can cut it further, `placement::fit_on`).
+pub const MIN_HEIGHT: f64 = 96.0;
+pub const MAX_HEIGHT: f64 = 900.0;
+
+/// `route`'s panel size: the panel width and the route's height, clamped.
+pub fn size_for(route: Route) -> (f64, f64) {
+    (PANEL_WIDTH, clamp_height(views::height_for(route)))
+}
+
+/// A wanted height clamped to [`MIN_HEIGHT`]..[`MAX_HEIGHT`].
+pub fn clamp_height(h: f64) -> f64 {
+    if h.is_finite() {
+        h.clamp(MIN_HEIGHT, MAX_HEIGHT)
+    } else {
+        PANEL_HEIGHT
+    }
+}
 
 pub fn options(placement: Option<Placement>) -> WindowOptions {
     let (x, y) = placement.map_or((0.0, 0.0), |p| p.local);
-    let (w, h) = PANEL_SIZE;
+    let (w, h) = placement.map_or((PANEL_WIDTH, PANEL_HEIGHT), |p| p.size);
     WindowOptions {
         // Origin is relative to `display_id`'s frame (see placement.rs).
         window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -56,7 +80,7 @@ pub fn options(placement: Option<Placement>) -> WindowOptions {
 /// is on no screen. The origin is relative to the primary display, whose global x is
 /// 0, so the leftmost global x is directly usable.
 pub fn prewarm_options(displays: &[Display]) -> WindowOptions {
-    let (w, _) = PANEL_SIZE;
+    let w = PANEL_WIDTH;
     let left = displays.iter().map(|d| d.frame.x).fold(0.0, f64::min);
     let mut o = options(None);
     o.focus = false;
@@ -258,7 +282,7 @@ impl Render for PanelView {
 #[cfg(test)]
 mod tests {
     use super::super::placement::{Display, Rect};
-    use super::{prewarm_options, PANEL_SIZE};
+    use super::{clamp_height, prewarm_options, MAX_HEIGHT, MIN_HEIGHT, PANEL_HEIGHT, PANEL_WIDTH};
     use gpui_kit::WindowBounds;
 
     fn display(id: u32, x: f64, y: f64, w: f64, h: f64) -> Display {
@@ -292,7 +316,7 @@ mod tests {
             panic!("windowed bounds expected");
         };
         let x = f64::from(f32::from(b.origin.x));
-        let right = x + PANEL_SIZE.0;
+        let right = x + PANEL_WIDTH;
         for d in &displays {
             assert!(
                 right < d.frame.x,
@@ -300,5 +324,14 @@ mod tests {
                 d.id
             );
         }
+    }
+
+    #[test]
+    fn heights_are_clamped_as_the_tauri_shell_clamped_them() {
+        assert_eq!(clamp_height(140.0), 140.0);
+        assert_eq!(clamp_height(20.0), MIN_HEIGHT);
+        assert_eq!(clamp_height(5000.0), MAX_HEIGHT);
+        assert_eq!(clamp_height(f64::NAN), PANEL_HEIGHT);
+        assert_eq!((MIN_HEIGHT, MAX_HEIGHT), (96.0, 900.0));
     }
 }

@@ -1,0 +1,420 @@
+{
+  "description": "Parity: Escape dismisses the panel as the Tauri panel's did. Capture and onboarding: Esc hides the panel. Browser: Esc cancels a pending mark, else clears a non-empty filter (rows unfiltered again), else hides. Settings: Esc closes an open reset confirmation (nothing deleted), else hides. Hidden = state, window_id and Quartz agree.",
+  "requirement": "P2-escape-dismiss (GPUI Phase 2b parity, Tauri dist/panel.js:555-592 keydown Escape)",
+  "notes": [
+    "Tauri reference (ee80e70:dist/panel.js): settings `if (!$('set-reset-confirm').hidden) close it, else dismiss_panel`; browser `if (markedUri) unmark; else if (browse.filter) clear the filter; else dismiss_panel`; every other view falls to the generic `if (e.key === 'Escape') invoke('dismiss_panel')` (capture, onboarding).",
+    "The key verb dispatches a real Escape keystroke through GPUI's keymap and listeners in the panel window (the path a keyboard takes): in the browser the focused filter Input maps it to its Escape action, elsewhere it reaches the view's key listener.",
+    "graph-backlinks.json seeded; capture-ok.json makes the capture land before Escape. Top-level browser rows in list_links order start Decoy Unrelated, Gamma Doc, Beta Post (browser-left-close.json).",
+    "The landed capture stores https://example.com/ in the graph, so the graph is reset to graph-backlinks.json (seed_graph replace) before the browser block: its row order and the settings block's counts are the seed's.",
+    "Must fail on 4c6e66d at 'capture: Escape dismisses the panel' (Escape is ignored there)."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "capture": "capture-ok.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "capture: open",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "route": "capture"
+      },
+      "block": "capture"
+    },
+    {
+      "name": "capture: captured",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "captured"
+      },
+      "block": "capture"
+    },
+    {
+      "name": "capture: on screen (records its window number)",
+      "winframe": "any",
+      "block": "capture"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "capture",
+      "name": "capture: Escape"
+    },
+    {
+      "name": "capture: Escape dismisses the panel",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "capture"
+    },
+    {
+      "name": "capture: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "capture"
+    },
+    {
+      "name": "capture: window left the screen",
+      "winframe": "gone",
+      "block": "capture"
+    },
+    {
+      "name": "reset the graph to the seed (the capture stored example.com)",
+      "seed_graph": "graph-backlinks.json",
+      "replace": true
+    },
+    {
+      "name": "browser: open",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      },
+      "block": "browser"
+    },
+    {
+      "name": "browser: top level",
+      "see": {
+        "role": "Label",
+        "text": "Your links"
+      },
+      "route": "browser",
+      "timeout_ms": 3000,
+      "block": "browser"
+    },
+    {
+      "name": "browser: on screen (records its window number)",
+      "winframe": "any",
+      "block": "browser"
+    },
+    {
+      "name": "browser: mark the selected link",
+      "call": "key",
+      "args": {
+        "keys": "cmd-l"
+      },
+      "block": "browser"
+    },
+    {
+      "name": "browser: the mark shows",
+      "see": {
+        "role": "Label",
+        "text": "Linking from"
+      },
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "browser",
+      "name": "browser: Escape (mark pending)"
+    },
+    {
+      "name": "browser: Escape cancelled the mark",
+      "see": {
+        "role": "Label",
+        "text": "Linking from"
+      },
+      "absent": true,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "browser"
+    },
+    {
+      "name": "browser: mark: still visible on route browser",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      },
+      "block": "browser"
+    },
+    {
+      "name": "browser: type 'be'",
+      "call": "key",
+      "args": {
+        "keys": "b e"
+      },
+      "block": "browser"
+    },
+    {
+      "name": "browser: the filter holds 'be'",
+      "see": {
+        "role": "TextInput",
+        "text": "be"
+      },
+      "exact": true,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "browser",
+      "name": "browser: Escape (filter not empty)"
+    },
+    {
+      "name": "browser: Escape cleared the filter",
+      "see": {
+        "role": "TextInput",
+        "text": "be"
+      },
+      "absent": true,
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "browser"
+    },
+    {
+      "name": "browser: the rows are unfiltered again",
+      "see": {
+        "sequence": {
+          "role": "ListItem",
+          "texts": [
+            "https://decoy.example/unrelated",
+            "https://gamma.example/three",
+            "https://beta.example/two"
+          ],
+          "mode": "prefix",
+          "deep": true
+        }
+      },
+      "route": "browser",
+      "timeout_ms": 2000,
+      "block": "browser"
+    },
+    {
+      "name": "browser: filter: still visible on route browser",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      },
+      "block": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "browser",
+      "name": "browser: Escape (no mark, empty filter)"
+    },
+    {
+      "name": "browser: Escape dismisses the panel",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "browser"
+    },
+    {
+      "name": "browser: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "browser"
+    },
+    {
+      "name": "browser: window left the screen",
+      "winframe": "gone",
+      "block": "browser"
+    },
+    {
+      "name": "settings: open",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      },
+      "block": "settings"
+    },
+    {
+      "name": "settings: on screen (records its window number)",
+      "winframe": "any",
+      "block": "settings"
+    },
+    {
+      "name": "settings: Tab to Reset",
+      "key_until": {
+        "role": "Button",
+        "text": "Reset",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings",
+      "block": "settings"
+    },
+    {
+      "name": "settings: ask to reset",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      },
+      "block": "settings"
+    },
+    {
+      "name": "settings: the confirmation shows",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "route": "settings",
+      "timeout_ms": 2000,
+      "block": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "settings",
+      "name": "settings: Escape (confirmation open)"
+    },
+    {
+      "name": "settings: Escape closed the confirmation",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "absent": true,
+      "route": "settings",
+      "timeout_ms": 2000,
+      "block": "settings"
+    },
+    {
+      "name": "settings: confirmation: still visible on route settings",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      },
+      "block": "settings"
+    },
+    {
+      "name": "settings: nothing was deleted",
+      "graph": true,
+      "link_count": 3,
+      "resource_count": 5,
+      "block": "settings"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "settings",
+      "name": "settings: Escape (no confirmation)"
+    },
+    {
+      "name": "settings: Escape dismisses the panel",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "settings"
+    },
+    {
+      "name": "settings: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "settings"
+    },
+    {
+      "name": "settings: window left the screen",
+      "winframe": "gone",
+      "block": "settings"
+    },
+    {
+      "name": "onboarding: open",
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding"
+      },
+      "block": "onboarding"
+    },
+    {
+      "name": "onboarding: shown",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      },
+      "block": "onboarding"
+    },
+    {
+      "name": "onboarding: on screen (records its window number)",
+      "winframe": "any",
+      "block": "onboarding"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      },
+      "block": "onboarding",
+      "name": "onboarding: Escape"
+    },
+    {
+      "name": "onboarding: Escape dismisses the panel",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "shell.visible": false,
+        "route": null
+      },
+      "block": "onboarding"
+    },
+    {
+      "name": "onboarding: shell has no panel",
+      "call": "window_id",
+      "expect_error": "no panel open",
+      "block": "onboarding"
+    },
+    {
+      "name": "onboarding: window left the screen",
+      "winframe": "gone",
+      "block": "onboarding"
+    },
+    {
+      "name": "nothing launched",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    }
+  ]
+}

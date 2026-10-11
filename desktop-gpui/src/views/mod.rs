@@ -30,6 +30,8 @@
 pub mod a11y_spike;
 pub mod browser;
 pub mod capture;
+pub mod escape;
+pub mod layout;
 pub mod onboarding;
 pub mod settings;
 pub mod theming;
@@ -111,6 +113,16 @@ pub struct RouteEntry {
     /// analysis rightly sees no reader; the allow is scoped to that build.
     #[cfg_attr(not(feature = "automation"), allow(dead_code))]
     pub state: fn() -> ViewState,
+    /// The panel's height for this route, in points, before the shell's clamp and the
+    /// display's cut (`shell::panel::size_for`). Asked when the panel opens on the
+    /// route and when it switches to it, so the window fits the route's content (the
+    /// Tauri panel's `fitWindow`).
+    pub height: fn() -> f64,
+}
+
+/// The height of a route whose content fits the Tauri window's configured 140 pt.
+fn fixed_height() -> f64 {
+    crate::shell::panel::PANEL_HEIGHT
 }
 
 /// The router: one row per [`Route`] variant. `router_registers_four_views` proves
@@ -122,24 +134,28 @@ pub const TABLE: [RouteEntry; 4] = [
         dismiss: Dismiss::HideOnDeactivate,
         build: capture::build,
         state: capture::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Browser,
         dismiss: Dismiss::HideOnDeactivate,
         build: browser::build,
         state: browser::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Onboarding,
         dismiss: Dismiss::StayOpen,
         build: onboarding::build,
         state: onboarding::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Settings,
         dismiss: Dismiss::StayOpen,
         build: settings::build,
         state: settings::state,
+        height: settings::panel_height,
     },
 ];
 
@@ -154,30 +170,35 @@ pub const TABLE: [RouteEntry; 5] = [
         dismiss: Dismiss::HideOnDeactivate,
         build: capture::build,
         state: capture::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Browser,
         dismiss: Dismiss::HideOnDeactivate,
         build: browser::build,
         state: browser::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Onboarding,
         dismiss: Dismiss::StayOpen,
         build: onboarding::build,
         state: onboarding::state,
+        height: fixed_height,
     },
     RouteEntry {
         route: Route::Settings,
         dismiss: Dismiss::StayOpen,
         build: settings::build,
         state: settings::state,
+        height: settings::panel_height,
     },
     RouteEntry {
         route: Route::A11ySpike,
         dismiss: Dismiss::StayOpen,
         build: a11y_spike::build,
         state: a11y_spike::state,
+        height: fixed_height,
     },
 ];
 
@@ -195,6 +216,11 @@ pub fn entry_for(route: Route) -> &'static RouteEntry {
 /// once when the panel opens and again on every route switch.
 pub fn build_for(route: Route, cx: &mut App) -> AnyView {
     (entry_for(route).build)(cx)
+}
+
+/// `route`'s panel height (see [`RouteEntry::height`]).
+pub fn height_for(route: Route) -> f64 {
+    (entry_for(route).height)()
 }
 
 /// `route`'s current view-state, for Task 6's automation `state` verb.
