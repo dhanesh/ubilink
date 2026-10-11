@@ -14,16 +14,53 @@
 //! Measured, never declared: a value is whatever the layout produced this frame. A
 //! view clears its layout at the top of each render, so an element that is gone reads
 //! as missing (and a probe step that needs it fails) instead of a stale place.
+//!
+//! Automation builds only: nothing but the automation `state` verb reads the layout, so
+//! a release build gets the no-op [`Layout`] below. Its markers are `Empty` elements and
+//! no store, lock or JSON is built at prepaint.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 
 use gpui_kit::*;
-use serde_json::{json, Value};
+use serde_json::Value;
+
+#[cfg(feature = "automation")]
+use serde_json::json;
+#[cfg(feature = "automation")]
+use std::sync::Mutex;
 
 /// One view's measured elements, keyed by a name the probe uses as a path segment.
+#[cfg(feature = "automation")]
 pub struct Layout(Mutex<BTreeMap<&'static str, Value>>);
 
+/// Release builds: measures nothing (see the module doc).
+#[cfg(not(feature = "automation"))]
+pub struct Layout;
+
+#[cfg(not(feature = "automation"))]
+impl Layout {
+    pub const fn new() -> Self {
+        Layout
+    }
+
+    /// Always empty: nothing is measured.
+    #[allow(dead_code)]
+    pub fn get(&self) -> BTreeMap<String, Value> {
+        BTreeMap::new()
+    }
+
+    pub fn clear(&self) {}
+
+    pub fn bounds(&'static self, _key: &'static str) -> impl IntoElement {
+        Empty
+    }
+
+    pub fn font(&'static self, _key: &'static str) -> impl IntoElement {
+        Empty
+    }
+}
+
+#[cfg(feature = "automation")]
 impl Layout {
     pub const fn new() -> Self {
         Layout(Mutex::new(BTreeMap::new()))
@@ -86,11 +123,13 @@ impl Layout {
 }
 
 /// Points rounded to 1/100: layout floats compare equal when the layout is equal.
+#[cfg(feature = "automation")]
 fn round2(v: f32) -> f64 {
     (f64::from(v) * 100.0).round() / 100.0
 }
 
 /// `{x, y, w, h, bottom}` in window points, rounded to 1/100.
+#[cfg(feature = "automation")]
 pub fn rect_json(b: Bounds<Pixels>) -> Value {
     let (x, y) = (f32::from(b.origin.x), f32::from(b.origin.y));
     let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
@@ -103,7 +142,7 @@ pub fn rect_json(b: Bounds<Pixels>) -> Value {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "automation"))]
 mod tests {
     use super::{rect_json, Layout};
     use gpui_kit::{point, px, size, Bounds};
