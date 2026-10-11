@@ -40,8 +40,10 @@ ubilink-app = { path = "../app" }
 # gpui-kit, so a caret range could pull a mismatched set. Default features (`component`
 # + `assets`) are what the four views need: gpui-component does not feature-gate its
 # widgets, so list, virtual_list, input, switch, setting, dialog, notification and theme
-# all come with `component`, and `assets` supplies the icon set they render. The
-# font-kit text stack is switched on by gpui-kit itself (its gpui_platform dependency).
+# all come with `component`. `assets` compiles in the Lucide icon set, but icons render
+# only because main.rs registers it (`application().with_assets(gpui_kit::assets::Assets)`,
+# D26); without that call every gpui-component icon draws blank. The font-kit text
+# stack is switched on by gpui-kit itself (its gpui_platform dependency).
 gpui-kit = "=0.7.0"
 
 # Menu-bar icon and the global hotkey (U1), the jobs Tauri's tray + global-shortcut

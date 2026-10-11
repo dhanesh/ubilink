@@ -65,7 +65,9 @@ fn main() {
     // graph) from paths::data_dir(); automation builds skip the OS permission probe.
     app_state::init();
 
-    let app = gpui_kit::application();
+    // gpui-kit's icon set (Lucide), so gpui-component widgets that draw an icon (a
+    // Switch's tooltip, an Input's clear button, ...) find their SVGs.
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
     // `open Ubilink.app` while it runs: LaunchServices sends a reopen instead of
     // starting a second process. Show the panel, as the Tauri shell's tray "Show" did.
     app.on_reopen(|cx| shell::execute(Command::Open(Route::Capture), cx));
