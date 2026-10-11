@@ -1,0 +1,190 @@
+{
+  "description": "rc.4: Settings has a Permissions section above App adapters: an Automation row with its live status (exactly 'Not allowed' or 'Allowed', from the same report onboarding reads) and an 'Open permission setup…' button that Tab reaches and Enter activates, switching the same window to onboarding and opening nothing",
+  "requirement": "P2-settings-permissions (rc.4 parity, Tauri dist/index.html Settings › Permissions: set-auto, set-open-perms)",
+  "notes": [
+    "Tauri reference (c82d048^): dist/index.html's Settings › Permissions group (Automation, 'Read the active app's link.', a status pill, 'Open permission setup…' → openSetup → showOnboarding).",
+    "The status comes from the `permission` fixture (views/onboarding.rs check_permissions), read off the main thread when Settings opens. 'Allowed' is matched exactly so 'Not allowed' cannot satisfy it.",
+    "Round 1 (permissions-two-missing.json): status 'Not allowed'; Tab to the button, Enter: route onboarding in the same window and process, nothing opened (the button opens onboarding, not System Settings).",
+    "Round 2 restarts and loads permissions-all-granted.json after the replay: status exactly 'Allowed', no 'Not allowed'.",
+    "On main (before the fix) Settings has no Permissions section, so round 1 fails at its first see."
+  ],
+  "setup": {
+    "fixtures": {
+      "permission": "permissions-two-missing.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "not allowed: open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "not allowed: remember the panel window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid": "window_id"
+      }
+    },
+    {
+      "name": "not allowed: the Permissions section names Automation and its purpose",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Permissions",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "Automation",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "Read the active app's link."
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "not allowed: the Automation status reads Not allowed",
+      "see": {
+        "role": "Label",
+        "text": "Not allowed",
+        "exact": true
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "not allowed: the Permissions section sits above App adapters",
+      "see": {
+        "sequence": {
+          "role": "Label",
+          "texts": [
+            "Permissions",
+            "Not allowed",
+            "App adapters"
+          ],
+          "mode": "ordered"
+        }
+      },
+      "route": "settings",
+      "timeout_ms": 0
+    },
+    {
+      "name": "not allowed: Tab to Open permission setup",
+      "key_until": {
+        "role": "Button",
+        "text": "Open permission setup",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "not allowed: activate it",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "not allowed: the button routes to onboarding",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "not allowed: onboarding lists the Automation step",
+      "see": {
+        "role": "ListItem",
+        "text": "Automation",
+        "deep": true
+      },
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "not allowed: same window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "name": "not allowed: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "not allowed: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance for the allowed round",
+      "restart": true
+    },
+    {
+      "name": "allowed: load the all-granted report (after the restart's replay)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-all-granted.json"
+      }
+    },
+    {
+      "name": "allowed: open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "allowed: the Automation status reads Allowed, exactly",
+      "see": {
+        "role": "Label",
+        "text": "Allowed",
+        "exact": true
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "allowed: no Not allowed",
+      "see": {
+        "text": "Not allowed"
+      },
+      "absent": true,
+      "route": "settings",
+      "timeout_ms": 0
+    }
+  ]
+}

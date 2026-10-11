@@ -1,10 +1,11 @@
 {
-  "description": "Parity: Settings' action buttons are one height, as the Tauri panel's .set-btn were: Import and Reset… are as tall as Export, and so are the reset confirmation's Delete everything and Cancel.",
+  "description": "Parity: Settings' action buttons are one height, as the Tauri panel's .set-btn were: Import, Reset… and Open permission setup… are as tall as Export, and so are the reset confirmation's Delete everything and Cancel.",
   "requirement": "P2-settings-buttons (GPUI Phase 2b parity, Tauri ee80e70:dist/panel.css .set-btn, dist/index.html set-export/set-import/set-reset)",
   "notes": [
     "Heights are the buttons' measured bounds (view.layout.<name>_button.h, views/layout.rs), compared against Export's in the same state read.",
     "Export keeps its accent look (the R14 accent sample, theming.json); only the heights must agree.",
-    "Must fail on the instrumentation commit (before the fix) at 'Import is as tall as Export' (24 vs 28 pt)."
+    "Must fail on the instrumentation commit (before the fix) at 'Import is as tall as Export' (24 vs 28 pt).",
+    "rc.4: the Permissions section's 'Open permission setup…' (view.layout.permissions_button) is one of the action buttons and must match Export's height too."
   ],
   "steps": [
     {
@@ -48,6 +49,18 @@
       "retry_ms": 2000,
       "expect": {
         "view.layout.reset_button.h": {
+          "eq": {
+            "path": "view.layout.export_button.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "Open permission setup… is as tall as Export",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.permissions_button.h": {
           "eq": {
             "path": "view.layout.export_button.h"
           }
