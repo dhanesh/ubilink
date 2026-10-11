@@ -1,12 +1,13 @@
 {
-  "description": "rc.4: Settings has a Permissions section above App adapters: an Automation row with its live status (exactly 'Not allowed' or 'Allowed', from the same report onboarding reads) and an 'Open permission setup…' button that Tab reaches and Enter activates, switching the same window to onboarding and opening nothing",
+  "description": "rc.4: Settings has a Permissions section above App adapters: an Automation row with its live status (exactly 'Not allowed' or 'Allowed', from the same report onboarding reads) and an 'Open permission setup…' button that Tab reaches and Enter activates, switching the same window to onboarding and opening nothing; with Automation granted and Accessibility not, setup reads complete and never asks for Accessibility",
   "requirement": "P2-settings-permissions (rc.4 parity, Tauri dist/index.html Settings › Permissions: set-auto, set-open-perms)",
   "notes": [
     "Tauri reference (c82d048^): dist/index.html's Settings › Permissions group (Automation, 'Read the active app's link.', a status pill, 'Open permission setup…' → openSetup → showOnboarding).",
     "The status comes from the `permission` fixture (views/onboarding.rs check_permissions), read off the main thread when Settings opens. 'Allowed' is matched exactly so 'Not allowed' cannot satisfy it.",
     "Round 1 (permissions-two-missing.json): status 'Not allowed'; Tab to the button, Enter: route onboarding in the same window and process, nothing opened (the button opens onboarding, not System Settings).",
     "Round 2 restarts and loads permissions-all-granted.json after the replay: status exactly 'Allowed', no 'Not allowed'.",
-    "On main (before the fix) Settings has no Permissions section, so round 1 fails at its first see."
+    "On main (before the fix) Settings has no Permissions section, so round 1 fails at its first see.",
+    "Round 3 (review S1): Automation granted, Accessibility not (permissions-accessibility-missing.json). Opening setup from Settings must show setup complete: 'All set', no 'Not granted' step and no Accessibility step (no built-in adapter needs it; Bear captures through bearcli), and Re-check keeps saying 'All set'. Before the fix onboarding listed a 'Not granted' Accessibility step and its hint never reached 'All set'."
   ],
   "setup": {
     "fixtures": {
@@ -185,6 +186,108 @@
       "absent": true,
       "route": "settings",
       "timeout_ms": 0
+    },
+    {
+      "name": "automation only: fresh instance",
+      "restart": true
+    },
+    {
+      "name": "automation only: load the report (automation granted, accessibility not)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-accessibility-missing.json"
+      }
+    },
+    {
+      "name": "automation only: open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "automation only: the Automation status reads Allowed",
+      "see": {
+        "role": "Label",
+        "text": "Allowed",
+        "exact": true
+      },
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation only: Tab to Open permission setup",
+      "key_until": {
+        "role": "Button",
+        "text": "Open permission setup",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "automation only: activate it",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "automation only: onboarding opens",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "automation only: setup is complete (All set)",
+      "see": {
+        "role": "Label",
+        "text": "All set"
+      },
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation only: no step is left Not granted",
+      "see": {
+        "text": "Not granted"
+      },
+      "absent": true,
+      "route": "onboarding",
+      "timeout_ms": 0
+    },
+    {
+      "name": "automation only: onboarding does not ask for Accessibility",
+      "see": {
+        "text": "Accessibility"
+      },
+      "absent": true,
+      "route": "onboarding",
+      "timeout_ms": 0
+    },
+    {
+      "name": "automation only: R (Re-check)",
+      "call": "key",
+      "args": {
+        "keys": "r"
+      }
+    },
+    {
+      "name": "automation only: re-check says All set",
+      "see": {
+        "role": "Label",
+        "text": "All set"
+      },
+      "route": "onboarding",
+      "timeout_ms": 3000
     }
   ]
 }
