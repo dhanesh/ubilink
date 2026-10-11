@@ -31,6 +31,6 @@
     "danger": { "light": "#ee0005", "dark": "#ff4245", "aa": "light was systemRed #ff383c: 3.57:1 on #ffffff" },
     "dangerFill": { "light": "#ee0005", "dark": "#ee0005", "aa": "white text on systemRed is 3.57:1 (light #ff383c) / 3.43:1 (dark #ff4245)" },
     "success": { "light": "#24883d", "dark": "#30d158", "aa": "light was systemGreen #34c759: 2.22:1 on #ffffff" },
-    "warning": { "light": "#be5900", "dark": "#ff9230", "aa": "light was systemOrange #ff8d28: 2.27:1 on #ffffff" }
+    "warning": { "light": "#be5900", "dark": "#ff9230", "aa": "light was systemOrange #ff8d28: 2.31:1 on #ffffff" }
   }
 }

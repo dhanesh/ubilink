@@ -921,3 +921,143 @@ retired; the Tauri app survives only in history.
   records of their time and are not rewritten. `ee80e70` is the last commit with the
   Tauri app (`desktop/`, `dist/`); `6e913b2` is the last commit with `src-tauri/` and
   `ubilink-next`.
+
+## D26 — Native macOS 27 look: system font, Liquid Glass, system colours, live accent
+
+**Date:** 2026-10-11 · **Constraints:** U1 (feel native), WCAG AA · **Source:** the user's
+macOS 27 instruction (2026-10-11), branch `factory/ubilink-theme`
+
+Ubilink should look and feel as much like a first-party macOS 27 app as it can. A
+Graphical theme ("Ubilink", graphicalui.com) was adopted first. Three of its picks are
+**superseded by the user's macOS 27 instruction (2026-10-11)**:
+
+| Graphical-theme pick | Now |
+|---|---|
+| Inter (embedded, weights 500/600) | the system font, `.SystemUIFont` (SF), at macOS text-style sizes; no font files |
+| an opaque panel | Liquid Glass (NSGlassEffectView) around an opaque card |
+| black/white primary buttons and a red (#fc032d) focus/accent | the user's live system accent colour |
+
+The Graphical guide stays in the repo (`GUI.md`, `gui/`, `.agents/skills/`) for its
+method (inventory, map by semantic role, convert shared components, audit), not its
+values. `CLAUDE.md` says so.
+
+**Who decided.** The font, the radii and sizes, and the colour source were scored with
+Jev (TypeSafe System One). The material and the accent went through a reasoning pass:
+glass with an opaque card, so contrast and the colour probes stay deterministic; the
+accent first as fixed #007aff, then, on the user's update, the live system accent.
+
+### What
+
+- **Tokens.** `design/ubilink-tokens.json` is still the one source. It holds:
+  - AppKit's system colours as macOS 27.0.1 reports them (`NSColor` in sRGB, light and
+    dark);
+  - the macOS text styles, used by role: DISPLAY = title2 17, TITLE = headline 13 bold,
+    ROW = body 13, META = callout 12; the base stays 13, macOS body and the
+    gpui-component rem;
+  - the 4 pt spacing grid;
+  - concentric radii: panel 18, card 14 (18 − the 4 pt frame), controls and rows 6;
+  - control and row heights: 24 pt each.
+
+  `theme/convert.rs` maps the tokens to gpui-component roles (the table is in
+  `theme/mod.rs`).
+- **Material.**
+  - On macOS 26+ an NSGlassEffectView (radius 18) is added as a sibling below GPUI's
+    view, where GPUI's NSVisualEffectView was, and that view is hidden.
+  - On older systems the vibrancy view stays.
+  - Each view paints an opaque card in windowBackgroundColor (#ffffff / #1e1e1e),
+    inset 4 pt, so the glass shows as the panel's rim.
+  - The shell adds the frame to the window size, so a view's height is still its card's.
+  - `shell.material` reports `"glass"` or `"vibrancy"`, read back from the live window.
+- **Accent.** `theme/accent.rs`:
+  - reads `controlAccentColor`, plus `selectedContentBackgroundColor` and
+    `keyboardFocusIndicatorColor` under Aqua and DarkAqua, in sRGB;
+  - re-reads them on `NSSystemColorsDidChangeNotification` and the distributed
+    `AppleColorPreferencesChangedNotification` / `AppleAquaColorVariantChanged`, and
+    re-themes open windows in place;
+  - "Multicolor" reports #007aff, as the default does.
+
+  The derivation (`accent::derive`) is pure and unit-tested for all eight macOS
+  accents in both modes:
+
+  | Role | Rule |
+  |---|---|
+  | Primary button | white text if it reaches 4.5:1; else the fill darkened by up to 0.12 HSL lightness; else black text on the accent (orange, yellow), as macOS does |
+  | Checked switch, caret | the accent, moved to 3:1 on the card only if needed |
+  | Focus ring | AppKit's colour, its alpha raised to 3:1 |
+  | Selected row | AppKit's selection fill with white text |
+
+  Automation builds may take an `accent` fixture, through the same re-theme path;
+  release builds read only the system.
+- **Controls.** `views/theming.rs` has one constructor per control:
+
+  | Constructor | Look |
+  |---|---|
+  | primary button | accent fill |
+  | push button | `secondary`: a light control fill, no stroke |
+  | destructive button | filled red, white text |
+  | text field | 24 pt, 13 pt text |
+  | switch | gpui-component `small`, 28×16, the closest to AppKit's small switch |
+
+  List rows are 24 pt with an inset, rounded selection drawn by the view.
+  gpui-component caps `list_active` at 20% alpha, so it is made transparent.
+  Settings' Reset… becomes a plain push button, because it only asks; Delete everything
+  is the destructive one.
+- **Icons.** `main.rs` registers `gpui_kit::assets::Assets`. Before this, every
+  gpui-component icon drew blank. No icons were added to views.
+
+### Deviations from AppKit's values, and why
+
+| Value | AppKit | Used | Why |
+|---|---|---|---|
+| secondaryLabel, light | black 0.50 (4.00:1) | black 0.54 (4.61:1) | AA 4.5:1 for 12–13 pt text |
+| systemRed as text, light | #ff383c (3.57:1) | #ee0005 (4.53:1) | AA |
+| destructive button fill, both modes | systemRed (white text 3.57 / 3.43:1) | #ee0005 (4.53:1) | AA |
+| systemGreen as text, light | #34c759 (2.22:1) | #24883d (4.50:1) | AA |
+| systemOrange as text, light | #ff8d28 (2.31:1) | #be5900 (4.55:1) | AA (`warning`; no view uses it yet) |
+| primary button fill (blue accent) | controlAccentColor #007aff (white 4.02:1) | #0072ef (4.51:1) | AA; the switch keeps #007aff (4.02:1 ≥ 3:1) |
+| focus ring | keyboardFocusIndicatorColor at 0.50 (2.16 / 2.60:1) | alpha raised to 3:1 (opaque accent for a fixture) | AA 3:1 non-text |
+| text field edge, switch-off track | separator-like, about 0.10 (1.26 / 1.36:1) | black 0.42 / white 0.34 (3.03 / 3.13:1) | AA 3:1 non-text; heavier than native |
+| separators | separatorColor 0.10 | unchanged (1.26 / 1.36:1) | decorative hairlines, not control boundaries (WCAG 1.4.11 does not apply); views draw none of their own |
+| primary button padding | about 12 pt | 32 pt a side | the theming probe needs 24 pt of solid fill beside the label |
+| switch size | NSSwitch small | gpui-component small (28×16) | the nearest size gpui-component offers |
+| letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
+| URIs | — | SF Mono, META size | identifiers; macOS has no text style for them |
+
+### AA (final tokens, blue accent; `scratchpad` contrast script)
+
+Every text pair is at least 4.5:1 and every control boundary or state mark at least 3:1,
+in both modes. The exceptions are decorative separators (above) and disabled controls
+(WCAG exempts them).
+
+| Pair | Light | Dark |
+|---|---|---|
+| label on card | 15.13 | 12.27 |
+| secondaryLabel on card | 4.61 | 5.92 |
+| secondaryLabel on underPage | 4.52 | (label 11.06) |
+| danger text | 4.53 | 4.86 |
+| success text | 4.50 | 8.25 |
+| warning text | 4.55 | 7.47 |
+| white on primary button #0072ef | 4.51 | 4.51 |
+| label on push button | 13.62 | 8.26 |
+| label on push button, hover | 12.75 | 6.86 |
+| white on destructive #ee0005 | 4.53 | 4.53 |
+| white on selected row (live #0064e1 / #0059d1) | 5.37 | 6.27 |
+| text field edge on card | 3.03 | 3.13 |
+| switch off track on card | 3.03 | 3.13 |
+| switch on (#007aff) on card | 4.02 | 4.15 |
+| switch thumb on the on track | 4.02 | 4.02 |
+| focus ring on card | 4.02 | 4.15 |
+| orange accent: black on #f7821b button | 8.16 | 8.16 |
+| orange accent: switch #eb7208 / #f7821b on card | 3.02 | 6.48 |
+
+### Gaps and follow-ups
+
+- **Icons in views.** The icon set is now registered, but no view uses an icon yet.
+- **SF optical tracking and per-style line heights.** GPUI exposes neither.
+- **Not exercised live.** The accent notification path is wired but was not triggered
+  by changing System Settings during the run. The probe drives the same re-theme path
+  through the `accent` fixture.
+- **Selected-row tint when the window is not key.** AppKit's
+  unemphasized selection colour is not used; the panel is key while shown.
+- **Shadow.** The glass and its window shadow are AppKit's; no extra card shadow is
+  drawn.
