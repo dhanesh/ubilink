@@ -421,11 +421,20 @@ Phase 2b view contract additions:
   onboarding open at 140 pt. Settings opens at its content height
   (`settings::content_height`). Capture refits to its backlinks when the capture lands
   (`capture::content_height`, at most 8 rows). Settings refits when the reset question
-  opens or closes. The shell clamps every height to 96..900, keeps the panel's top,
+  opens or closes, and when the launch-at-login explanation (or error) line appears or
+  goes (Settings reserves up to three 16 pt lines for it). The shell clamps every height to 96..900, keeps the panel's top,
   cuts the height to the display's usable area, and moves the panel up rather than off
   the bottom (`placement::fit_on`). A route switch resizes the same window in place;
   it is never reopened. The width stays 640.
-- **Layout** (`state.view.layout`, settings and capture): see the table below.
+- **Layout** (`state.view.layout`, settings and capture; automation builds only): see
+  the table below. What each value measures, and its limits:
+  - A button's height is its wrapper's: a `div` whose only child is the button,
+    with no padding, so the two heights are equal. gpui-component's `Button` puts
+    its children in an inner content box, so a marker inside it would measure that
+    box, not the button.
+  - A text size is the size GPUI resolves on the element holding the text (the
+    label's `div`, the status's `div` around its `text!`). The marker reads the text
+    style that element's children inherit. It is not read from rendered glyphs.
 
 ## Phase 1 view-state contract
 

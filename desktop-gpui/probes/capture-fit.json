@@ -47,7 +47,9 @@
       "retry_ms": 2000,
       "expect": {
         "view.layout.last_backlink.y": {
-          "ge": 0
+          "ge": {
+            "path": "view.layout.backlinks_box.y"
+          }
         },
         "view.layout.last_backlink.bottom": {
           "le": {
@@ -105,7 +107,9 @@
       "retry_ms": 2000,
       "expect": {
         "view.layout.last_backlink.y": {
-          "ge": 0
+          "ge": {
+            "path": "view.layout.backlinks_box.y"
+          }
         },
         "view.layout.last_backlink.bottom": {
           "le": {

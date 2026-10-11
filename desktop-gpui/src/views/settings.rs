@@ -140,9 +140,10 @@ const HEADER_H: Pixels = px(26.);
 /// The reset question's row: two 18 pt lines beside its buttons.
 const CONFIRM_H: Pixels = px(40.);
 const CONFIRM_LINE_H: Pixels = px(18.);
-/// The launch-at-login row, and with an explanation (two 16 pt lines) beside it.
+/// The launch-at-login row, and with an explanation beside it: up to three 16 pt
+/// lines (the not-found explanation wraps to three beside the switch and status).
 const LOGIN_H: Pixels = px(20.);
-const LOGIN_EXPLAINED_H: Pixels = px(34.);
+const LOGIN_EXPLAINED_H: Pixels = px(50.);
 const EXPLANATION_LINE_H: Pixels = px(16.);
 /// One adapter switch, and the grid's gap between them.
 const ADAPTER_W: Pixels = px(140.);
@@ -1147,9 +1148,9 @@ mod tests {
         assert_eq!(h(4, false, false), 124.0 + 16.0);
         assert_eq!(h(5, false, false), 124.0 + 16.0 + 8.0 + 16.0);
         assert_eq!(h(8, false, false), h(5, false, false));
-        // The reset question adds its row and a gap; an explanation a second line.
+        // The reset question adds its row and a gap; an explanation up to three lines.
         assert_eq!(h(10, true, false), 188.0 + 40.0 + 4.0);
-        assert_eq!(h(10, false, true), 188.0 + 14.0);
+        assert_eq!(h(10, false, true), 188.0 + 30.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
     }

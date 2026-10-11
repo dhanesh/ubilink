@@ -46,9 +46,10 @@ Expected: every scenario exits 0 and reports `verdict` `"PASS"`.
 
 ## Proof
 
-- **settings-fit.** The last adapter switch ends inside the grid's scroll box, and
-  the box ends inside the window. This holds when shown, while the reset question is
-  open, and after it closes. `winframe: state` keeps the window on its display.
+- **settings-fit.** The last adapter switch lies inside the grid's scroll box (top
+  and bottom), and the box ends inside the window. This holds when shown, while the
+  reset question is open, and after it closes. Once the question closes, the panel is
+  back to its shown height. `winframe: state` keeps the window on its display.
 - **settings-buttons.** Import, Reset…, Delete everything and Cancel each have
   Export's measured height.
 - **settings-login-text.** The status (`Not registered`, then `Enabled`) has the
@@ -81,8 +82,16 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
 
 - **Measured, not declared.** A value is whatever the layout produced that frame. An
   element that is not drawn reads as missing, and a step needing it fails.
-- **Refits are async.** A refit (the reset question, a capture landing) sets the
-  window frame from a foreground task, so read layout with `retry_ms`.
+- **Refits are async.** These set the window frame from a foreground task, so read
+  layout with `retry_ms`:
+  - the reset question opening or closing;
+  - the launch-at-login explanation (or error) line appearing or going;
+  - a capture landing.
+- **Automation builds only.** `state.view.layout` is measured in automation builds
+  only. A release build's markers are no-ops.
+- **Measurement limits.** A button's height is its wrapper's, and the wrapper holds
+  nothing but the button. A text size is the one GPUI resolves on the element holding
+  the text, not one read from glyphs (probes/README.md).
 - **The settings height depends on login state.** It includes the login row's second
   line whenever there is an explanation or an error. Without a `login_item` fixture
   that line is an error, so the panel is 14 pt taller.

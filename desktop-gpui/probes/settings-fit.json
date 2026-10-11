@@ -1,5 +1,5 @@
 {
-  "description": "Parity: the panel fits Settings' content. With the 10 adapters of fixtures/adapters.json (3 rows of 4), the last adapter switch lies inside the window, also while the reset confirmation adds its row, and the window stays on its display.",
+  "description": "Parity: the panel fits Settings' content. With the 10 adapters of fixtures/adapters.json (3 rows of 4), the last adapter switch lies inside its scroll box and the box inside the window, also while the reset confirmation adds its row; once the question closes the panel shrinks back to its shown height; and the window stays on its display.",
   "requirement": "P2-settings-fit (GPUI Phase 2b parity, Tauri ee80e70:desktop/src/main.rs resize_panel + dist/panel.js fitWindow)",
   "notes": [
     "The a11y dump carries no bounds, so the view reports measured layout (views/layout.rs), all in window points from one frame: view.layout.last_adapter (the last switch), view.layout.adapters_box (the grid's scroll box, which clips what it does not show) and view.layout.viewport (the window's content size). A {\"path\": ...} operand compares them (README, Expectations): the last switch ends inside the scroll box, and the box ends inside the window.",
@@ -36,7 +36,9 @@
       "retry_ms": 2000,
       "expect": {
         "view.layout.last_adapter.y": {
-          "ge": 0
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
         },
         "view.layout.last_adapter.bottom": {
           "le": {
@@ -48,6 +50,9 @@
             "path": "view.layout.viewport.h"
           }
         }
+      },
+      "save": {
+        "shown_h": "view.layout.viewport.h"
       }
     },
     {
@@ -86,7 +91,9 @@
       "retry_ms": 2000,
       "expect": {
         "view.layout.last_adapter.y": {
-          "ge": 0
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
         },
         "view.layout.last_adapter.bottom": {
           "le": {
@@ -121,12 +128,14 @@
       "timeout_ms": 2000
     },
     {
-      "name": "closed again: the last adapter switch is fully visible (inside its scroll box, inside the window)",
+      "name": "closed again: the last adapter switch is fully visible and the panel is back to its shown height",
       "call": "state",
       "retry_ms": 2000,
       "expect": {
         "view.layout.last_adapter.y": {
-          "ge": 0
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
         },
         "view.layout.last_adapter.bottom": {
           "le": {
@@ -137,6 +146,9 @@
           "le": {
             "path": "view.layout.viewport.h"
           }
+        },
+        "view.layout.viewport.h": {
+          "saved": "shown_h"
         }
       }
     }

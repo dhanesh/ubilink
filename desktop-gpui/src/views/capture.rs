@@ -1049,8 +1049,6 @@ mod tests {
         assert!(parse_fixture("not json").is_err());
     }
 
-    /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
-    /// and the panel is gone well inside 3 s of the key.
     /// Parity (Tauri `fitWindow`): the panel shows every backlink row, up to
     /// MAX_ROWS, past which the list scrolls; without backlinks it stays 140 pt.
     #[test]
@@ -1064,6 +1062,8 @@ mod tests {
         assert_eq!(content_height(MAX_ROWS + 5), content_height(MAX_ROWS));
     }
 
+    /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
+    /// and the panel is gone well inside 3 s of the key.
     #[test]
     fn copied_hold_meets_the_contract() {
         assert!(COPIED_HOLD >= Duration::from_secs(1));
