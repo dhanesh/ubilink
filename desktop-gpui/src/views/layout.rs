@@ -9,7 +9,9 @@
 //! - [`Layout::bounds`]: the parent's laid-out bounds in window points
 //!   (`{x, y, w, h, bottom}`), plus the window's `viewport` (`{w, h}`) at that frame;
 //! - [`Layout::font`]: the text size the parent's text actually resolves to
-//!   (`{font_px}`), read from the text style GPUI applies to the parent's children.
+//!   (`{font_px}`), read from the text style GPUI applies to the parent's children;
+//! - [`Layout::text_field`]: a text field's bounds, the box its text is clipped to and
+//!   the line box its `InputState` laid the text out in this frame.
 //!
 //! Measured, never declared: a value is whatever the layout produced this frame. A
 //! view clears its layout at the top of each render, so an element that is gone reads
@@ -21,6 +23,7 @@
 
 use std::collections::BTreeMap;
 
+use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use serde_json::Value;
 
@@ -56,6 +59,15 @@ impl Layout {
     }
 
     pub fn font(&'static self, _key: &'static str) -> impl IntoElement {
+        Empty
+    }
+
+    pub fn text_field(
+        &'static self,
+        _key: &'static str,
+        _state: &Entity<InputState>,
+        _inset_y: Pixels,
+    ) -> impl IntoElement {
         Empty
     }
 }
@@ -119,6 +131,52 @@ impl Layout {
         )
         .absolute()
         .size_0()
+    }
+
+    /// A zero-paint element laid over a text field's wrapper (which must be
+    /// `relative()` and hold only the field) that records, as `key`:
+    ///
+    /// - `field`: the field's laid-out bounds (the wrapper's);
+    /// - `content`: those bounds less `inset_y` top and bottom (the field's border and
+    ///   vertical padding, `theming::TEXT_FIELD_INSET_Y`): the box the single-line
+    ///   text is clipped to;
+    /// - `text`: the text line box the field's `InputState` laid out this frame (its
+    ///   `input_bounds`, one line height tall), which the glyphs, descenders
+    ///   included, are drawn in;
+    /// - `centre_offset`: how far the line box's vertical centre is from the field's.
+    ///
+    /// Recorded at paint, after the field has painted and stored this frame's line box.
+    pub fn text_field(
+        &'static self,
+        key: &'static str,
+        state: &Entity<InputState>,
+        inset_y: Pixels,
+    ) -> impl IntoElement {
+        let state = state.clone();
+        canvas(
+            |_, _, _| {},
+            move |bounds, _, _, cx| {
+                let text = state.read(cx).input_bounds();
+                let content = Bounds::from_corners(
+                    point(bounds.left(), bounds.top() + inset_y),
+                    point(bounds.right(), bounds.bottom() - inset_y),
+                );
+                let centre = |b: Bounds<Pixels>| f32::from(b.top() + b.size.height / 2.);
+                self.set(
+                    key,
+                    json!({
+                        "field": rect_json(bounds),
+                        "content": rect_json(content),
+                        "text": rect_json(text),
+                        "centre_offset": round2((centre(text) - centre(bounds)).abs()),
+                    }),
+                );
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     }
 }
 

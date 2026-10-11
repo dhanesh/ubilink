@@ -60,6 +60,7 @@
 //! view's construction to just after its first frame's present, the same
 //! next-frame-then-defer timing `shell/panel.rs` uses for the hotkey.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -75,6 +76,7 @@ use serde::{Deserialize, Serialize};
 use ubilink_core::BrowseEntry;
 
 use super::escape::{self, EscapeAction, EscapeState};
+use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
@@ -217,10 +219,18 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
+    /// Measured places (`views::layout`): `viewport`, and `filter` (the filter
+    /// field's `field` bounds, the `content` box its text is clipped to and the
+    /// `text` line box it lays its text out in).
+    #[serde(default)]
+    pub layout: BTreeMap<String, serde_json::Value>,
 }
 
 /// The newest browser view's theme sample regions (R14), written at prepaint.
 static SAMPLES: Samples = Samples::new();
+
+/// The newest browser view's measured layout (`views::layout`), written at paint.
+static LAYOUT: Layout = Layout::new();
 
 /// The open button's label: opens the selected link, as Enter does (R6).
 pub const OPEN_BUTTON: &str = "Open";
@@ -238,6 +248,7 @@ pub fn state() -> super::ViewState {
         filter_samples: timings.len(),
         filter_p99_ms: p99(&timings),
         theme_samples: SAMPLES.get(),
+        layout: LAYOUT.get(),
     })
 }
 
@@ -959,6 +970,7 @@ impl Render for BrowserView {
         #[cfg(feature = "automation")]
         self.time_first_frame(window, cx);
         SAMPLES.clear();
+        LAYOUT.clear();
         self.appearance.ensure(window, cx);
 
         let list = self
@@ -1108,7 +1120,13 @@ impl Render for BrowserView {
                             .w(FILTER_W)
                             .flex_shrink(1.)
                             .min_w_0()
-                            .child(theming::text_field(&filter)),
+                            .relative()
+                            .child(theming::text_field(&filter))
+                            .child(LAYOUT.text_field(
+                                "filter",
+                                &filter,
+                                theming::text_field_inset_y(),
+                            )),
                     )
                     .child(
                         div()
