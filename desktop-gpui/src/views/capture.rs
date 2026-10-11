@@ -41,7 +41,7 @@ use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
-use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
+use crate::theme::tokens::{font_size, font_weight, radius, size, spacing, MONO_FONT_FAMILY};
 use ubilink_core::{LinkView, PanelBackend, PanelView};
 
 /// The capturing indicator's text (the Tauri panel's wording, `dist/panel.js`).
@@ -64,9 +64,10 @@ const GAP: Pixels = spacing::S1;
 /// The one-line name and URI above the backlinks.
 const BODY_LINE_H: Pixels = px(20.);
 const HEADING_LINE_H: Pixels = px(16.);
-const ROW_LINE_H: Pixels = px(18.);
-/// Between the heading and the list, and between rows.
-const ROW_GAP: Pixels = px(2.);
+/// One backlink row: a macOS list row (D26), its selection inset and rounded.
+const ROW_H: Pixels = size::ROW;
+/// Between the heading and the list (rows sit edge to edge, as in a macOS list).
+const HEADING_GAP: Pixels = spacing::S1;
 /// The most backlink rows the panel grows to show; more scroll.
 pub const MAX_ROWS: usize = 8;
 
@@ -80,9 +81,10 @@ pub fn content_height(backlinks: usize) -> f64 {
     }
     let pt = |p: Pixels| f64::from(f32::from(p));
     let rows = backlinks.min(MAX_ROWS) as f64;
-    let list = rows * pt(ROW_LINE_H) + (rows - 1.0) * pt(ROW_GAP);
-    let section = pt(HEADING_LINE_H) + pt(ROW_GAP) + list;
-    let h = 2.0 * pt(PAD_Y) + pt(theming::ACCENT_H) + pt(GAP) + pt(BODY_LINE_H) + pt(GAP) + section;
+    let list = rows * pt(ROW_H);
+    let section = pt(HEADING_LINE_H) + pt(HEADING_GAP) + list;
+    let h =
+        2.0 * pt(PAD_Y) + pt(theming::CONTROL_H) + pt(GAP) + pt(BODY_LINE_H) + pt(GAP) + section;
     h.max(base)
 }
 
@@ -620,7 +622,8 @@ fn backlinks_section(
     cx: &mut Context<CaptureView>,
 ) -> AnyElement {
     let (foreground, muted) = (theming::primary_text(cx), cx.theme().muted_foreground);
-    let focus_bg = cx.theme().list_active;
+    // A focused row is the selected row: macOS's selection fill, with its text colour.
+    let (selected_bg, selected_text) = theming::selection(cx);
     let count = backlinks.len();
     let rows = backlinks
         .iter()
@@ -634,14 +637,15 @@ fn backlinks_section(
                 .track_focus(handle)
                 .on_click(cx.listener(move |this, _, _, cx| this.open_backlink(ix, cx)))
                 .cursor_pointer()
-                .rounded(radius::CARD)
-                .when(focused, |d| d.bg(focus_bg))
+                .h(ROW_H)
+                .px(spacing::S2)
+                .rounded(radius::ROW)
+                .when(focused, |d| d.bg(selected_bg))
                 .aria_position_in_set(ix + 1)
                 .aria_size_of_set(count)
                 .flex()
                 .flex_row()
-                .items_baseline()
-                .line_height(ROW_LINE_H)
+                .items_center()
                 .gap(spacing::S3)
                 .w_full()
                 .min_w_0()
@@ -653,7 +657,7 @@ fn backlinks_section(
                         .flex_shrink_0()
                         .max_w(relative(0.45))
                         .text_size(font_size::ROW)
-                        .text_color(foreground)
+                        .text_color(if focused { selected_text } else { foreground })
                         .truncate()
                         .child(text!(
                             id = SharedString::from(format!("backlink-{ix}-name")),
@@ -666,7 +670,7 @@ fn backlinks_section(
                         .min_w_0()
                         .text_size(font_size::META)
                         .font_family(MONO_FONT_FAMILY)
-                        .text_color(muted)
+                        .text_color(if focused { selected_text } else { muted })
                         .truncate()
                         .child(text!(
                             id = SharedString::from(format!("backlink-{ix}-uri")),
@@ -679,7 +683,7 @@ fn backlinks_section(
         .flex_col()
         .flex_1()
         .min_h_0()
-        .gap(ROW_GAP)
+        .gap(HEADING_GAP)
         .child(
             div()
                 .text_size(font_size::META)
@@ -702,7 +706,6 @@ fn backlinks_section(
                         .role(Role::List)
                         .flex()
                         .flex_col()
-                        .gap(ROW_GAP)
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
@@ -756,6 +759,7 @@ impl Render for CaptureView {
         let body = match &self.phase {
             Phase::Capturing => div()
                 .text_size(font_size::TITLE)
+                .font_weight(font_weight::HEADLINE)
                 .text_color(theme.muted_foreground)
                 .child(text!(CAPTURING_TEXT))
                 .into_any_element(),
@@ -774,6 +778,7 @@ impl Render for CaptureView {
                         .max_w(relative(0.5))
                         .relative()
                         .text_size(font_size::TITLE)
+                        .font_weight(font_weight::HEADLINE)
                         .text_color(foreground)
                         .truncate()
                         .child(text!(name.clone()))
@@ -850,13 +855,13 @@ impl Render for CaptureView {
                 d.gap(GAP).px(spacing::S5).py(PAD_Y)
             })
             .rounded(radius::CARD)
-            // The opaque token surface (R14): the panel's blur stays behind the card.
+            // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
             // Header: the title, then the copy button.
             // Fixed height, so the content doesn't jump when the capture lands.
             .child(
                 div()
-                    .h(theming::ACCENT_H)
+                    .h(theming::CONTROL_H)
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
@@ -879,14 +884,14 @@ impl Render for CaptureView {
                     // Always there (the header never shifts when the capture lands);
                     // usable, and accent-filled, once there is a link to copy.
                     .map(|d| {
-                        let button = theming::accent_button("capture-copy")
+                        let button = theming::primary_button("capture-copy")
                             .label(COPY_BUTTON)
                             .disabled(!captured)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.copy(cx);
                             }));
                         if captured {
-                            d.child(SAMPLES.mark(Sample::Accent, button))
+                            d.child(SAMPLES.mark(Sample::Primary, button))
                         } else {
                             d.child(button)
                         }
@@ -1054,11 +1059,12 @@ mod tests {
     #[test]
     fn capture_height_fits_its_backlinks() {
         assert_eq!(content_height(0), 140.0);
-        // pad 8+8, header 28, gap 4, name line 20, gap 4, heading 16, gap 2: 90 + rows.
+        // pad 8+8, header 24, gap 4, name line 20, gap 4, heading 16, gap 4: 88 + rows
+        // of 24 (D26: macOS list rows).
         assert_eq!(content_height(1), 140.0, "one row fits the old panel");
-        assert_eq!(content_height(3), 90.0 + 3.0 * 18.0 + 2.0 * 2.0);
+        assert_eq!(content_height(3), 88.0 + 3.0 * 24.0);
         assert!(content_height(3) > 140.0, "the third row used to be cut");
-        assert_eq!(content_height(4), 90.0 + 4.0 * 18.0 + 3.0 * 2.0);
+        assert_eq!(content_height(4), 88.0 + 4.0 * 24.0);
         assert_eq!(content_height(MAX_ROWS + 5), content_height(MAX_ROWS));
     }
 

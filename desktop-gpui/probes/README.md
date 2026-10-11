@@ -106,7 +106,7 @@ in the `opened` sink. File dialogs take fixture paths (`load_fixture`).
   before launch, the same way the `seed_graph` step does (below).
 - `setup.fixtures` sends `load_fixture {kind, path}` after launch. Relative paths
   resolve against the instance's fixture copy. The kinds are `capture`,
-  `permission`, `graph_dir`, `export_path`, `import_path` and `login_item`
+  `permission`, `graph_dir`, `export_path`, `import_path`, `login_item` and `accent`
   (`desktop-gpui/src/automation/protocol.rs`).
 - Unknown top-level keys, unknown step types and unknown step options are
   **scenario errors** (exit 2). A typo can never make a step pass.
@@ -334,6 +334,9 @@ Phase 0, because Phase 1 may change neither this directory nor `scripts/probe.py
 | | | `onboarding` | R9 | `theming` | R14 |
 | | | | | `performance` | R15 |
 
+`accent.json` (D26, the live system accent) is not one of Phase 1's fifteen; it runs
+by name like the parity scenarios.
+
 ```
 python3 scripts/probe.py list                                   # run all 15, print name / req / result
 python3 scripts/probe.py list --expect 15 --expect-failing 15   # Phase 0: all 15 must be product FAILs
@@ -473,7 +476,7 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
 | settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
 | capture | `layout` | object | as settings: `viewport`, and with backlinks `backlinks_box` and `last_backlink` | capture-fit |
-| every view | `theme_samples` | object | `{surface, text, accent}`, each `{x, y, w, h}` in window points from the panel's top-left: a region of an opaque surface the view paints with `color.uiBg`'s RGB at full opacity, a region around a run of primary text (`color.text1`) drawn on that surface, and a region inside a control filled with `color.accent`; each at least 24 × 24 pt (the probe fails a smaller one) | theming |
+| every view | `theme_samples` | object | `{surface, text, primary, accent}`, each `{x, y, w, h}` in window points from the panel's top-left, or `null` while not drawn: a region of the opaque card the view paints in `color.windowBackground`, a region around a run of primary text (`color.label`) drawn on that card, a region inside the primary (default) button's fill clear of its label and corners, and (Settings only) a region around a checked, enabled Switch, whose track is the system accent; each at least 24 × 24 pt (the probe fails a smaller one) | theming, accent |
 
 The browser's first-frame time is not a view-state field: the browser records a
 `view_first_frame` sample (route `"browser"`, timed at present) in the metrics ring
@@ -553,10 +556,25 @@ sets `status` to the file's `on_register`, unregister to `not_registered`, and b
 append their name to `calls`, which the scenario reads back with `file` steps. The
 view must not cache the status across shows or call SMAppService when the seam
 answers.
-- **Every view (R14).** Colours follow `set_appearance` live, without a new window or
-  process. Expected samples (ΔE ≤ 3): light surface `#fafafc`, text `#1e1e1e`
-  (text1 over that surface), accent `#007aff`; dark surface `#1c1c1e`, text `#f6f6f6`,
-  accent `#0a84ff`.
+- **Every view (R14, D26).** Colours follow `set_appearance` live, without a new window or
+  process. Expected samples (ΔE ≤ 3), with the accent pinned to `#007aff` by
+  `accent-blue.json`: light card `#ffffff`, text `#262626` (label over the card),
+  primary button `#0072ef`, checked switch `#007aff`; dark card `#1e1e1e`, text
+  `#dddddd`, primary button `#0072ef`, checked switch `#007aff`.
+- **Accent (D26).** `appearance.accent` (in `state`) is the accent the theme was built
+  from, `#rrggbb`. Automation builds take it from the `accent` fixture when one is
+  loaded (loading one re-themes open windows in place, the path the system's
+  colour-change notification takes); otherwise, as release builds always do, from
+  `NSColor.controlAccentColor`. `appearance.primary` and `appearance.button_primary`
+  are the live theme's colours (`#rrggbb`); `appearance.accent_refreshes` counts
+  accent re-themes. The automation-only verb `post_colors_changed` posts
+  `NSSystemColorsDidChangeNotification` in-process, so the observer → shell inbox →
+  re-theme path runs (`accent.json`).
+- **Material (D26).** `shell.material` is what sits behind the panel's content, read
+  back from the live window: `"glass"` (NSGlassEffectView, macOS 26+), `"vibrancy"`
+  (NSVisualEffectView, older systems) or `"unknown"` before a panel is read.
+  `shell.json`, `panel-hotkey.json` and `performance.json` assert `"glass"`, so they
+  need macOS 26 or later; on an older Mac those steps fail by design.
 
 ## PERFORMANCE.md format
 

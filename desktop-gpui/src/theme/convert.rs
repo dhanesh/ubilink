@@ -1,93 +1,78 @@
-// Satisfies: R12 (GPUI Phase 0 — ubilink's design tokens become gpui-component
-// ThemeConfigs). See desktop-gpui/src/theme/mod.rs for the mapping table this
-// module implements.
+// Satisfies: R12 (design tokens become gpui-component ThemeConfigs), D26 (native macOS
+// 27). See desktop-gpui/src/theme/mod.rs for the mapping table this module implements.
 //
-// `design/ubilink-tokens.json` is embedded at compile time (`include_str!`)
-// rather than read at start-up: Task 12's brief requires the shell to have no
-// runtime file dependency on `design/` (Phase 0's binding constraint was not to
-// touch `design/` or the Tauri web panel that also rendered it).
+// `design/ubilink-tokens.json` is embedded at compile time (`include_str!`) so the
+// shipped binary has no runtime file dependency on `design/`.
 
 use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
 use gpui_kit::SharedString;
 use serde::Deserialize;
 
-/// The source of truth (`design/ubilink-tokens.json`, which the deleted Tauri web
-/// panel also rendered as `dist/tokens.css`), embedded so the GPUI binary ships with
-/// no runtime dependency on `design/`.
+use super::accent::{Rgb, Roles};
+
+/// The source of truth, embedded so the GPUI binary ships with no runtime dependency
+/// on `design/`.
 const RAW_TOKENS: &str = include_str!("../../../design/ubilink-tokens.json");
 
-/// Mirrors `design/ubilink-tokens.json`'s shape. Only the fields Task 12 (and
-/// the `tokens` module's constants) consume are typed; `$meta`, `directions`
-/// and `sourceIcons` are Phase 1+ concerns (direction variants, icon keys) and
-/// are left for the task that reads them, per spec D-scope (don't speculate
-/// ahead of the view that needs it).
+/// Mirrors `design/ubilink-tokens.json`'s shape. `$meta` and each colour's `aa` note
+/// are documentation and are not typed.
 #[derive(Debug, Deserialize)]
 pub(super) struct DesignTokens {
     pub(super) font: FontTokens,
     #[serde(rename = "fontSize")]
     pub(super) font_size: FontSizeTokens,
+    // Read only by `tokens::tests` (pins `tokens::font_weight`).
+    #[allow(dead_code)]
+    #[serde(rename = "fontWeight")]
+    pub(super) font_weight: FontWeightTokens,
     pub(super) radius: RadiusTokens,
-    // Read only by `tokens::tests::constants_match_the_embedded_json`, which
-    // pins `tokens::spacing` against this field so the two cannot drift.
-    // `desktop-gpui` is a `[[bin]]`-only crate, so nothing outside a test
-    // build ever reads it — there is no lib target for which "pub" would
-    // mean "used elsewhere".
+    // Read only by `tokens::tests`, which pins `tokens::spacing` against it.
     #[allow(dead_code)]
     pub(super) spacing: SpacingTokens,
-    pub(super) status: StatusTokens,
+    #[allow(dead_code)]
+    pub(super) size: SizeTokens,
+    pub(super) accent: AccentTokens,
     pub(super) color: ColorTokens,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct FontTokens {
+    /// The UI family GPUI resolves: `.SystemUIFont` is the platform UI font (SF).
     pub(super) ui: String,
-    /// Read only by `tokens::tests` (pins `tokens::MONO_FONT_FAMILY`); see
-    /// that module's doc for why `ThemeConfig::mono_font_family` isn't set
-    /// from it.
+    /// Read only by `tokens::tests` (pins `tokens::MONO_FONT_FAMILY`).
     #[allow(dead_code)]
     pub(super) mono: String,
 }
 
+/// macOS text styles: display = title2 (17), title = headline (13, bold), row =
+/// body (13), body = the base size (13, the gpui-component rem), meta = callout (12).
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub(super) struct FontSizeTokens {
-    // `display`/`title`/`row`/`meta`: read only by
-    // `tokens::tests::constants_match_the_embedded_json`, which pins
-    // `tokens::font_size::*` against them; no `ThemeConfig` slot takes them
-    // (see this module's mapping table doc). `body` is the one Task 12 maps.
-    #[allow(dead_code)]
     pub(super) display: f32,
-    #[allow(dead_code)]
     pub(super) title: f32,
-    #[allow(dead_code)]
     pub(super) row: f32,
     pub(super) body: f32,
-    #[allow(dead_code)]
     pub(super) meta: f32,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub(super) struct FontWeightTokens {
+    pub(super) regular: f32,
+    pub(super) headline: f32,
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub(super) struct RadiusTokens {
     pub(super) panel: f32,
-    // `card`/`row`/`tile`/`kbd`/`pill`: read only by
-    // `tokens::tests::constants_match_the_embedded_json`, which pins
-    // `tokens::radius::*` against them; `control`/`panel` are the two Task 12
-    // maps (see this module's mapping table doc).
-    #[allow(dead_code)]
     pub(super) card: f32,
-    #[allow(dead_code)]
-    pub(super) row: f32,
-    #[allow(dead_code)]
-    pub(super) tile: f32,
     pub(super) control: f32,
-    #[allow(dead_code)]
-    pub(super) kbd: f32,
-    #[allow(dead_code)]
+    pub(super) row: f32,
     pub(super) pill: f32,
 }
 
-/// Read only by `tokens::tests::constants_match_the_embedded_json`, which
-/// pins `tokens::spacing::*` against every field here — `ThemeConfig` has no
-/// spacing slot at all (see `theme::mod`'s doc).
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub(super) struct SpacingTokens {
@@ -109,16 +94,22 @@ pub(super) struct SpacingTokens {
     pub(super) s8: f32,
 }
 
+/// The glass frame around the card, and the control and list-row heights.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-pub(super) struct StatusTokens {
-    pub(super) green: String,
-    pub(super) danger: String,
+pub(super) struct SizeTokens {
+    pub(super) frame: f32,
+    pub(super) control: f32,
+    pub(super) row: f32,
 }
 
-/// One `color.*` entry: a value per theme mode, as `design/ubilink-tokens.json`
-/// stores it (`{"dark": "...", "light": "..."}`). Most values are `rgba(...)`
-/// or `#rrggbb` color strings; `uiShadow` is the one exception (a CSS
-/// `box-shadow` string) and is handled as an opaque string for that reason.
+#[derive(Debug, Deserialize)]
+pub(super) struct AccentTokens {
+    /// The macOS default accent, used when the system's cannot be read.
+    pub(super) default: String,
+}
+
+/// One `color.*` entry: a value per mode (`rgba(...)` or `#rrggbb`).
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct DualValue {
     pub(super) dark: String,
@@ -126,55 +117,32 @@ pub(super) struct DualValue {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct ColorTokens {
-    #[serde(rename = "uiBg")]
-    pub(super) ui_bg: DualValue,
-    #[serde(rename = "uiBg2")]
-    pub(super) ui_bg_2: DualValue,
-    #[serde(rename = "uiBorder")]
-    pub(super) ui_border: DualValue,
-    #[serde(rename = "uiHairline")]
-    pub(super) ui_hairline: DualValue,
-    // `ui_shadow`/`text3`/`kbd_bg`/`kbd_border`/`kbd_text`: intentionally
-    // unmapped (see `theme::mod`'s mapping table doc) — no `ThemeConfigColors`
-    // field fits them. Read only by `tokens::tests`, which pins
-    // `tokens::unmapped_colors::*` against these.
-    #[serde(rename = "uiShadow")]
+    pub(super) window_background: DualValue,
+    pub(super) under_page_background: DualValue,
+    pub(super) label: DualValue,
+    pub(super) secondary_label: DualValue,
     #[allow(dead_code)]
-    pub(super) ui_shadow: DualValue,
-    pub(super) text1: DualValue,
-    pub(super) text2: DualValue,
-    #[allow(dead_code)]
-    pub(super) text3: DualValue,
-    pub(super) accent: DualValue,
-    #[serde(rename = "accentSoft")]
-    pub(super) accent_soft: DualValue,
-    #[serde(rename = "rowSelected")]
-    pub(super) row_selected: DualValue,
-    #[serde(rename = "rowHover")]
+    pub(super) tertiary_label: DualValue,
+    pub(super) separator: DualValue,
+    pub(super) control_border: DualValue,
+    pub(super) control: DualValue,
+    pub(super) control_hover: DualValue,
+    pub(super) control_active: DualValue,
     pub(super) row_hover: DualValue,
-    #[serde(rename = "ctrlBg")]
-    pub(super) ctrl_bg: DualValue,
-    #[serde(rename = "ctrlBgHover")]
-    pub(super) ctrl_bg_hover: DualValue,
-    #[serde(rename = "ctrlBorder")]
-    pub(super) ctrl_border: DualValue,
-    #[serde(rename = "kbdBg")]
-    #[allow(dead_code)]
-    pub(super) kbd_bg: DualValue,
-    #[serde(rename = "kbdBorder")]
-    #[allow(dead_code)]
-    pub(super) kbd_border: DualValue,
-    #[serde(rename = "kbdText")]
-    #[allow(dead_code)]
-    pub(super) kbd_text: DualValue,
+    pub(super) switch_off: DualValue,
+    pub(super) switch_thumb: DualValue,
+    pub(super) danger: DualValue,
+    pub(super) danger_fill: DualValue,
+    pub(super) danger_fill_hover: DualValue,
+    pub(super) danger_fill_active: DualValue,
+    pub(super) success: DualValue,
+    pub(super) warning: DualValue,
 }
 
-/// Parses the embedded tokens once per call; cheap enough (a few hundred
-/// bytes of JSON) that callers don't need a `Lazy`/`OnceLock` wrapper, and a
-/// plain function keeps the parse visible to `cargo test`'s RED/GREEN cycle
-/// (a `Lazy` that panicked on bad JSON would panic at first *use*, anywhere,
-/// not at the call site that is actually wrong).
+/// Parses the embedded tokens. Cheap (a few KB of JSON), so no `OnceLock`: a parse
+/// failure panics at the call that is wrong, which `cargo test` covers.
 pub(super) fn design_tokens() -> DesignTokens {
     serde_json::from_str(RAW_TOKENS).expect(
         "design/ubilink-tokens.json is checked into the repo and embedded at compile time; \
@@ -182,17 +150,11 @@ pub(super) fn design_tokens() -> DesignTokens {
     )
 }
 
-/// Converts a `color.*` token's CSS value (`rgba(r,g,b,a)` or `#rrggbb[aa]`)
-/// into the `#RRGGBBAA`/`#RRGGBB` hex string gpui-component's
-/// `try_parse_color` accepts (gpui-component's `ThemeConfigColors` fields are
-/// plain strings parsed with that function; it understands hex and Tailwind
-/// names, not CSS `rgba(...)`, so this is where that gap gets closed).
+/// A token's CSS value (`rgba(r,g,b,a)` or `#rrggbb[aa]`) as the `#RRGGBB[AA]` hex
+/// string gpui-component's `try_parse_color` accepts.
 pub(super) fn to_hex_color(value: &str) -> String {
     let value = value.trim();
     if let Some(digits) = value.strip_prefix('#') {
-        // Normalize to the uppercase form gpui-component's own `Hsla::to_hex`
-        // produces, so a token already given as hex (`color.accent`) and one
-        // converted from `rgba(...)` here read identically.
         return format!("#{}", digits.to_ascii_uppercase());
     }
 
@@ -227,8 +189,22 @@ fn hex(value: &str) -> SharedString {
     SharedString::from(to_hex_color(value))
 }
 
-/// Picks the `dark`/`light` side of a `color.*` token for the mode being
-/// built.
+/// A `#rrggbb` token at alpha 0, as `#RRGGBB00`.
+fn clear(value: &str) -> SharedString {
+    let hex = to_hex_color(value);
+    SharedString::from(format!("{}00", &hex[..7]))
+}
+
+fn rgb_hex(c: Rgb) -> SharedString {
+    SharedString::from(format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2))
+}
+
+fn rgba_hex(c: Rgb, alpha: f64) -> SharedString {
+    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    SharedString::from(format!("#{:02X}{:02X}{:02X}{a:02X}", c.0, c.1, c.2))
+}
+
+/// Picks the `dark`/`light` side of a `color.*` token for the mode being built.
 fn side(value: &DualValue, mode: ThemeMode) -> &str {
     if mode.is_dark() {
         &value.dark
@@ -237,46 +213,77 @@ fn side(value: &DualValue, mode: ThemeMode) -> &str {
     }
 }
 
-/// Builds the `ThemeConfig` for `mode` from the parsed design tokens. See
-/// `desktop-gpui/src/theme/mod.rs`'s module doc for the field-by-field
-/// mapping table this follows.
-pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode) -> ThemeConfig {
+/// Builds the `ThemeConfig` for `mode` from the tokens and the accent roles. See
+/// `desktop-gpui/src/theme/mod.rs`'s module doc for the field-by-field mapping.
+pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode, a: &Roles) -> ThemeConfig {
     let c = &tokens.color;
-    let accent = hex(side(&c.accent, mode));
+    let v = |d: &DualValue| Some(hex(side(d, mode)));
+    let transparent = Some(SharedString::from("#00000000"));
+    let white = Some(SharedString::from("#FFFFFF"));
 
-    // macOS system blue (`color.accent`) is both the generic hover/accent tint
-    // and the primary-action color in Ubilink's HUD — there is one accent in
-    // the source tokens, not two — so it feeds both `accent.background` and
-    // `primary.background`. Native macOS controls pair that blue with white
-    // text; the tokens don't define a primary-foreground, so this is a fixed
-    // choice, not a token mapping.
-    let primary_foreground = SharedString::from("#FFFFFF");
-
-    // `ThemeConfigColors` keeps a handful of base-palette fields (`blue`,
-    // `red`, ...) private, so it cannot be built with struct-literal syntax
-    // from outside gpui-component (even `..Default::default()` needs every
-    // field nameable). Build the default, then set only the public fields
-    // Task 12 maps.
+    // `ThemeConfigColors` keeps a few base-palette fields private, so it cannot be
+    // built with struct-literal syntax from outside gpui-component: set the public
+    // fields on the default.
     let mut colors = ThemeConfigColors::default();
-    colors.background = Some(hex(side(&c.ui_bg, mode)));
-    colors.foreground = Some(hex(side(&c.text1, mode)));
-    colors.muted_foreground = Some(hex(side(&c.text2, mode)));
-    colors.border = Some(hex(side(&c.ui_border, mode)));
-    colors.table_row_border = Some(hex(side(&c.ui_hairline, mode)));
-    colors.accent = Some(accent.clone());
-    colors.accent_foreground = Some(hex(side(&c.text1, mode)));
-    colors.primary = Some(accent);
-    colors.primary_foreground = Some(primary_foreground);
-    colors.selection = Some(hex(side(&c.accent_soft, mode)));
-    colors.list_active = Some(hex(side(&c.row_selected, mode)));
-    colors.list_hover = Some(hex(side(&c.row_hover, mode)));
-    colors.secondary = Some(hex(side(&c.ctrl_bg, mode)));
-    colors.secondary_hover = Some(hex(side(&c.ctrl_bg_hover, mode)));
-    colors.muted = Some(hex(side(&c.ctrl_bg, mode)));
-    colors.input = Some(hex(side(&c.ctrl_border, mode)));
-    colors.popover = Some(hex(side(&c.ui_bg_2, mode)));
-    colors.success = Some(SharedString::from(tokens.status.green.clone()));
-    colors.danger = Some(SharedString::from(tokens.status.danger.clone()));
+    // Surfaces and text. `background` is windowBackgroundColor at alpha 0:
+    // gpui-component's Root paints the whole window in it, which would cover the
+    // panel's glass; each view paints the card itself, opaque
+    // (`theming::surface`), from the same RGB.
+    colors.background = Some(clear(side(&c.window_background, mode)));
+    colors.popover = v(&c.window_background);
+    colors.foreground = v(&c.label);
+    colors.popover_foreground = v(&c.label);
+    colors.muted = v(&c.under_page_background);
+    colors.muted_foreground = v(&c.secondary_label);
+    colors.border = v(&c.separator);
+    colors.table_row_border = v(&c.separator);
+    colors.scrollbar_thumb = v(&c.tertiary_label);
+    // Controls: a text field's edge, push buttons (gpui-component's `secondary`),
+    // hover surfaces.
+    colors.input = v(&c.control_border);
+    colors.secondary = v(&c.control);
+    colors.secondary_hover = v(&c.control_hover);
+    colors.secondary_active = v(&c.control_active);
+    colors.secondary_foreground = v(&c.label);
+    colors.accent = v(&c.row_hover);
+    colors.accent_foreground = v(&c.label);
+    colors.list_hover = v(&c.row_hover);
+    // A selected row's fill is drawn by the view (theming::selection): gpui-component
+    // caps list_active at 20% alpha, too faint for macOS's selection.
+    colors.list_active = transparent.clone();
+    colors.list_active_border = transparent;
+    colors.switch = v(&c.switch_off);
+    // White (`color.switchThumb`), or black where white is under 3:1 on the checked
+    // track (a light accent; `accent::derive`).
+    colors.switch_thumb = if a.thumb == Rgb::WHITE {
+        v(&c.switch_thumb)
+    } else {
+        Some(rgb_hex(a.thumb))
+    };
+    // The accent (theme/accent.rs): a checked switch and the caret take `primary`.
+    colors.primary = Some(rgb_hex(a.mark));
+    colors.primary_foreground = Some(rgb_hex(a.button_text));
+    colors.primary_hover = Some(rgb_hex(a.button_hover));
+    colors.primary_active = Some(rgb_hex(a.button_active));
+    colors.button_primary = Some(rgb_hex(a.button));
+    colors.button_primary_foreground = Some(rgb_hex(a.button_text));
+    colors.button_primary_hover = Some(rgb_hex(a.button_hover));
+    colors.button_primary_active = Some(rgb_hex(a.button_active));
+    colors.ring = Some(rgba_hex(a.ring.0, a.ring.1));
+    colors.selection = Some(rgba_hex(a.text_selection.0, a.text_selection.1));
+    colors.caret = Some(rgb_hex(a.mark));
+    colors.link = Some(rgb_hex(a.mark));
+    // Status: text colours, and the filled destructive button (white text).
+    colors.danger = v(&c.danger);
+    colors.danger_foreground = white.clone();
+    colors.button_danger = v(&c.danger_fill);
+    // Explicit, or gpui-component derives a pale tint that white text fails on:
+    // darker steps, so white keeps (more than) 4.5:1.
+    colors.button_danger_hover = v(&c.danger_fill_hover);
+    colors.button_danger_active = v(&c.danger_fill_active);
+    colors.button_danger_foreground = white;
+    colors.success = v(&c.success);
+    colors.warning = v(&c.warning);
 
     ThemeConfig {
         name: SharedString::from(if mode.is_dark() {
@@ -286,18 +293,17 @@ pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode) -> Them
         }),
         mode,
         font_size: Some(tokens.font_size.body),
-        font_family: Some(SharedString::from(first_real_font_family(&tokens.font.ui))),
+        font_family: Some(SharedString::from(tokens.font.ui.clone())),
         radius: Some(tokens.radius.control.round() as usize),
-        radius_lg: Some(tokens.radius.panel.round() as usize),
+        radius_lg: Some(tokens.radius.card.round() as usize),
         colors,
         ..Default::default()
     }
 }
 
-/// `font.ui` is a CSS font stack: `-apple-system, "SF Pro Text", ...`. The
-/// first entry is a CSS pseudo-keyword (an alias the browser resolves, not an
-/// installed font name), so it names nothing GPUI's font loader could look
-/// up; the first *quoted* family is the first real, nameable font.
+/// `font.mono` is a CSS font stack; the first *quoted* family is the first real one.
+/// Read only by `tokens::tests` (pins `tokens::MONO_FONT_FAMILY`).
+#[cfg(test)]
 pub(super) fn first_real_font_family(stack: &str) -> String {
     stack
         .split(',')
@@ -307,10 +313,12 @@ pub(super) fn first_real_font_family(stack: &str) -> String {
         .to_string()
 }
 
-pub fn light_theme_config() -> ThemeConfig {
-    build_theme_config(&design_tokens(), ThemeMode::Light)
+/// The light theme for accent roles `roles` (`accent::derive(.., Light)`).
+pub fn light_theme_config(roles: &Roles) -> ThemeConfig {
+    build_theme_config(&design_tokens(), ThemeMode::Light, roles)
 }
 
-pub fn dark_theme_config() -> ThemeConfig {
-    build_theme_config(&design_tokens(), ThemeMode::Dark)
+/// The dark theme for accent roles `roles` (`accent::derive(.., Dark)`).
+pub fn dark_theme_config(roles: &Roles) -> ThemeConfig {
+    build_theme_config(&design_tokens(), ThemeMode::Dark, roles)
 }

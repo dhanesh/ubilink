@@ -49,6 +49,9 @@ pub enum ShellEvent {
     Menu(String),
     /// A second instance (single-instance socket) asked for the panel.
     Show,
+    /// D26: AppKit reported a system colour change (the accent, `theme::accent`):
+    /// rebuild the theme and repaint in place.
+    AccentChanged,
     /// R6: a request from the automation socket, run on the main thread by the pump.
     /// The variant exists only in `automation` builds (S1).
     #[cfg(feature = "automation")]
@@ -203,6 +206,8 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
     // Clicks on the item itself open its menu natively. A no-op handler stops
     // tray-icon queueing every click on a channel nobody reads.
     TrayIconEvent::set_event_handler(Some(|_: TrayIconEvent| {}));
+    // D26: follow the system accent colour live.
+    crate::theme::accent::observe(inbox.clone());
 
     let mut state = startup_state();
 
@@ -265,6 +270,10 @@ fn prewarm(cx: &mut App) {
     let opened = gpui_kit::open_window(panel::prewarm_options(&displays), cx, |window, cx| {
         cx.new(|cx| panel::PanelView::prewarm(window, cx))
     });
+    // Warm the glass view too, so the first real show does not load it.
+    if let Some(n) = native::newest_panel_number(mtm) {
+        native::apply_glass(mtm, n, panel::CORNER_RADIUS);
+    }
     match opened {
         // The close runs as a foreground task, i.e. after this run-loop turn's Core
         // Animation commit, which is the expensive part being warmed.
@@ -327,6 +336,11 @@ pub fn handle_event(event: ShellEvent, cx: &mut App) {
         crate::automation::handle(call, cx);
         return;
     }
+    if let ShellEvent::AccentChanged = event {
+        native::accent_change_taken();
+        crate::theme::refresh_accent(cx);
+        return;
+    }
     let Some(shell) = cx.try_global::<Shell>() else {
         return;
     };
@@ -374,6 +388,7 @@ fn command_for(event: &ShellEvent, hotkey_routes: &[(u32, Route)]) -> Option<Com
         ShellEvent::HotKey { pressed: false, .. } => None,
         ShellEvent::Menu(id) => tray::command_for(id),
         ShellEvent::Show => Some(Command::Open(Route::Capture)),
+        ShellEvent::AccentChanged => None,
         #[cfg(feature = "automation")]
         ShellEvent::Automation(_) => None,
     }
@@ -422,10 +437,14 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
             return;
         }
     };
-    // Read back what AppKit actually built (the window is ordered front synchronously
-    // by GPUI's open), so the state reports facts rather than the request.
-    let facts = native::inspect_panel(mtm);
+    // D26: Liquid Glass behind the content (macOS 26+; vibrancy before). Then read
+    // back what AppKit actually built (the window is ordered front synchronously by
+    // GPUI's open), so the state reports facts rather than the request.
     let number = native::newest_panel_number(mtm);
+    if let Some(n) = number {
+        native::apply_glass(mtm, n, panel::CORNER_RADIUS);
+    }
+    let facts = native::inspect_panel(mtm);
     cx.update_global::<Shell, _>(|shell, _| {
         shell.panel = Some(Panel {
             handle,
@@ -496,7 +515,7 @@ pub fn fit_panel(height: f64, cx: &mut App) {
         current.display_id,
         current.global,
         // The nominal width, not the current one: a narrow display may have cut it.
-        (panel::PANEL_WIDTH, panel::clamp_height(height)),
+        (panel::PANEL_WIDTH, panel::window_height(height)),
     ) else {
         return;
     };

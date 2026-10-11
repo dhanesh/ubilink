@@ -1,50 +1,38 @@
 {
   "$meta": {
     "name": "Ubilink Design Tokens",
-    "description": "Tokens for the Ubilink HUD redesign. Two directions (aurora, console), dual-theme (light/dark via prefers-color-scheme). Accent = macOS system blue.",
+    "description": "Native macOS 27 (D26): the system font at macOS text-style sizes, AppKit's system colours as macOS 27.0.1 reports them (NSColor, sRGB), raised only where WCAG AA requires (each such value names its AppKit original in `aa`), a glass panel frame around an opaque card, and the user's live system accent (theme/accent.rs derives the accent roles; `accent.default` is the macOS default used when none can be read).",
     "themes": ["dark", "light"]
   },
   "font": {
-    "ui": "-apple-system, \"SF Pro Text\", \"SF Pro Display\", system-ui, sans-serif",
+    "ui": ".SystemUIFont",
     "mono": "\"SF Mono\", ui-monospace, Menlo, monospace"
   },
-  "fontSize": { "display": 18, "title": 16, "row": 14, "body": 13, "meta": 12 },
-  "fontWeight": { "regular": 400, "medium": 500, "semibold": 600, "bold": 700 },
-  "radius": { "panel": 17, "card": 12, "row": 10, "tile": 7, "control": 8, "kbd": 6, "pill": 999 },
+  "fontSize": { "display": 17, "title": 13, "row": 13, "body": 13, "meta": 12 },
+  "fontWeight": { "regular": 400, "headline": 700 },
+  "radius": { "panel": 18, "card": 14, "control": 6, "row": 6, "pill": 999 },
   "spacing": { "1": 4, "2": 8, "3": 12, "4": 16, "5": 20, "6": 24, "7": 32, "8": 40 },
-  "material": { "blur": 42, "blurSolid": 18, "saturate": "180%" },
-  "source": {
-    "bear": "#e8743b",
-    "things": "#2c6bf0",
-    "web": "#3b82f6",
-    "finder": "#8a8a90"
-  },
-  "status": { "green": "#30d158", "danger": "#ff453a" },
+  "size": { "frame": 4, "control": 24, "row": 24 },
+  "accent": { "default": "#007aff" },
   "color": {
-    "uiBg":       { "dark": "rgba(28,28,30,0.72)",     "light": "rgba(250,250,252,0.72)" },
-    "uiBg2":      { "dark": "rgba(58,58,62,0.50)",     "light": "rgba(255,255,255,0.70)" },
-    "uiBorder":   { "dark": "rgba(255,255,255,0.10)",  "light": "rgba(0,0,0,0.08)" },
-    "uiHairline": { "dark": "rgba(255,255,255,0.08)",  "light": "rgba(0,0,0,0.07)" },
-    "uiShadow":   { "dark": "0 28px 64px -18px rgba(0,0,0,0.62), 0 2px 10px rgba(0,0,0,0.40)", "light": "0 28px 64px -18px rgba(0,0,0,0.24), 0 2px 10px rgba(0,0,0,0.10)" },
-    "text1":      { "dark": "rgba(255,255,255,0.96)",  "light": "rgba(0,0,0,0.88)" },
-    "text2":      { "dark": "rgba(235,235,245,0.62)",  "light": "rgba(60,60,67,0.60)" },
-    "text3":      { "dark": "rgba(235,235,245,0.34)",  "light": "rgba(60,60,67,0.40)" },
-    "accent":     { "dark": "#0a84ff",                 "light": "#007aff" },
-    "accentSoft": { "dark": "rgba(10,132,255,0.20)",   "light": "rgba(0,122,255,0.14)" },
-    "rowSelected":{ "dark": "rgba(10,132,255,0.26)",   "light": "rgba(0,122,255,0.16)" },
-    "rowHover":   { "dark": "rgba(255,255,255,0.06)",  "light": "rgba(0,0,0,0.05)" },
-    "ctrlBg":     { "dark": "rgba(255,255,255,0.09)",  "light": "rgba(0,0,0,0.05)" },
-    "ctrlBgHover":{ "dark": "rgba(255,255,255,0.14)",  "light": "rgba(0,0,0,0.09)" },
-    "ctrlBorder": { "dark": "rgba(255,255,255,0.12)",  "light": "rgba(0,0,0,0.10)" },
-    "kbdBg":      { "dark": "rgba(255,255,255,0.08)",  "light": "rgba(0,0,0,0.05)" },
-    "kbdBorder":  { "dark": "rgba(255,255,255,0.12)",  "light": "rgba(0,0,0,0.12)" },
-    "kbdText":    { "dark": "rgba(235,235,245,0.60)",  "light": "rgba(60,60,67,0.60)" }
-  },
-  "directions": {
-    "aurora":  { "radiusPanel": 17, "blur": 42, "selection": "fill", "note": "native macOS vibrancy, blue capsule selection" },
-    "console": { "radiusPanel": 12, "blur": 18, "selection": "leftbar", "note": "denser/solid surface, accent left-bar selection" }
-  },
-  "sourceIcons": {
-    "bear": "book", "things": "check-square", "web": "globe", "finder": "folder"
+    "windowBackground": { "light": "#ffffff", "dark": "#1e1e1e" },
+    "underPageBackground": { "light": "#f6f6f6", "dark": "#282828" },
+    "label": { "light": "rgba(0,0,0,0.85)", "dark": "rgba(255,255,255,0.85)" },
+    "secondaryLabel": { "light": "rgba(0,0,0,0.55)", "dark": "rgba(255,255,255,0.55)", "aa": "light was rgba(0,0,0,0.50): 4.00:1 on #ffffff; 0.55 keeps 4.5:1 on a hovered row (rowHover)" },
+    "tertiaryLabel": { "light": "rgba(0,0,0,0.26)", "dark": "rgba(255,255,255,0.25)" },
+    "separator": { "light": "rgba(0,0,0,0.10)", "dark": "rgba(255,255,255,0.10)" },
+    "controlBorder": { "light": "rgba(0,0,0,0.42)", "dark": "rgba(255,255,255,0.34)", "aa": "a text field's edge on the card at 3:1 (separatorColor, 0.10, is 1.26 / 1.36:1)" },
+    "control": { "light": "rgba(0,0,0,0.06)", "dark": "rgba(255,255,255,0.14)" },
+    "controlHover": { "light": "rgba(0,0,0,0.10)", "dark": "rgba(255,255,255,0.20)" },
+    "controlActive": { "light": "rgba(0,0,0,0.14)", "dark": "rgba(255,255,255,0.26)" },
+    "rowHover": { "light": "rgba(0,0,0,0.05)", "dark": "rgba(255,255,255,0.06)" },
+    "switchOff": { "light": "rgba(0,0,0,0.42)", "dark": "rgba(255,255,255,0.34)", "aa": "the off track on the card at 3:1" },
+    "switchThumb": { "light": "#ffffff", "dark": "#ffffff", "aa": "white unless it is under 3:1 on the checked track; theme/accent.rs then uses black" },
+    "danger": { "light": "#ee0005", "dark": "#ff4245", "aa": "light was systemRed #ff383c: 3.57:1 on #ffffff" },
+    "dangerFill": { "light": "#ee0005", "dark": "#ee0005", "aa": "white text on systemRed is 3.57:1 (light #ff383c) / 3.43:1 (dark #ff4245)" },
+    "dangerFillHover": { "light": "#d60004", "dark": "#d60004" },
+    "dangerFillActive": { "light": "#bd0004", "dark": "#bd0004" },
+    "success": { "light": "#24883d", "dark": "#30d158", "aa": "light was systemGreen #34c759: 2.22:1 on #ffffff" },
+    "warning": { "light": "#be5900", "dark": "#ff9230", "aa": "light was systemOrange #ff8d28: 2.31:1 on #ffffff" }
   }
 }

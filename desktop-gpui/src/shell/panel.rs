@@ -1,11 +1,17 @@
 //! The pop-up panel (R4): one `WindowKind::PopUp` window — on macOS an NSPanel with the
 //! non-activating style at NSPopUpWindowLevel, so opening it does not make ubilink the
 //! frontmost app and capture still sees the app the user was in (the Tauri shell's
-//! "render-first" reason for accessory + overlay) — over a `Blurred` background (a real
-//! NSVisualEffectView, the Tauri shell's HUD vibrancy).
+//! "render-first" reason for accessory + overlay) — over Liquid Glass (D26: an
+//! NSGlassEffectView on macOS 26+, `native::apply_glass`; GPUI's `Blurred`
+//! NSVisualEffectView before).
+//!
+//! The glass shows as a [`FRAME`]-wide rim around the content, like a macOS 27
+//! popover: each view paints an opaque card (`theming::surface`) inset by the frame,
+//! with corners concentric to the panel's ([`CORNER_RADIUS`] − frame). The frame is
+//! added here, in the window's size, so a view's height is its card's.
 //!
 //! The view hosted inside is built by Task 13's router (`crate::views::build_for`):
-//! `PanelView` itself only owns the translucent card and the type-erased child view,
+//! `PanelView` itself only owns the glass frame and the type-erased child view,
 //! and asks `Route::hides_on_deactivate` (which reads the router table) for the
 //! click-away rule below, rather than deciding it itself.
 //!
@@ -17,12 +23,11 @@
 //! shows take ~15–30 ms in a debug build; only the process's first one was slow, which
 //! `shell::prewarm` (with `prewarm_options` below) moves to launch.
 
-use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 
 use super::placement::{Display, Placement};
 use super::Route;
-use crate::theme::tokens::radius;
+use crate::theme::tokens::{radius, size};
 use crate::views;
 
 /// Panel width in points: the Tauri panel's (its tauri.conf.json, 640; deleted in D24).
@@ -33,6 +38,21 @@ pub const PANEL_WIDTH: f64 = 640.0;
 /// fits its content (`views::settings::panel_height`).
 pub const PANEL_HEIGHT: f64 = 140.0;
 
+/// The glass rim around the card, each side, in points.
+pub const FRAME: f64 = 4.0;
+
+/// The glass panel's corner radius (macOS 27 popover); the card's is this minus
+/// [`FRAME`] (`tokens::radius`).
+pub const CORNER_RADIUS: f64 = 18.0;
+
+/// The card's width: what a view lays out across.
+pub const CARD_WIDTH: f64 = PANEL_WIDTH - 2.0 * FRAME;
+
+/// The window height for a view whose card is `card_height` tall, clamped.
+pub fn window_height(card_height: f64) -> f64 {
+    clamp_height(card_height + 2.0 * FRAME)
+}
+
 /// The Tauri shell's `resize_panel` clamp: no route is shorter or taller than this
 /// (a display's usable area can cut it further, `placement::fit_on`).
 pub const MIN_HEIGHT: f64 = 96.0;
@@ -40,7 +60,7 @@ pub const MAX_HEIGHT: f64 = 900.0;
 
 /// `route`'s panel size: the panel width and the route's height, clamped.
 pub fn size_for(route: Route) -> (f64, f64) {
-    (PANEL_WIDTH, clamp_height(views::height_for(route)))
+    (PANEL_WIDTH, window_height(views::height_for(route)))
 }
 
 /// A wanted height clamped to [`MIN_HEIGHT`]..[`MAX_HEIGHT`].
@@ -269,12 +289,13 @@ impl Render for PanelView {
                 });
             });
         }
-        let theme = cx.theme();
+        // Transparent: the glass behind shows in the frame around the view's card.
+        #[cfg(not(feature = "automation"))]
+        let _ = cx;
         div()
             .size_full()
-            .rounded(radius::CARD)
-            // Translucent so the NSVisualEffectView's blur shows through.
-            .bg(theme.background.opacity(0.55))
+            .p(size::FRAME)
+            .rounded(radius::PANEL)
             .child(self.child.clone())
     }
 }
@@ -282,7 +303,21 @@ impl Render for PanelView {
 #[cfg(test)]
 mod tests {
     use super::super::placement::{Display, Rect};
-    use super::{clamp_height, prewarm_options, MAX_HEIGHT, MIN_HEIGHT, PANEL_HEIGHT, PANEL_WIDTH};
+    use super::{
+        clamp_height, prewarm_options, window_height, CARD_WIDTH, CORNER_RADIUS, FRAME, MAX_HEIGHT,
+        MIN_HEIGHT, PANEL_HEIGHT, PANEL_WIDTH,
+    };
+    use crate::theme::tokens::{radius, size};
+    use gpui_kit::px;
+
+    #[test]
+    fn the_glass_frame_matches_the_tokens_and_wraps_the_card() {
+        assert_eq!(px(FRAME as f32), size::FRAME);
+        assert_eq!(px(CORNER_RADIUS as f32), radius::PANEL);
+        assert_eq!(CARD_WIDTH, 632.0);
+        assert_eq!(window_height(140.0), 148.0);
+        assert_eq!(window_height(5000.0), MAX_HEIGHT);
+    }
     use gpui_kit::WindowBounds;
 
     fn display(id: u32, x: f64, y: f64, w: f64, h: f64) -> Display {

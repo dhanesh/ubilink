@@ -85,8 +85,28 @@ pub fn activation_policy(mtm: MainThreadMarker) -> NSApplicationActivationPolicy
 pub struct PanelFacts {
     /// An NSPanel with the non-activating style at NSPopUpWindowLevel: GPUI's PopUp.
     pub popup: bool,
-    /// An NSVisualEffectView sits in the content view: GPUI's Blurred background.
-    pub blurred: bool,
+    /// The material behind GPUI's content (D26).
+    pub material: Material,
+}
+
+/// The material a visible subview of the panel's content view provides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Material {
+    /// An NSGlassEffectView: Liquid Glass, macOS 26+ ([`apply_glass`]).
+    Glass,
+    /// An NSVisualEffectView: GPUI's `Blurred` background, the fallback.
+    Vibrancy,
+    None,
+}
+
+impl Material {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Material::Glass => "glass",
+            Material::Vibrancy => "vibrancy",
+            Material::None => "none",
+        }
+    }
 }
 
 /// The app's visible GPUI panel window, if any. The shell has one panel at a time,
@@ -181,19 +201,260 @@ pub fn restore_panel_after_dialog(mtm: MainThreadMarker, number: isize) {
     }
 }
 
-/// Inspect the app's visible GPUI panel window, if any.
+/// Inspect the app's visible GPUI panel window, if any. The material is read from
+/// the content view's visible subviews: glass wins over a (hidden or not) vibrancy view.
 pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
     let effect_class = AnyClass::get(c"NSVisualEffectView")?;
+    let glass_class = AnyClass::get(c"NSGlassEffectView");
     visible_panel(mtm).map(|w| {
         let popup = w.level() == POPUP_WINDOW_LEVEL
             && w.styleMask()
                 .contains(NSWindowStyleMask::NonactivatingPanel);
-        let blurred = w.contentView().is_some_and(|v| {
-            let subs = v.subviews();
-            (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(effect_class))
-        });
-        PanelFacts { popup, blurred }
+        let shown = |class: &AnyClass| {
+            w.contentView().is_some_and(|v| {
+                let subs = v.subviews();
+                (0..subs.count()).any(|i| {
+                    let s = subs.objectAtIndex(i);
+                    s.isKindOfClass(class) && !s.isHidden()
+                })
+            })
+        };
+        let material = if glass_class.is_some_and(shown) {
+            Material::Glass
+        } else if shown(effect_class) {
+            Material::Vibrancy
+        } else {
+            Material::None
+        };
+        PanelFacts { popup, material }
     })
+}
+
+/// NSViewWidthSizable | NSViewHeightSizable.
+const SIZABLE: usize = 2 | 16;
+/// NSWindowBelow, for `addSubview:positioned:relativeTo:`.
+const WINDOW_BELOW: isize = -1;
+
+/// D26: give panel `number` Liquid Glass. On macOS 26+ (NSGlassEffectView exists) an
+/// NSGlassEffectView with the panel's corner radius goes to the bottom of the content
+/// view's subviews, where GPUI put its NSVisualEffectView for the `Blurred`
+/// background, and that view is hidden (not removed: GPUI keeps a pointer to it). GPUI's
+/// own view, the accessibility adapter on the content view and the window are left
+/// alone. Returns the material the panel now has; on older systems it keeps vibrancy.
+pub fn apply_glass(mtm: MainThreadMarker, number: isize, corner_radius: f64) -> Material {
+    let Some(content) = window_numbered(mtm, number).and_then(|w| w.contentView()) else {
+        return Material::None;
+    };
+    let Some(effect_class) = AnyClass::get(c"NSVisualEffectView") else {
+        return Material::None;
+    };
+    let subs = content.subviews();
+    let blur = (0..subs.count())
+        .map(|i| subs.objectAtIndex(i))
+        .find(|s| s.isKindOfClass(effect_class));
+    let Some(glass_class) = AnyClass::get(c"NSGlassEffectView") else {
+        return if blur.is_some() {
+            Material::Vibrancy
+        } else {
+            Material::None
+        };
+    };
+    let has_glass = (0..subs.count()).any(|i| subs.objectAtIndex(i).isKindOfClass(glass_class));
+    if !has_glass {
+        let bounds = content.bounds();
+        // SAFETY: NSGlassEffectView is an NSView subclass (macOS 26 SDK): alloc +
+        // initWithFrame: return a retained instance; setAutoresizingMask: and
+        // setCornerRadius: take an NSUInteger and a CGFloat; addSubview:positioned:
+        // relativeTo: takes a view, an NSWindowOrderingMode and nil. Main thread (mtm).
+        unsafe {
+            let glass: objc2::rc::Allocated<AnyObject> = msg_send![glass_class, alloc];
+            let glass: Option<Retained<AnyObject>> = msg_send![glass, initWithFrame: bounds];
+            let Some(glass) = glass else {
+                return Material::Vibrancy;
+            };
+            let _: () = msg_send![&*glass, setAutoresizingMask: SIZABLE];
+            let _: () = msg_send![&*glass, setCornerRadius: corner_radius];
+            let _: () = msg_send![
+                &*content,
+                addSubview: &*glass,
+                positioned: WINDOW_BELOW,
+                relativeTo: Option::<&AnyObject>::None
+            ];
+        }
+    }
+    if let Some(blur) = blur {
+        blur.setHidden(true);
+    }
+    Material::Glass
+}
+
+/// One `NSColor` class colour (`controlAccentColor`, ...) in sRGB under the current
+/// drawing appearance: its RGB and alpha.
+fn system_color(
+    color_class: &AnyClass,
+    srgb: &AnyObject,
+    name: objc2::runtime::Sel,
+) -> Option<(crate::theme::accent::Rgb, f64)> {
+    // SAFETY: each selector is an NSColor class property returning an autoreleased
+    // NSColor; colorUsingColorSpace: returns nil or an NSColor; the component getters
+    // return CGFloat. Main thread (callers hold a MainThreadMarker).
+    unsafe {
+        let color: Option<Retained<AnyObject>> = msg_send![color_class, performSelector: name];
+        let color = color?;
+        let c: Option<Retained<AnyObject>> = msg_send![&*color, colorUsingColorSpace: srgb];
+        let c = c?;
+        let r: f64 = msg_send![&*c, redComponent];
+        let g: f64 = msg_send![&*c, greenComponent];
+        let b: f64 = msg_send![&*c, blueComponent];
+        let a: f64 = msg_send![&*c, alphaComponent];
+        let ch = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Some((crate::theme::accent::Rgb(ch(r), ch(g), ch(b)), a))
+    }
+}
+
+/// D26: the live system accent (`controlAccentColor`) and, under the light (Aqua) and
+/// dark (DarkAqua) appearances, `selectedContentBackgroundColor` and
+/// `keyboardFocusIndicatorColor`, in sRGB. Restores the current drawing appearance.
+pub fn read_accent(_mtm: MainThreadMarker) -> Option<crate::theme::accent::Source> {
+    use objc2::sel;
+    let color_class = AnyClass::get(c"NSColor")?;
+    let appearance_class = AnyClass::get(c"NSAppearance")?;
+    let space_class = AnyClass::get(c"NSColorSpace")?;
+    // SAFETY: +[NSColorSpace sRGBColorSpace] and +[NSAppearance currentAppearance] /
+    // appearanceNamed: / setCurrentAppearance: are class methods returning (or taking)
+    // nil or an autoreleased object; main thread.
+    unsafe {
+        let srgb: Option<Retained<AnyObject>> = msg_send![space_class, sRGBColorSpace];
+        let srgb = srgb?;
+        let previous: Option<Retained<AnyObject>> = msg_send![appearance_class, currentAppearance];
+        let mut selection = [None; 2];
+        let mut focus = [None; 2];
+        let mut accent = None;
+        for (ix, name) in ["NSAppearanceNameAqua", "NSAppearanceNameDarkAqua"]
+            .iter()
+            .enumerate()
+        {
+            let n = NSString::from_str(name);
+            let appearance: Option<Retained<AnyObject>> =
+                msg_send![appearance_class, appearanceNamed: &*n];
+            let _: () = msg_send![appearance_class, setCurrentAppearance: appearance.as_deref()];
+            if ix == 0 {
+                accent = system_color(color_class, &srgb, sel!(controlAccentColor)).map(|c| c.0);
+            }
+            selection[ix] =
+                system_color(color_class, &srgb, sel!(selectedContentBackgroundColor)).map(|c| c.0);
+            focus[ix] = system_color(color_class, &srgb, sel!(keyboardFocusIndicatorColor));
+        }
+        let _: () = msg_send![appearance_class, setCurrentAppearance: previous.as_deref()];
+        Some(crate::theme::accent::Source {
+            accent: accent?,
+            selection,
+            focus,
+        })
+    }
+}
+
+/// One accent change can arrive as up to three notifications (the local system-colours
+/// one and two distributed ones): post one re-theme until the shell has handled it.
+static ACCENT_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The shell is about to re-theme: later notifications post again.
+pub fn accent_change_taken() {
+    ACCENT_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Automation (D26): post `NSSystemColorsDidChangeNotification` on the local center,
+/// as AppKit does when the accent changes.
+#[cfg(feature = "automation")]
+pub fn post_system_colors_changed(_mtm: MainThreadMarker) {
+    let Some(center_class) = AnyClass::get(c"NSNotificationCenter") else {
+        return;
+    };
+    // SAFETY: +defaultCenter returns the shared center; postNotificationName:object:
+    // takes an NSString and nil. Main thread (mtm).
+    unsafe {
+        let center: Option<Retained<AnyObject>> = msg_send![center_class, defaultCenter];
+        if let Some(center) = center {
+            let n = NSString::from_str("NSSystemColorsDidChangeNotification");
+            let _: () = msg_send![
+                &*center,
+                postNotificationName: &*n,
+                object: Option::<&AnyObject>::None
+            ];
+        }
+    }
+}
+
+/// Where the accent observer posts: set once by [`observe_accent`].
+static ACCENT_INBOX: std::sync::OnceLock<super::Inbox> = std::sync::OnceLock::new();
+
+objc2::define_class!(
+    // SAFETY: NSObject has no subclassing requirements; the class adds one method and
+    // no ivars.
+    #[unsafe(super(objc2::runtime::NSObject))]
+    #[name = "UbilinkAccentObserver"]
+    struct AccentObserver;
+
+    impl AccentObserver {
+        /// Any of the colour notifications: hand the re-theme to the main-thread pump.
+        #[unsafe(method(colorsChanged:))]
+        fn colors_changed(&self, _note: &AnyObject) {
+            if let Some(inbox) = ACCENT_INBOX.get() {
+                if !ACCENT_PENDING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    inbox.post(super::ShellEvent::AccentChanged);
+                }
+            }
+        }
+    }
+);
+
+/// D26: observe the system accent. `NSSystemColorsDidChangeNotification` (local) is
+/// what AppKit posts when the accent or highlight colour changes;
+/// `AppleColorPreferencesChangedNotification` and `AppleAquaColorVariantChanged`
+/// (distributed) are the System Settings broadcasts. Each posts
+/// [`super::ShellEvent::AccentChanged`]. The observer lives for the process.
+pub fn observe_accent(_mtm: MainThreadMarker, inbox: super::Inbox) {
+    use objc2::{sel, ClassType};
+    if ACCENT_INBOX.set(inbox).is_err() {
+        return;
+    }
+    let (Some(local), Some(distributed)) = (
+        AnyClass::get(c"NSNotificationCenter"),
+        AnyClass::get(c"NSDistributedNotificationCenter"),
+    ) else {
+        return;
+    };
+    // SAFETY: +new on our NSObject subclass returns a retained instance; the centers'
+    // defaultCenter returns the shared center; addObserver:selector:name:object: takes
+    // the observer, a selector it implements (colorsChanged:, one object argument), an
+    // NSString and nil. The observer is leaked so it outlives every registration.
+    unsafe {
+        let observer: Retained<AnyObject> = msg_send![AccentObserver::class(), new];
+        for (center_class, names) in [
+            (local, &["NSSystemColorsDidChangeNotification"][..]),
+            (
+                distributed,
+                &[
+                    "AppleColorPreferencesChangedNotification",
+                    "AppleAquaColorVariantChanged",
+                ][..],
+            ),
+        ] {
+            let center: Option<Retained<AnyObject>> = msg_send![center_class, defaultCenter];
+            let Some(center) = center else { continue };
+            for name in names {
+                let n = NSString::from_str(name);
+                let _: () = msg_send![
+                    &*center,
+                    addObserver: &*observer,
+                    selector: sel!(colorsChanged:),
+                    name: &*n,
+                    object: Option::<&AnyObject>::None
+                ];
+            }
+        }
+        std::mem::forget(observer);
+    }
 }
 
 /// Move and resize panel `number` to `size` points with its top-left corner at

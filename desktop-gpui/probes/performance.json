@@ -1827,6 +1827,7 @@
         "window_verified": true,
         "shell.window_kind": "popup",
         "shell.background": "blurred",
+        "shell.material": "glass",
         "shell.visible": true
       },
       "block": "placement"
