@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Sizable, Theme, ThemeMode};
+use gpui_kit::component::{ActiveTheme, Sizable, Size, Theme, ThemeMode};
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +110,16 @@ pub fn push_button(id: impl Into<ElementId>) -> Button {
 /// white text.
 pub fn destructive_button(id: impl Into<ElementId>) -> Button {
     Button::new(id).danger().h(CONTROL_H).px(BUTTON_PAD_X)
+}
+
+/// A text field's border: gpui-component's `Input` draws a 1 pt `border_1`.
+pub const TEXT_FIELD_BORDER: Pixels = px(1.);
+
+/// How far a single-line text field's content box sits inside its top and bottom
+/// edges: the border plus the vertical padding the field gets (gpui-component's
+/// default for a medium `Input`). The text is clipped to that box.
+pub fn text_field_inset_y() -> Pixels {
+    TEXT_FIELD_BORDER + Size::Medium.input_py()
 }
 
 /// A single-line text field at the control height with 13 pt text.

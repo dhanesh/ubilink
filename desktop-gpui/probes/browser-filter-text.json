@@ -1,0 +1,284 @@
+{
+  "description": "D26 fix (rc.5): the link browser's filter field lays its text out inside the box the text is clipped to, for the placeholder and for a descender-heavy query, in light and dark, at a regular macOS control height (22-28 pt)",
+  "requirement": "D26 (native macOS 27 controls), R14",
+  "notes": [
+    "view.layout.filter (views/layout.rs Layout::text_field, automation builds): `field` is the field's laid-out bounds; `content` is that box less the field's border and vertical padding (theming::text_field_inset_y), the box gpui-component clips a single-line Input's text to (its InputState container is overflow_x_hidden, and gpui-pre 0.3.7's overflow_mask then clips y to the container too); `text` is the line box the InputState laid out this frame (InputState::input_bounds, one line height tall), which the glyphs, descenders included, are drawn in; `centre_offset` is |text centre − field centre|.",
+    "Fails on 713e9cd (rc.4): theming::text_field's .h(CONTROL_H) is gpui-component Input's multi-line-only height, so the field stays a medium Input (26 pt, 8 pt padding, 1 pt border): an 8 pt clip box for a 16 pt line, and the text loses its top and bottom (descenders) to the clip.",
+    "Screenshots are kept for review (README `screenshot`); the layout steps are the check."
+  ],
+  "setup": {
+    "graph": "graph-ranking.json"
+  },
+  "steps": [
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "the filter input is in the tree",
+      "see": {
+        "role": "TextInput"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      }
+    },
+    {
+      "name": "placeholder/light: the field is a regular macOS control (22-28 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "view.layout.filter.field.h": {
+          "ge": 22,
+          "le": 28
+        }
+      }
+    },
+    {
+      "name": "placeholder/light: the text line box starts inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.y": {
+          "ge": {
+            "path": "view.layout.filter.content.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "placeholder/light: the text line box (descenders included) ends inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.bottom": {
+          "le": {
+            "path": "view.layout.filter.content.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "placeholder/light: the text is vertically centred in the field (within 1 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.centre_offset": {
+          "le": 1
+        }
+      }
+    },
+    {
+      "name": "placeholder/light: screenshot",
+      "screenshot": "placeholder-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      }
+    },
+    {
+      "name": "placeholder/dark: the field is a regular macOS control (22-28 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "view.layout.filter.field.h": {
+          "ge": 22,
+          "le": 28
+        }
+      }
+    },
+    {
+      "name": "placeholder/dark: the text line box starts inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.y": {
+          "ge": {
+            "path": "view.layout.filter.content.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "placeholder/dark: the text line box (descenders included) ends inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.bottom": {
+          "le": {
+            "path": "view.layout.filter.content.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "placeholder/dark: the text is vertically centred in the field (within 1 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.centre_offset": {
+          "le": 1
+        }
+      }
+    },
+    {
+      "name": "placeholder/dark: screenshot",
+      "screenshot": "placeholder-dark"
+    },
+    {
+      "name": "type a descender-heavy query",
+      "call": "key",
+      "args": {
+        "keys": "g y p s y space j q"
+      }
+    },
+    {
+      "name": "the field shows the typed text",
+      "see": {
+        "role": "TextInput",
+        "text": "gypsy jq"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      }
+    },
+    {
+      "name": "typed/light: the field is a regular macOS control (22-28 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "view.layout.filter.field.h": {
+          "ge": 22,
+          "le": 28
+        }
+      }
+    },
+    {
+      "name": "typed/light: the text line box starts inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.y": {
+          "ge": {
+            "path": "view.layout.filter.content.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "typed/light: the text line box (descenders included) ends inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.bottom": {
+          "le": {
+            "path": "view.layout.filter.content.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "typed/light: the text is vertically centred in the field (within 1 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.centre_offset": {
+          "le": 1
+        }
+      }
+    },
+    {
+      "name": "typed/light: screenshot",
+      "screenshot": "typed-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      }
+    },
+    {
+      "name": "typed/dark: the field is a regular macOS control (22-28 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "view.layout.filter.field.h": {
+          "ge": 22,
+          "le": 28
+        }
+      }
+    },
+    {
+      "name": "typed/dark: the text line box starts inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.y": {
+          "ge": {
+            "path": "view.layout.filter.content.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "typed/dark: the text line box (descenders included) ends inside the clip box",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.text.bottom": {
+          "le": {
+            "path": "view.layout.filter.content.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "typed/dark: the text is vertically centred in the field (within 1 pt)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.centre_offset": {
+          "le": 1
+        }
+      }
+    },
+    {
+      "name": "typed/dark: screenshot",
+      "screenshot": "typed-dark"
+    },
+    {
+      "name": "back to the system appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "system"
+      }
+    }
+  ]
+}
