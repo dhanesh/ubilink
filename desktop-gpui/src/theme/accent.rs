@@ -183,6 +183,9 @@ pub struct Roles {
     pub button_active: Rgb,
     /// The focus ring and its alpha (at least 3:1 on the card once composited).
     pub ring: (Rgb, f64),
+    /// A switch's thumb: white, or black where white is under 3:1 on the checked
+    /// track (`mark`). Black also clears 3:1 on the off track in both modes.
+    pub thumb: Rgb,
     /// A selected list row's fill and its text (AA 4.5:1).
     pub selection: Rgb,
     pub selection_text: Rgb,
@@ -190,13 +193,16 @@ pub struct Roles {
     pub text_selection: (Rgb, f64),
 }
 
-/// The opaque card every view paints (`color.windowBackground`), per mode.
+/// The opaque card every view paints (`color.windowBackground`), per mode, read
+/// from the tokens.
 pub fn card(mode: ThemeMode) -> Rgb {
-    if mode.is_dark() {
-        Rgb(0x1e, 0x1e, 0x1e)
+    let t = super::convert::design_tokens();
+    let side = if mode.is_dark() {
+        t.color.window_background.dark
     } else {
-        Rgb::WHITE
-    }
+        t.color.window_background.light
+    };
+    Rgb::parse(&side).expect("color.windowBackground in design/ubilink-tokens.json is #rrggbb")
 }
 
 /// How far the fill may be darkened for white text before the rule switches to black
@@ -265,6 +271,12 @@ pub fn derive(source: &Source, mode: ThemeMode) -> Roles {
         None => (mark, 1.0),
     };
 
+    let thumb = if contrast(Rgb::WHITE, mark) >= AA_UI {
+        Rgb::WHITE
+    } else {
+        Rgb::BLACK
+    };
+
     // Selected row: AppKit's selectedContentBackgroundColor where given, else the
     // button fill; text as on a button.
     let selection = source.selection[ix].unwrap_or(button);
@@ -278,6 +290,7 @@ pub fn derive(source: &Source, mode: ThemeMode) -> Roles {
         button_hover,
         button_active,
         ring,
+        thumb,
         selection,
         selection_text,
         text_selection: (accent, 0.3),
@@ -416,6 +429,20 @@ mod tests {
                     contrast(r.selection_text, r.selection) >= 4.5,
                     "{accent} selection"
                 );
+                assert!(
+                    contrast(r.thumb, r.mark) >= 3.0,
+                    "{accent} {mode:?} thumb on track"
+                );
+                // The off track: switchOff over the card.
+                let off = if mode.is_dark() {
+                    Rgb::WHITE.over(0.34, card)
+                } else {
+                    Rgb::BLACK.over(0.42, card)
+                };
+                assert!(
+                    contrast(r.thumb, off) >= 3.0,
+                    "{accent} {mode:?} thumb on off"
+                );
             }
         }
     }
@@ -448,6 +475,22 @@ mod tests {
         let dark = derive(&source, ThemeMode::Dark);
         assert_eq!(dark.selection, rgb("#0059d1"));
         assert!(dark.ring.1 > 0.5 && dark.ring.1 <= 1.0);
+    }
+
+    /// The card colours `derive` measures against are the tokens' windowBackground.
+    #[test]
+    fn card_is_the_tokens_window_background() {
+        assert_eq!(super::card(ThemeMode::Light).hex(), "#ffffff");
+        assert_eq!(super::card(ThemeMode::Dark).hex(), "#1e1e1e");
+    }
+
+    /// A light accent's checked track takes a black thumb in dark mode.
+    #[test]
+    fn a_light_accent_gets_a_dark_thumb() {
+        let orange = derive(&Source::bare(rgb("#f7821b")), ThemeMode::Dark);
+        assert_eq!(orange.thumb, Rgb::BLACK, "white on #f7821b is 2.57:1");
+        let blue = derive(&Source::bare(rgb("#007aff")), ThemeMode::Dark);
+        assert_eq!(blue.thumb, Rgb::WHITE);
     }
 
     #[test]

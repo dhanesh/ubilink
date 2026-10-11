@@ -11,7 +11,7 @@
 //! |---|---|---|
 //! | `color.windowBackground` | `background` (alpha 0), `popover` | the card's RGB; views paint it opaque (`theming::surface`), the window root stays clear so the glass shows |
 //! | `color.label` | `foreground`, `popover_foreground`, `secondary_foreground`, `accent_foreground` | |
-//! | `color.secondaryLabel` | `muted_foreground` | light raised to 0.54 for AA |
+//! | `color.secondaryLabel` | `muted_foreground` | light raised to 0.55 for AA (on the card and on a hovered row) |
 //! | `color.underPageBackground` | `muted` | |
 //! | `color.separator` | `border`, `table_row_border` | hairlines (decorative) |
 //! | `color.tertiaryLabel` | `scrollbar_thumb` | |
@@ -69,9 +69,26 @@ fn apply(source: accent::Source, cx: &mut App) {
     cx.set_global(AccentRoles { light, dark });
 }
 
+/// How many accent re-themes have run (`refresh_accent`), for automation's `state`.
+static ACCENT_REFRESHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg_attr(not(feature = "automation"), allow(dead_code))]
+pub fn accent_refreshes() -> u64 {
+    ACCENT_REFRESHES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// An opaque theme colour as `#rrggbb` (automation's `state`).
+#[cfg_attr(not(feature = "automation"), allow(dead_code))]
+pub fn hex_of(c: Hsla) -> String {
+    let c = Rgba::from(c);
+    let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    accent::Rgb(ch(c.r), ch(c.g), ch(c.b)).hex()
+}
+
 /// The system accent (or, in automation builds, the `accent` fixture) changed: rebuild
 /// the themes and repaint open windows in place, in the mode they are in.
 pub fn refresh_accent(cx: &mut App) {
+    ACCENT_REFRESHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     apply(accent::current(), cx);
     let mode = cx.theme().mode;
     Theme::change(mode, None, cx);
@@ -117,6 +134,65 @@ mod tests {
     use super::convert::to_hex_color;
     use super::*;
 
+    /// The live theme colours automation reports survive the hex -> Hsla -> hex trip
+    /// exactly, so the accent probe can compare them as strings.
+    #[test]
+    fn hex_of_round_trips_the_probe_colours() {
+        for h in ["#007aff", "#0072ef", "#f7821b", "#eb7208"] {
+            let c = Hsla::from(Rgba::try_from(h).unwrap());
+            assert_eq!(hex_of(c), h);
+        }
+    }
+
+    /// A token colour (`rgba(..)` / `#rrggbb`) as (RGB, alpha).
+    fn rgba(value: &str) -> (Rgb, f64) {
+        let hex = to_hex_color(value);
+        let rgb = Rgb::parse(&hex[..7]).unwrap();
+        let a = if hex.len() == 9 {
+            f64::from(u8::from_str_radix(&hex[7..9], 16).unwrap()) / 255.0
+        } else {
+            1.0
+        };
+        (rgb, a)
+    }
+
+    /// D26 AA: text roles on the card, on the under-page surface and on a hovered row
+    /// (the browser's URI is muted text on a hovered ListItem), in both modes.
+    #[test]
+    fn text_on_every_surface_meets_aa() {
+        use super::accent::{card, contrast};
+        let t = super::convert::design_tokens();
+        let c = &t.color;
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let pick = |d: &super::convert::DualValue| {
+                rgba(if mode.is_dark() { &d.dark } else { &d.light })
+            };
+            let card = card(mode);
+            let under = pick(&c.under_page_background).0;
+            let (hover, ha) = pick(&c.row_hover);
+            let hovered = hover.over(ha, card);
+            let surfaces = [("card", card), ("underPage", under), ("rowHover", hovered)];
+            // Label roles appear on every surface; status lines only on the card
+            // (no view puts one in a row or on the under-page surface).
+            for (name, (fg, fa), on) in [
+                ("label", pick(&c.label), &surfaces[..]),
+                ("secondaryLabel", pick(&c.secondary_label), &surfaces[..]),
+                ("danger", pick(&c.danger), &surfaces[..1]),
+                ("success", pick(&c.success), &surfaces[..1]),
+                ("warning", pick(&c.warning), &surfaces[..1]),
+            ] {
+                for (surface, bg) in on {
+                    let r = contrast(fg.over(fa, *bg), *bg);
+                    assert!(r >= 4.5, "{mode:?} {name} on {surface}: {r:.2}");
+                }
+            }
+            for fill in [&c.danger_fill, &c.danger_fill_hover, &c.danger_fill_active] {
+                let r = contrast(Rgb::WHITE, pick(fill).0);
+                assert!(r >= 4.5, "{mode:?} white on a destructive fill: {r:.2}");
+            }
+        }
+    }
+
     /// RED/GREEN anchor (R12, D26): concrete values from `design/ubilink-tokens.json`
     /// and the accent derivation land in the converted `ThemeConfig`s.
     #[test]
@@ -134,7 +210,7 @@ mod tests {
             light.colors.foreground.as_deref(),
             Some(to_hex_color("rgba(0,0,0,0.85)").as_str())
         );
-        assert_eq!(light.colors.muted_foreground.as_deref(), Some("#0000008A"));
+        assert_eq!(light.colors.muted_foreground.as_deref(), Some("#0000008C"));
         assert_eq!(dark.colors.muted_foreground.as_deref(), Some("#FFFFFF8C"));
 
         for c in [&light, &dark] {

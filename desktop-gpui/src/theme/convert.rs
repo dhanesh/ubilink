@@ -135,6 +135,8 @@ pub(super) struct ColorTokens {
     pub(super) switch_thumb: DualValue,
     pub(super) danger: DualValue,
     pub(super) danger_fill: DualValue,
+    pub(super) danger_fill_hover: DualValue,
+    pub(super) danger_fill_active: DualValue,
     pub(super) success: DualValue,
     pub(super) warning: DualValue,
 }
@@ -251,7 +253,13 @@ pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode, a: &Rol
     colors.list_active = transparent.clone();
     colors.list_active_border = transparent;
     colors.switch = v(&c.switch_off);
-    colors.switch_thumb = v(&c.switch_thumb);
+    // White (`color.switchThumb`), or black where white is under 3:1 on the checked
+    // track (a light accent; `accent::derive`).
+    colors.switch_thumb = if a.thumb == Rgb::WHITE {
+        v(&c.switch_thumb)
+    } else {
+        Some(rgb_hex(a.thumb))
+    };
     // The accent (theme/accent.rs): a checked switch and the caret take `primary`.
     colors.primary = Some(rgb_hex(a.mark));
     colors.primary_foreground = Some(rgb_hex(a.button_text));
@@ -269,9 +277,10 @@ pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode, a: &Rol
     colors.danger = v(&c.danger);
     colors.danger_foreground = white.clone();
     colors.button_danger = v(&c.danger_fill);
-    // Explicit, or gpui-component derives a pale tint that white text fails on.
-    colors.button_danger_hover = v(&c.danger_fill);
-    colors.button_danger_active = v(&c.danger_fill);
+    // Explicit, or gpui-component derives a pale tint that white text fails on:
+    // darker steps, so white keeps (more than) 4.5:1.
+    colors.button_danger_hover = v(&c.danger_fill_hover);
+    colors.button_danger_active = v(&c.danger_fill_active);
     colors.button_danger_foreground = white;
     colors.success = v(&c.success);
     colors.warning = v(&c.warning);

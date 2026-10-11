@@ -245,6 +245,11 @@ fn run(verb: Verb, cx: &mut App) -> Outcome {
                 .ok_or_else(|| "no panel open".into())
         }
         Verb::Opened => Ok(json!(store::opened())),
+        Verb::PostColorsChanged => {
+            let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
+            native::post_system_colors_changed(mtm);
+            Ok(json!({"posted": "NSSystemColorsDidChangeNotification"}))
+        }
         Verb::A11y => unreachable!("a11y replies asynchronously from `handle`"),
     }
 }
@@ -263,8 +268,13 @@ fn state_json(cx: &mut App) -> Value {
         "appearance": {
             "override": store::appearance().as_str(),
             "theme": if cx.theme().mode.is_dark() { "dark" } else { "light" },
-            // D26: the accent the theme was built from.
+            // D26: the accent the theme was built from, the live theme's colours (so a
+            // probe sees the re-theme itself, not only its input), and how many accent
+            // re-themes have run.
             "accent": crate::theme::roles(cx).accent.hex(),
+            "primary": crate::theme::hex_of(cx.theme().primary),
+            "button_primary": crate::theme::hex_of(cx.theme().button_primary),
+            "accent_refreshes": crate::theme::accent_refreshes(),
         },
         "fixtures": fixtures_json(),
         // O1: the probe checks each instance resolved its own data dir.

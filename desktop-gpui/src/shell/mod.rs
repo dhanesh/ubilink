@@ -337,6 +337,7 @@ pub fn handle_event(event: ShellEvent, cx: &mut App) {
         return;
     }
     if let ShellEvent::AccentChanged = event {
+        native::accent_change_taken();
         crate::theme::refresh_accent(cx);
         return;
     }

@@ -19,7 +19,7 @@ use crate::views::{Route, TABLE};
 
 /// Every verb the channel serves, exactly R6's list and nothing else. `parse_request`
 /// matches on these literals; `the_allowlist_is_exactly_r6s_verbs` pins the set.
-pub const VERBS: [&str; 11] = [
+pub const VERBS: [&str; 12] = [
     "open_view",
     "key",
     "state",
@@ -31,6 +31,7 @@ pub const VERBS: [&str; 11] = [
     "window_id",
     "a11y",
     "opened",
+    "post_colors_changed",
 ];
 
 /// Longest request line accepted, in bytes. Requests are tiny; a cap keeps a confused
@@ -55,6 +56,9 @@ pub enum Verb {
     WindowId,
     A11y,
     Opened,
+    /// D26: post `NSSystemColorsDidChangeNotification` in-process, as AppKit does when
+    /// the accent changes, so the observer -> inbox -> re-theme path runs.
+    PostColorsChanged,
 }
 
 /// What `set_appearance` asks the theme to follow.
@@ -240,6 +244,7 @@ pub fn parse_request(line: &str) -> Result<Verb, String> {
         "window_id" => no_args(v, &args, Verb::WindowId),
         "a11y" => no_args(v, &args, Verb::A11y),
         "opened" => no_args(v, &args, Verb::Opened),
+        "post_colors_changed" => no_args(v, &args, Verb::PostColorsChanged),
         // Unreachable past the gate above; kept so a verb added to VERBS without a
         // parser is refused rather than guessed at.
         other => Err(format!("unknown verb: {other}")),
@@ -302,6 +307,7 @@ mod tests {
             ("window_id", json!({})),
             ("a11y", json!({})),
             ("opened", json!({})),
+            ("post_colors_changed", json!({})),
         ];
         let names: Vec<&str> = valid.iter().map(|(v, _)| *v).collect();
         assert_eq!(names, VERBS);

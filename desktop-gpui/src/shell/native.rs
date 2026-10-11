@@ -354,6 +354,37 @@ pub fn read_accent(_mtm: MainThreadMarker) -> Option<crate::theme::accent::Sourc
     }
 }
 
+/// One accent change can arrive as up to three notifications (the local system-colours
+/// one and two distributed ones): post one re-theme until the shell has handled it.
+static ACCENT_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The shell is about to re-theme: later notifications post again.
+pub fn accent_change_taken() {
+    ACCENT_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Automation (D26): post `NSSystemColorsDidChangeNotification` on the local center,
+/// as AppKit does when the accent changes.
+#[cfg(feature = "automation")]
+pub fn post_system_colors_changed(_mtm: MainThreadMarker) {
+    let Some(center_class) = AnyClass::get(c"NSNotificationCenter") else {
+        return;
+    };
+    // SAFETY: +defaultCenter returns the shared center; postNotificationName:object:
+    // takes an NSString and nil. Main thread (mtm).
+    unsafe {
+        let center: Option<Retained<AnyObject>> = msg_send![center_class, defaultCenter];
+        if let Some(center) = center {
+            let n = NSString::from_str("NSSystemColorsDidChangeNotification");
+            let _: () = msg_send![
+                &*center,
+                postNotificationName: &*n,
+                object: Option::<&AnyObject>::None
+            ];
+        }
+    }
+}
+
 /// Where the accent observer posts: set once by [`observe_accent`].
 static ACCENT_INBOX: std::sync::OnceLock<super::Inbox> = std::sync::OnceLock::new();
 
@@ -369,7 +400,9 @@ objc2::define_class!(
         #[unsafe(method(colorsChanged:))]
         fn colors_changed(&self, _note: &AnyObject) {
             if let Some(inbox) = ACCENT_INBOX.get() {
-                inbox.post(super::ShellEvent::AccentChanged);
+                if !ACCENT_PENDING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    inbox.post(super::ShellEvent::AccentChanged);
+                }
             }
         }
     }

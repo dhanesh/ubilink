@@ -565,10 +565,16 @@ answers.
   from, `#rrggbb`. Automation builds take it from the `accent` fixture when one is
   loaded (loading one re-themes open windows in place, the path the system's
   colour-change notification takes); otherwise, as release builds always do, from
-  `NSColor.controlAccentColor`.
+  `NSColor.controlAccentColor`. `appearance.primary` and `appearance.button_primary`
+  are the live theme's colours (`#rrggbb`); `appearance.accent_refreshes` counts
+  accent re-themes. The automation-only verb `post_colors_changed` posts
+  `NSSystemColorsDidChangeNotification` in-process, so the observer → shell inbox →
+  re-theme path runs (`accent.json`).
 - **Material (D26).** `shell.material` is what sits behind the panel's content, read
   back from the live window: `"glass"` (NSGlassEffectView, macOS 26+), `"vibrancy"`
   (NSVisualEffectView, older systems) or `"unknown"` before a panel is read.
+  `shell.json`, `panel-hotkey.json` and `performance.json` assert `"glass"`, so they
+  need macOS 26 or later; on an older Mac those steps fail by design.
 
 ## PERFORMANCE.md format
 

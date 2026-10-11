@@ -5,7 +5,7 @@
     "Automation instances run with UBILINK_SKIP_HOTKEYS=1 (O4), so this asserts hotkeys_skipped and an empty hotkeys_registered; the three real registrations are the maintainer's manual R4 check.",
     "The tray is created whether or not hotkeys are skipped, so tray_present is asserted for real.",
     "window_kind/background stay 'unknown' and window_verified false until a live panel is read back; step 1 pins that, so the later 'popup'/'blurred' cannot be a default.",
-    "material (D26) names what is behind the panel's content, read back from the live window's subviews: 'glass' (an NSGlassEffectView, macOS 26+), 'vibrancy' (GPUI's NSVisualEffectView, the fallback on older systems) or 'unknown' before a panel is read. This host runs macOS 27, so 'glass' is asserted.",
+    "material (D26) names what is behind the panel's content, read back from the live window's subviews: 'glass' (an NSGlassEffectView, macOS 26+), 'vibrancy' (GPUI's NSVisualEffectView, the fallback on older systems) or 'unknown' before a panel is read. This scenario asserts 'glass', which needs macOS 26 or later; on an older Mac the material is 'vibrancy' and the material steps fail by design (the probe format has no OS condition).",
     "data_dir is what the app's one resolver (desktop-gpui/src/paths.rs) returns: it must be this instance's own {data_dir}, never the user's Application Support dir."
   ],
   "steps": [
