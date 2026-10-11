@@ -2062,7 +2062,9 @@ class LockWaitBudget(unittest.TestCase):
         start = probe._PROCESS_START
         self.assertLessEqual(probe._WAIT_DEADLINE_S, 480)
         self.assertEqual(probe.default_lock_timeout(start), probe._WAIT_DEADLINE_S)
-        self.assertEqual(probe.default_lock_timeout(start + 100), probe._WAIT_DEADLINE_S - 100)
+        # start is a large monotonic float, so (start + 100) - start can miss 100 by an ulp.
+        self.assertAlmostEqual(probe.default_lock_timeout(start + 100), probe._WAIT_DEADLINE_S - 100,
+                               places=6)
         self.assertEqual(probe.default_lock_timeout(start + 10_000), 1.0, "never below 1 s")
 
 
