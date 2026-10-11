@@ -921,3 +921,176 @@ retired; the Tauri app survives only in history.
   records of their time and are not rewritten. `ee80e70` is the last commit with the
   Tauri app (`desktop/`, `dist/`); `6e913b2` is the last commit with `src-tauri/` and
   `ubilink-next`.
+
+## D26 — Native macOS 27 look: system font, Liquid Glass, system colours, live accent
+
+**Date:** 2026-10-11 · **Constraints:** U1 (feel native), WCAG AA · **Source:** the user's
+macOS 27 instruction (2026-10-11), branch `factory/ubilink-theme`
+
+Ubilink should look and feel as much like a first-party macOS 27 app as it can. A
+Graphical theme ("Ubilink", graphicalui.com) was adopted first. Three of its picks are
+**superseded by the user's macOS 27 instruction (2026-10-11)**:
+
+| Graphical-theme pick | Now |
+|---|---|
+| Inter (embedded, weights 500/600) | the system font, `.SystemUIFont` (SF), at macOS text-style sizes; no font files |
+| an opaque panel | Liquid Glass (NSGlassEffectView) around an opaque card |
+| black/white primary buttons and a red (#fc032d) focus/accent | the user's live system accent colour |
+
+The Graphical guide stays in the repo (`GUI.md`, `gui/`, `.agents/skills/`) for its
+method (inventory, map by semantic role, convert shared components, audit), not its
+values. `CLAUDE.md` says so.
+
+**Who decided.**
+
+- **Jev (TypeSafe System One), 2026-10-11 12:26, per `jev log`:**
+  - system font: yes 0.96
+  - native control sizes: yes 0.90
+  - concentric radii: yes 0.72
+  - material, scores out of 2: opaque 1.57 (confidence 0.37), glass 0.87 (0.70),
+    vibrancy 0.68 (0.43)
+  - accent, scores out of 2: fixed 1.53 (0.28), live 0.69 (0.35)
+- **Reasoning pass.** The material and accent scores were low-confidence, so they
+  went to a reasoning pass. It chose glass around an opaque card, which keeps AA and
+  the colour probes deterministic. It chose a fixed #007aff accent. The user then
+  asked for the live system accent.
+- **Executor judgement calls, for review:**
+  - Reset… is a plain push button.
+  - The primary button has 32 pt side padding.
+  - The glass frame is 4 pt.
+  - The darken limit for white button text is 0.12 lightness.
+  - Separators are treated as decorative (see below).
+
+### What
+
+- **Tokens.** `design/ubilink-tokens.json` is still the one source. It holds:
+  - AppKit's system colours as macOS 27.0.1 reports them (`NSColor` in sRGB, light and
+    dark);
+  - the macOS text styles, used by role: DISPLAY = title2 17, TITLE = headline 13 bold,
+    ROW = body 13, META = callout 12; the base stays 13, macOS body and the
+    gpui-component rem;
+  - the 4 pt spacing grid;
+  - concentric radii: panel 18, card 14 (18 − the 4 pt frame), controls and rows 6;
+  - control and row heights: 24 pt each.
+
+  `theme/convert.rs` maps the tokens to gpui-component roles (the table is in
+  `theme/mod.rs`).
+- **Material.**
+  - The theme carries windowBackgroundColor at alpha 0. gpui-component's window root
+    paints the whole window in the theme background, and an opaque one would cover
+    the glass.
+  - On macOS 26+ an NSGlassEffectView (radius 18) is added as a sibling below GPUI's
+    view, where GPUI's NSVisualEffectView was, and that view is hidden.
+  - On older systems the vibrancy view stays.
+  - Each view paints an opaque card in windowBackgroundColor (#ffffff / #1e1e1e),
+    inset 4 pt, so the glass shows as the panel's rim.
+  - The shell adds the frame to the window size, so a view's height is still its card's.
+  - `shell.material` reports `"glass"` or `"vibrancy"`, read back from the live window.
+- **Accent.** `theme/accent.rs`:
+  - reads `controlAccentColor`, plus `selectedContentBackgroundColor` and
+    `keyboardFocusIndicatorColor` under Aqua and DarkAqua, in sRGB;
+  - re-reads them on `NSSystemColorsDidChangeNotification` and the distributed
+    `AppleColorPreferencesChangedNotification` / `AppleAquaColorVariantChanged`, and
+    re-themes open windows in place;
+  - "Multicolor" reports #007aff, as the default does.
+
+  The derivation (`accent::derive`) is pure and unit-tested in both modes for eight
+  representative accents (blue, purple, pink, red, orange, yellow, green, graphite).
+  This host confirms only the blue value.
+
+  | Role | Rule |
+  |---|---|
+  | Primary button | white text if it reaches 4.5:1; else the fill darkened by up to 0.12 HSL lightness; else black text on the accent (orange, yellow), as macOS does |
+  | Checked switch, caret | the accent, moved to 3:1 on the card only if needed |
+  | Focus ring | AppKit's colour, its alpha raised to 3:1 |
+  | Selected row | AppKit's selection fill with white text |
+  | Switch thumb | white, or black where white is under 3:1 on the checked track |
+
+  Automation builds may take an `accent` fixture, through the same re-theme path;
+  release builds read only the system.
+- **Controls.** `views/theming.rs` has one constructor per control:
+
+  | Constructor | Look |
+  |---|---|
+  | primary button | accent fill |
+  | push button | `secondary`: a light control fill, no stroke |
+  | destructive button | filled red, white text |
+  | text field | 24 pt, 13 pt text |
+  | switch | gpui-component `small`, 28×16, the closest to AppKit's small switch |
+
+  List rows are 24 pt with an inset, rounded selection drawn by the view.
+  gpui-component caps `list_active` at 20% alpha, so it is made transparent.
+  Settings' Reset… becomes a plain push button, because it only asks; Delete everything
+  is the destructive one.
+- **Icons.** `main.rs` registers `gpui_kit::assets::Assets`. Before this, every
+  gpui-component icon drew blank. No icons were added to views.
+
+### Deviations from AppKit's values, and why
+
+| Value | AppKit | Used | Why |
+|---|---|---|---|
+| secondaryLabel, light | black 0.50 (4.00:1) | black 0.55 (4.74:1 on the card, 4.62:1 on a hovered row) | AA 4.5:1 for 12–13 pt text; 0.54 was 4.49:1 on a hovered row |
+| systemRed as text, light | #ff383c (3.57:1) | #ee0005 (4.53:1) | AA |
+| destructive button fill, both modes | systemRed (white text 3.57 / 3.43:1) | #ee0005 (4.53:1); hover #d60004 (5.44:1), pressed #bd0004 (6.63:1) | AA |
+| switch thumb on a checked light-accent track | white (dark mode: orange 2.57, green 2.43, yellow 1.58:1) | black where white is under 3:1 (orange 8.16:1); black also clears the off track (6.92 / 3.94:1) | AA 3:1 non-text |
+| systemGreen as text, light | #34c759 (2.22:1) | #24883d (4.50:1) | AA |
+| systemOrange as text, light | #ff8d28 (2.31:1) | #be5900 (4.55:1) | AA (`warning`; no view uses it yet) |
+| primary button fill (blue accent) | controlAccentColor #007aff (white 4.02:1) | #0072ef (4.51:1) | AA; the switch keeps #007aff (4.02:1 ≥ 3:1) |
+| focus ring | keyboardFocusIndicatorColor at 0.50 (2.16 / 2.60:1) | alpha raised to 3:1 (opaque accent for a fixture) | AA 3:1 non-text |
+| text field edge, switch-off track | separator-like, about 0.10 (1.26 / 1.36:1) | black 0.42 / white 0.34 (3.03 / 3.13:1) | AA 3:1 non-text; heavier than native |
+| separators | separatorColor 0.10 | unchanged (1.26 / 1.36:1) | **open decision for the user.** They are kept as decorative hairlines that are not control boundaries, so WCAG 1.4.11 would not apply. Views draw none of their own; gpui-component uses `border` for popup edges. Raising them to 3:1 would contradict "no heavy borders" |
+| primary button padding | about 12 pt | 32 pt a side | the theming probe needs 24 pt of solid fill beside the label |
+| switch size | NSSwitch small | gpui-component small (28×16) | the nearest size gpui-component offers |
+| letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
+| URIs | — | SF Mono, META size | identifiers; macOS has no text style for them |
+
+### AA (final tokens, blue accent; `scratchpad` contrast script)
+
+Every text pair is at least 4.5:1 and every control boundary or state mark at least 3:1,
+in both modes. The exceptions are decorative separators (above) and disabled controls
+(WCAG exempts them).
+
+| Pair | Light | Dark |
+|---|---|---|
+| label on card | 15.13 | 12.27 |
+| secondaryLabel on card | 4.74 | 5.92 |
+| secondaryLabel on underPage | 4.65 | (label 11.06) |
+| secondaryLabel on a hovered row (rowHover) | 4.62 | 5.35 |
+| danger text | 4.53 | 4.86 |
+| success text | 4.50 | 8.25 |
+| warning text | 4.55 | 7.47 |
+| white on primary button #0072ef | 4.51 | 4.51 |
+| label on push button | 13.62 | 8.26 |
+| label on push button, hover | 12.75 | 6.86 |
+| white on destructive #ee0005 | 4.53 | 4.53 |
+| white on selected row (live #0064e1 / #0059d1) | 5.37 | 6.27 |
+| text field edge on card | 3.03 | 3.13 |
+| switch off track on card | 3.03 | 3.13 |
+| switch on (#007aff) on card | 4.02 | 4.15 |
+| switch thumb on the on track (blue: white) | 4.02 | 4.02 |
+| switch thumb (white) on the off track | 3.03 | 5.33 |
+| focus ring on card | 4.02 | 4.15 |
+| orange accent: black on #f7821b button | 8.16 | 8.16 |
+| orange accent: switch #eb7208 / #f7821b on card | 3.02 | 6.48 |
+
+### Gaps and follow-ups
+
+- **Icons in views.** The icon set is now registered, but no view uses an icon yet.
+- **SF optical tracking and per-style line heights.** GPUI exposes neither.
+- **Partly exercised live.** The probe drives the real observer → shell inbox →
+  re-theme path by posting `NSSystemColorsDidChangeNotification` in-process
+  (`post_colors_changed`, automation only). It also checks the live theme colours
+  after an accent fixture loads. Up to three notifications per change are coalesced
+  into one re-theme. Nobody changed the accent in System Settings during a run, so
+  the distributed notifications and AppKit's own posting are untested.
+- **Selected-row tint when the window is not key.** AppKit's
+  unemphasized selection colour is not used; the panel is key while shown.
+- **Shadow.** The glass and its window shadow are AppKit's; no extra card shadow is
+  drawn.
+- **Dialogs need an opaque surface.** The theme background is transparent (alpha 0),
+  so a gpui-component Dialog drawn on `background` would be see-through. The a11y
+  spike's Dialog is one example. Any future Dialog must paint the card colour
+  (`theming::surface`).
+- **Status colours on other surfaces.** danger, success and warning are AA on the
+  card only (danger is 4.19:1 on the under-page surface). No view puts a status line
+  anywhere else; `theme::tests::text_on_every_surface_meets_aa` pins this.

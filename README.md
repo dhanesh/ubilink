@@ -65,7 +65,7 @@ way to get it, and revoking the grant stops it).
 Built and tested:
 
 - ✅ macOS app, native GPUI (`desktop-gpui/`, binary `ubilink`, Ubilink.app): a
-  menu-bar shell with a native blurred pop-up panel, global hotkeys and a tray, and four
+  menu-bar shell with a native Liquid Glass pop-up panel, global hotkeys and a tray, and four
   views:
   - capture (Cmd+Shift+K), with copy and backlinks
   - link browser (Cmd+Shift+L), with a virtualised list, fuzzy filter, keyboard
@@ -74,7 +74,11 @@ Built and tested:
   - settings (Cmd+Shift+,), with app adapters, graph export/import/reset and launch at
     login
 
-  Light and dark token theming. Each feature is proven on the running app by the GPUI
+  A native macOS 27 look ([D26](DECISIONS.md)): the system font at macOS text-style
+  sizes, AppKit's system colours in light and dark (raised only where WCAG AA needs
+  it), the user's live system accent colour, and a glass panel frame around an opaque
+  card. One token file (`design/ubilink-tokens.json`) feeds the theme; UI work follows
+  `CLAUDE.md`. Each feature is proven on the running app by the GPUI
   probes (`scripts/probe.py`, `desktop-gpui/probes/`) through an automation socket that
   release builds never contain ([D23](DECISIONS.md)). It replaced the earlier Tauri
   app in GPUI Phase 2b, keeping its name, bundle id and data dir ([D24](DECISIONS.md)).

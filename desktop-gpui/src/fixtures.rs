@@ -31,6 +31,9 @@ pub enum Fixture {
     /// spec D6): read and updated by [`crate::login_item`]'s seam, so a probe never
     /// registers a real login item on the host (O4).
     LoginItem,
+    /// The system accent colour (D26): stands in for `NSColor.controlAccentColor`
+    /// (`theme::accent`), so a probe's colours do not depend on the host's setting.
+    Accent,
 }
 
 /// The fixture path for `kind`, if an automation probe loaded one. Always `None` in a

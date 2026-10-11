@@ -30,8 +30,7 @@
 
 use std::path::Path;
 
-use gpui_kit::component::button::Button;
-use gpui_kit::component::{ActiveTheme, Sizable};
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
@@ -40,7 +39,7 @@ use super::escape::{self, EscapeAction, EscapeState};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::opener::Opener;
-use crate::theme::tokens::{font_size, radius, spacing};
+use crate::theme::tokens::{font_size, font_weight, radius, spacing};
 
 /// The onboarding route's view-state, for Task 6's automation `state` verb.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -403,14 +402,14 @@ impl OnboardingView {
                         // Still to grant: the accent (primary) button, the step's call
                         // to action. Granted: a plain one, to look again.
                         let button = if granted {
-                            Button::new(id).small()
+                            theming::push_button(id)
                         } else {
-                            theming::accent_button(id)
+                            theming::primary_button(id)
                         }
                         .label(p.button_text())
                         .on_click(cx.listener(move |this, _, _, cx| this.open(p, cx)));
                         if sample {
-                            d.child(SAMPLES.mark(Sample::Accent, button))
+                            d.child(SAMPLES.mark(Sample::Primary, button))
                         } else {
                             d.child(button)
                         }
@@ -467,11 +466,11 @@ impl Render for OnboardingView {
             .px(spacing::S5)
             .py(spacing::S2)
             .rounded(radius::CARD)
-            // The opaque token surface (R14): the panel's blur stays behind the card.
+            // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
             .child(
                 div()
-                    .h(theming::ACCENT_H)
+                    .h(theming::CONTROL_H)
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
@@ -481,6 +480,7 @@ impl Render for OnboardingView {
                             .flex_shrink_0()
                             .relative()
                             .text_size(font_size::TITLE)
+                            .font_weight(font_weight::HEADLINE)
                             .text_color(foreground)
                             .child(text!(Route::Onboarding.title()))
                             .child(SAMPLES.probe(Sample::Text)),
@@ -522,8 +522,7 @@ impl Render for OnboardingView {
                             .child(text!(id = "onboarding-hint", hint)),
                     )
                     .child(
-                        Button::new("recheck")
-                            .small()
+                        theming::push_button("recheck")
                             .label("Re-check")
                             .on_click(cx.listener(|this, _, _, cx| this.start_check(true, cx))),
                     ),

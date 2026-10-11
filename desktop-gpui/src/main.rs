@@ -65,7 +65,9 @@ fn main() {
     // graph) from paths::data_dir(); automation builds skip the OS permission probe.
     app_state::init();
 
-    let app = gpui_kit::application();
+    // gpui-kit's icon set (Lucide), so gpui-component widgets that draw an icon (a
+    // Switch's tooltip, an Input's clear button, ...) find their SVGs.
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
     // `open Ubilink.app` while it runs: LaunchServices sends a reopen instead of
     // starting a second process. Show the panel, as the Tauri shell's tray "Show" did.
     app.on_reopen(|cx| shell::execute(Command::Open(Route::Capture), cx));
@@ -78,9 +80,10 @@ fn main() {
         let mtm = MainThreadMarker::new().expect("GPUI runs this closure on the main thread");
         NSApplication::sharedApplication(mtm)
             .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-        // Satisfies R12: replace gpui-component's default light/dark themes
-        // with ubilink's own (design/ubilink-tokens.json), matching whichever
-        // mode the system is in right now. See desktop-gpui/src/theme/mod.rs.
+        // Satisfies R12, D26: replace gpui-component's default light/dark themes
+        // with ubilink's native macOS 27 ones (design/ubilink-tokens.json and the
+        // live system accent), matching whichever mode the system is in right now.
+        // See desktop-gpui/src/theme/mod.rs.
         theme::install(cx);
         // TN4: tray-icon and global-hotkey need the main thread and a running NSApp
         // loop, which exist only from here on.

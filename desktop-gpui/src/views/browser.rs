@@ -64,11 +64,11 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use gpui_kit::component::input::{
-    Enter, Escape, Input, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome,
-    MoveLeft, MoveRight, MoveUp,
+    Enter, Escape, InputEvent as FilterEvent, InputState, MoveDown, MoveEnd, MoveHome, MoveLeft,
+    MoveRight, MoveUp,
 };
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
-use gpui_kit::component::{ActiveTheme, IndexPath, Sizable};
+use gpui_kit::component::{ActiveTheme, IndexPath};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,7 @@ use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
 use crate::opener::Opener;
-use crate::theme::tokens::{font_size, radius, spacing, MONO_FONT_FAMILY};
+use crate::theme::tokens::{font_size, radius, size, spacing, MONO_FONT_FAMILY};
 
 /// The filter's placeholder (the Tauri browser's wording, `dist/index.html`).
 pub const FILTER_PLACEHOLDER: &str = "Filter links…";
@@ -92,12 +92,12 @@ pub const EMPTY_TEXT: &str = "No links yet. Capture one with the capture hotkey.
 // with the virtual list's one overdraw row, never builds more than sixty.
 /// Top and bottom padding of the view.
 const PAD_Y: Pixels = spacing::S2;
-/// The header row: the route title and the filter.
-const HEADER_H: Pixels = px(28.);
+/// The header row: the route title, the filter and the Open button (control height).
+const HEADER_H: Pixels = size::CONTROL;
 /// Between the header and the list.
 const GAP: Pixels = spacing::S1;
-/// One row: name and URI on a single line.
-const ROW_H: Pixels = px(20.);
+/// One row: name and URI on a single line, a macOS list row (D26).
+const ROW_H: Pixels = size::ROW;
 /// Up to this many shown rows, the list is laid out at its full height inside a
 /// scrolling container, so every row is built and reaches the accessibility tree (a
 /// filtered result is read whole); past it, the list virtualises to its viewport.
@@ -432,6 +432,9 @@ pub struct BrowserRows {
     shown: Vec<usize>,
     /// The levels drilled through, outermost first; empty at the top level.
     trail: Vec<Frame>,
+    /// The selected row, as `List` last reported it: drawn with macOS's selection
+    /// fill (D26; gpui-component caps its own `list_active` at 20% alpha).
+    selected: Option<usize>,
 }
 
 impl BrowserRows {
@@ -444,6 +447,7 @@ impl BrowserRows {
             query: String::new(),
             shown,
             trail: Vec::new(),
+            selected: None,
         }
     }
 
@@ -544,28 +548,38 @@ impl ListDelegate for BrowserRows {
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         let entry = self.shown_entry(ix.row)?;
-        let theme = cx.theme();
+        let selected = self.selected == Some(ix.row);
+        let (selected_bg, selected_text) = theming::selection(cx);
+        let (name_color, uri_color) = if selected {
+            (selected_text, selected_text)
+        } else {
+            (theming::primary_text(cx), cx.theme().muted_foreground)
+        };
         Some(
             ListItem::new(SharedString::from(format!("browser-row-{}", ix.row)))
                 .h(ROW_H)
-                .py_0()
-                .px(spacing::S2)
-                .rounded(radius::KBD)
+                .p_0()
+                .rounded(radius::ROW)
                 .child(
+                    // The row's own fill: macOS's selection when selected (ListItem's
+                    // own selected fill is transparent, `theme::convert`).
                     div()
                         .flex()
                         .flex_row()
-                        .items_baseline()
+                        .items_center()
                         .gap(spacing::S3)
+                        .h(ROW_H)
+                        .px(spacing::S2)
                         .w_full()
                         .min_w_0()
-                        .line_height(px(18.))
+                        .rounded(radius::ROW)
+                        .when(selected, |d| d.bg(selected_bg))
                         .child(
                             div()
                                 .flex_shrink_0()
                                 .max_w(relative(0.45))
                                 .text_size(font_size::ROW)
-                                .text_color(theming::primary_text(cx))
+                                .text_color(name_color)
                                 .truncate()
                                 .child(text!(entry.name.clone())),
                         )
@@ -575,7 +589,7 @@ impl ListDelegate for BrowserRows {
                                 .min_w_0()
                                 .text_size(font_size::META)
                                 .font_family(MONO_FONT_FAMILY)
-                                .text_color(theme.muted_foreground)
+                                .text_color(uri_color)
                                 .truncate()
                                 .child(text!(entry.uri.clone())),
                         ),
@@ -611,10 +625,11 @@ impl ListDelegate for BrowserRows {
 
     fn set_selected_index(
         &mut self,
-        _ix: Option<IndexPath>,
+        ix: Option<IndexPath>,
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) {
+        self.selected = ix.map(|ix| ix.row);
         cx.notify();
     }
 }
@@ -1058,7 +1073,7 @@ impl Render for BrowserView {
             .px(spacing::S3)
             .py(PAD_Y)
             .rounded(radius::CARD)
-            // The opaque token surface (R14): the panel's blur stays behind the card.
+            // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
             .child(
                 div()
@@ -1093,7 +1108,7 @@ impl Render for BrowserView {
                             .w(FILTER_W)
                             .flex_shrink(1.)
                             .min_w_0()
-                            .child(Input::new(&filter).small()),
+                            .child(theming::text_field(&filter)),
                     )
                     .child(
                         div()
@@ -1107,8 +1122,8 @@ impl Render for BrowserView {
                     // shown). Always there, so the header never shifts as rows load.
                     .child(
                         SAMPLES.mark(
-                            Sample::Accent,
-                            theming::accent_button("browser-open")
+                            Sample::Primary,
+                            theming::primary_button("browser-open")
                                 .label(OPEN_BUTTON)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     // The filter keeps focus (README contract).

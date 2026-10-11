@@ -1,0 +1,192 @@
+{
+  "description": "D26: the theme follows the system accent colour live. With the accent seam pinned to the default blue, Settings' primary button and checked switch are blue; loading an orange accent while Settings is open re-themes the same window in place, and both controls take the orange accent (adjusted only where AA requires), in light and dark.",
+  "requirement": "D26 (native macOS 27 look: live system accent)",
+  "notes": [
+    "Automation builds read the accent from the `accent` fixture when one is loaded (a stand-in for NSColor.controlAccentColor and NSSystemColorsDidChangeNotification); release builds read only the live system value (theme/accent.rs). Loading the fixture runs the same re-theme path the system notification does.",
+    "Expected colours are the derivation's output (theme/accent.rs, unit-tested): blue #007aff gives a #0072ef button fill (white text needs 4.5:1) and a #007aff switch. Orange #f7821b: white text fails AA and darkening within the bound does not reach it, so the button keeps the orange fill with black text (as macOS does for light accents); the switch is darkened to #eb7208 to reach 3:1 on the white card, and is #f7821b on the dark card.",
+    "appearance.primary and appearance.button_primary are the live theme's colours (cx.theme(), #rrggbb), so the re-theme itself is checked even where the pixel steps are ENV-BLOCKED; appearance.accent_refreshes counts accent re-themes. post_colors_changed (automation only) posts NSSystemColorsDidChangeNotification in-process, so the real observer -> shell inbox -> theme::refresh_accent path runs; it re-reads the loaded fixture, so the colours stay blue and the counter proves the path.",
+    "appearance.accent is the accent the theme was built from, as #rrggbb.",
+    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL."
+  ],
+  "setup": {
+    "fixtures": {
+      "accent": "accent-blue.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "open_view",
+      "args": {
+        "route": "settings"
+      },
+      "expect": {
+        "route": "settings",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid": "window_id"
+      }
+    },
+    {
+      "name": "the setup's accent fixture ran one re-theme",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "settings",
+        "appearance.accent_refreshes": 1
+      }
+    },
+    {
+      "name": "post NSSystemColorsDidChangeNotification, as AppKit does on an accent change",
+      "call": "post_colors_changed",
+      "expect": {
+        "posted": "NSSystemColorsDidChangeNotification"
+      }
+    },
+    {
+      "name": "the observer -> inbox -> re-theme path ran once more",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "appearance.accent_refreshes": 2,
+        "appearance.accent": "#007aff"
+      }
+    },
+    {
+      "name": "light",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light",
+        "override": "light"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "settings",
+        "appearance.theme": "light",
+        "appearance.accent": "#007aff",
+        "appearance.primary": "#007aff",
+        "appearance.button_primary": "#0072ef"
+      }
+    },
+    {
+      "name": "blue/light: primary button",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "blue/light: checked switch",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "switch the accent to orange while Settings is open",
+      "call": "load_fixture",
+      "args": {
+        "kind": "accent",
+        "path": "{fixtures}/accent-orange.json"
+      }
+    },
+    {
+      "name": "orange: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "orange: same window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "name": "orange/light: the theme took the new accent",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "settings",
+        "appearance.accent": "#f7821b",
+        "appearance.primary": "#eb7208",
+        "appearance.button_primary": "#f7821b",
+        "appearance.accent_refreshes": {
+          "ge": 3
+        }
+      }
+    },
+    {
+      "name": "orange/light: primary button takes the accent (black text: white fails AA on orange)",
+      "pixel": "view.theme_samples.primary",
+      "color": "#f7821b",
+      "delta_e": 3
+    },
+    {
+      "name": "orange/light: checked switch takes the accent, darkened to 3:1 on the white card",
+      "pixel": "view.theme_samples.accent",
+      "color": "#eb7208",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "orange/light: screenshot",
+      "screenshot": "accent-orange-light"
+    },
+    {
+      "name": "dark",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark",
+        "override": "dark"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "appearance.theme": "dark",
+        "appearance.accent": "#f7821b",
+        "appearance.primary": "#f7821b",
+        "appearance.button_primary": "#f7821b"
+      }
+    },
+    {
+      "name": "orange/dark: primary button",
+      "pixel": "view.theme_samples.primary",
+      "color": "#f7821b",
+      "delta_e": 3
+    },
+    {
+      "name": "orange/dark: checked switch",
+      "pixel": "view.theme_samples.accent",
+      "color": "#f7821b",
+      "delta_e": 3,
+      "match": "best"
+    },
+    {
+      "name": "orange/dark: screenshot",
+      "screenshot": "accent-orange-dark"
+    }
+  ]
+}

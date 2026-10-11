@@ -28,6 +28,9 @@ you're looking at and keeps a two-way graph of the links you make.
   blurred pop-up panel and a menu-bar icon. It keeps the name, bundle id
   (`org.dhanesh.ubilink`) and data folder of the earlier web-view build, so an
   existing link graph, adapter settings and `adapters.json` carry over unchanged.
+- A native macOS 27 look: the system font, system colours in light and dark, buttons,
+  switches and selection in your chosen accent colour (and following it when you change
+  it), and a Liquid Glass panel on macOS 26 and later.
 
 ### Removed
 - The Tauri web-view app and its web panel. The packaged app, the DMG and the release
