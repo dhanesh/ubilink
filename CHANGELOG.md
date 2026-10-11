@@ -28,6 +28,9 @@ you're looking at and keeps a two-way graph of the links you make.
   blurred pop-up panel and a menu-bar icon. It keeps the name, bundle id
   (`org.dhanesh.ubilink`) and data folder of the earlier web-view build, so an
   existing link graph, adapter settings and `adapters.json` carry over unchanged.
+- Source layout: the core crate now lives in `core/` (was `src-tauri/`) and the app's
+  Cargo package is named `ubilink` (was `ubilink-next`); the last Tauri-era names are
+  gone (D25).
 
 ### Removed
 - The Tauri web-view app and its web panel. The packaged app, the DMG and the release
