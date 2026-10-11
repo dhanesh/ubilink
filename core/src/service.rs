@@ -108,10 +108,12 @@ impl UbilinkService {
         self.permission
     }
 
-    /// Replace the permission the capture gate checks: a later check's answer, so a
-    /// grant made after the start-up probe takes effect without a relaunch.
-    pub fn set_permission(&mut self, p: PermissionState) {
-        self.permission = p;
+    /// Open the capture gate after a later check found Automation granted, so a grant
+    /// made after the start-up probe takes effect without a relaunch. One-way: there
+    /// is no way to lower the gate after construction (a revoked grant shows up as the
+    /// capture's own osascript failure).
+    pub(crate) fn grant_automation(&mut self) {
+        self.permission = PermissionState::Granted;
     }
 
     /// The second half of `capture`, for a caller that ran `capture_active` itself
