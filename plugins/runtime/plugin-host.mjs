@@ -38,7 +38,7 @@
 // with. The core therefore treats every authenticated frame's payload as
 // plugin-controlled and derives every security decision from its own broker.
 //
-// Protocol: see src-tauri/src/sandbox.rs.
+// Protocol: see core/src/sandbox.rs.
 
 import fs from 'node:fs';
 import v8 from 'node:v8';

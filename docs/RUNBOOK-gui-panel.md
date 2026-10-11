@@ -2,7 +2,7 @@
 
 The panel is the native GPUI app in `desktop-gpui/` (binary `ubilink`, Ubilink.app,
 `org.dhanesh.ubilink`; D22, D24). Its logic lives in the GUI-free `app/` command layer
-and in ubilink-core (`src-tauri/`), both tested headlessly; the views are proven on the
+and in ubilink-core (`core/`), both tested headlessly; the views are proven on the
 running app by the GPUI probes. What still needs a person at a real Mac is listed under
 "On a real Mac".
 
@@ -10,7 +10,7 @@ For the unattended GPUI probe runs (factory-conductor), see
 `docs/RUNBOOK-phase1-unattended.md` for the host preflight.
 
 ## What is already proven (no person needed)
-- **Command contract** (`src-tauri/src/panel.rs`, `app/`): `capture_current` surfaces a
+- **Command contract** (`core/src/panel.rs`, `app/`): `capture_current` surfaces a
   resource's backlinks (U5) and turns any capture failure into an explained message that
   says what to do (U3); other commands keep working while a capture is in flight; a
   captured link is validated before it is stored; `open_link` re-validates with the

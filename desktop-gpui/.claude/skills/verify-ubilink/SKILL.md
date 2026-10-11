@@ -174,7 +174,7 @@ name=pass|fail ...`. The recorder then writes
 | check | passes when |
 |---|---|
 | `process` | the recorded pid is alive and still runs this instance's binary copy (not a reused pid) |
-| `build` | all of these hold: the binary's sha256 is the one built at launch; the commit it was built from equals the skill's checkout's `HEAD` and your cwd's `HEAD`; and `desktop-gpui/`, `app/`, `src-tauri/` and `design/` were clean at build time and are clean now. Evidence is bound to `HEAD`, so a dirty or moved checkout cannot be proven: commit, then relaunch. A cwd in another checkout fails here, so cd into `$WT` |
+| `build` | all of these hold: the binary's sha256 is the one built at launch; the commit it was built from equals the skill's checkout's `HEAD` and your cwd's `HEAD`; and `desktop-gpui/`, `app/`, `core/` and `design/` were clean at build time and are clean now. Evidence is bound to `HEAD`, so a dirty or moved checkout cannot be proven: commit, then relaunch. A cwd in another checkout fails here, so cd into `$WT` |
 | `endpoint` | the instance's automation socket answers `state` and reports this instance's own `data_dir` (the port check, for a socket) |
 | `isolation` | `state.shell.hotkeys_skipped` is true and the data dir is inside the instance's temp root, never `~/Library/Application Support` |
 | `desktop` | the login session's screen is not locked. On a locked screen no panel becomes active and every a11y read fails for a reason that is not the product's; `call` refuses to drive one (exit 3). A sleeping display is fine: `call` holds `caffeinate -d -i -u` like `probe.py run`, which wakes it |

@@ -672,7 +672,7 @@
           {
             "id": "E2",
             "type": "file_exists",
-            "path": "src-tauri/src/resource.rs",
+            "path": "core/src/resource.rs",
             "status": "VERIFIED"
           }
         ],
@@ -691,7 +691,7 @@
           {
             "id": "E3",
             "type": "test_passes",
-            "path": "src-tauri/src/adapter.rs",
+            "path": "core/src/adapter.rs",
             "test_name": "permission_gate_blocks_capture_with_explanation_not_silence",
             "status": "VERIFIED"
           },
@@ -717,14 +717,14 @@
           {
             "id": "E4",
             "type": "test_passes",
-            "path": "src-tauri/src/resource.rs",
+            "path": "core/src/resource.rs",
             "test_name": "content_hash_matches_after_move_and_rename",
             "status": "VERIFIED"
           },
           {
             "id": "E5",
             "type": "file_exists",
-            "path": "src-tauri/src/resource.rs",
+            "path": "core/src/resource.rs",
             "status": "VERIFIED"
           }
         ],
@@ -743,14 +743,14 @@
           {
             "id": "E6",
             "type": "test_passes",
-            "path": "src-tauri/src/graph.rs",
+            "path": "core/src/graph.rs",
             "test_name": "backlink_visible_from_both_ends",
             "status": "VERIFIED"
           },
           {
             "id": "E7",
             "type": "file_exists",
-            "path": "src-tauri/src/graph.rs",
+            "path": "core/src/graph.rs",
             "status": "VERIFIED"
           }
         ],
@@ -770,7 +770,7 @@
           {
             "id": "E8",
             "type": "test_passes",
-            "path": "src-tauri/tests/sandbox.rs",
+            "path": "core/tests/sandbox.rs",
             "test_name": "fail_closed_no_fs_no_child_escape",
             "status": "VERIFIED"
           },
@@ -802,7 +802,7 @@
           {
             "id": "E11",
             "type": "test_passes",
-            "path": "src-tauri/tests/sandbox.rs",
+            "path": "core/tests/sandbox.rs",
             "test_name": "broker_allows_granted_denies_ungranted",
             "status": "VERIFIED"
           }
@@ -822,13 +822,13 @@
           {
             "id": "E12",
             "type": "file_exists",
-            "path": "src-tauri/src/capabilities.rs",
+            "path": "core/src/capabilities.rs",
             "status": "VERIFIED"
           },
           {
             "id": "E13",
             "type": "test_passes",
-            "path": "src-tauri/src/capabilities.rs",
+            "path": "core/src/capabilities.rs",
             "test_name": "unsupported_app_degrades_with_explanation_not_silence",
             "status": "VERIFIED"
           },
@@ -855,7 +855,7 @@
           {
             "id": "E14",
             "type": "test_passes",
-            "path": "src-tauri/tests/no_network_deps.rs",
+            "path": "core/tests/no_network_deps.rs",
             "test_name": "core_has_no_network_client_dependency",
             "status": "VERIFIED"
           },
@@ -917,14 +917,14 @@
           {
             "id": "E17",
             "type": "test_passes",
-            "path": "src-tauri/src/integrations.rs",
+            "path": "core/src/integrations.rs",
             "test_name": "forged/untrusted/unsigned/downgrade rejected; trusted installs",
             "status": "VERIFIED"
           },
           {
             "id": "E18",
             "type": "file_exists",
-            "path": "src-tauri/src/integrations.rs",
+            "path": "core/src/integrations.rs",
             "status": "VERIFIED"
           }
         ],
@@ -1143,7 +1143,7 @@
     "timestamp": "2026-06-17T09:20:00Z",
     "artifacts": [
       {
-        "path": "src-tauri/src/broker.rs",
+        "path": "core/src/broker.rs",
         "type": "code",
         "satisfies": [
           "RT-5",
@@ -1156,7 +1156,7 @@
         "artifact_class": "substantive"
       },
       {
-        "path": "src-tauri/src/sandbox.rs",
+        "path": "core/src/sandbox.rs",
         "type": "code",
         "satisfies": [
           "RT-5",
@@ -1168,7 +1168,7 @@
         "artifact_class": "substantive"
       },
       {
-        "path": "src-tauri/src/resource.rs",
+        "path": "core/src/resource.rs",
         "type": "code",
         "satisfies": [
           "RT-1",
@@ -1181,7 +1181,7 @@
         "artifact_class": "substantive"
       },
       {
-        "path": "src-tauri/src/graph.rs",
+        "path": "core/src/graph.rs",
         "type": "code",
         "satisfies": [
           "RT-4",
@@ -1193,7 +1193,7 @@
         "artifact_class": "substantive"
       },
       {
-        "path": "src-tauri/src/capabilities.rs",
+        "path": "core/src/capabilities.rs",
         "type": "code",
         "satisfies": [
           "RT-7",
@@ -1205,7 +1205,7 @@
         "artifact_class": "substantive"
       },
       {
-        "path": "src-tauri/src/lib.rs",
+        "path": "core/src/lib.rs",
         "type": "code",
         "satisfies": [
           "RT-5"
@@ -1214,7 +1214,7 @@
         "artifact_class": "structural"
       },
       {
-        "path": "src-tauri/tests/sandbox.rs",
+        "path": "core/tests/sandbox.rs",
         "type": "test",
         "satisfies": [
           "RT-5",
@@ -1323,7 +1323,7 @@
         "artifact_class": "structural"
       },
       {
-        "path": "src-tauri/Cargo.toml",
+        "path": "core/Cargo.toml",
         "type": "config",
         "satisfies": [
           "T1"

@@ -7,9 +7,9 @@
 # bindings are a large native GUI tree, and the core stays GUI-free (D1/D8) so its S2
 # `no_network_deps` guard stays physically true. Phases 0-2a built it beside desktop/
 # under its own identity (spec D4); Phase 2b gave it the Tauri app's name, bundle id and
-# data dir, and the package name stays as it was to keep Cargo.lock unchanged.
+# data dir, and D25 renamed the package from `ubilink-next` to `ubilink`.
 [package]
-name = "ubilink-next"
+name = "ubilink"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
@@ -27,7 +27,7 @@ default = []
 automation = []
 
 [dependencies]
-ubilink-core = { path = "../src-tauri" }
+ubilink-core = { path = "../core" }
 # The GUI-free command logic both shells call (R3/T4). Added in Phase 0 because
 # Phase 1 may not edit this file (spec O5) and its views call ubilink-app,
 # including the open_link_with / open_settings_with opener seam (R6, O4). A path

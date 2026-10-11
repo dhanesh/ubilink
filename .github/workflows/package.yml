@@ -11,7 +11,7 @@ on:
       # The app compiles in ubilink-core and ubilink-app and embeds the design
       # tokens (design/ubilink-tokens.json, include_str!), so changes there can break
       # the universal release build just as surely as desktop-gpui/ changes.
-      - "src-tauri/**"
+      - "core/**"
       - "app/**"
       - "design/**"
       - "Makefile"
