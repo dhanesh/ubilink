@@ -209,11 +209,29 @@ fn note_check(confirmed: &AtomicBool, check: &Result<Report, String>) {
 
 /// Read the current permission state (see the module doc for where it comes from):
 /// the one check onboarding, Settings' Permissions row and the capture paths share.
-/// May block (the release osascript probe): call it off the main thread.
+/// A check that finds Automation granted confirms the session and opens the core's
+/// capture gate, which the start-up probe set: a grant made after launch works at
+/// once, without a relaunch. May block (the release osascript probe): call it off
+/// the main thread.
 pub(crate) fn check_permissions() -> Result<Report, String> {
     let check = read_permissions();
-    note_check(&AUTOMATION_CONFIRMED, &check);
+    note_session(&check);
     check
+}
+
+/// [`note_check`] for this session, and pass a grant on to the core's capture gate.
+fn note_session(check: &Result<Report, String>) {
+    note_check(&AUTOMATION_CONFIRMED, check);
+    open_capture_gate();
+}
+
+/// Once the session is confirmed, open the core's capture gate (only ever upgrades).
+fn open_capture_gate() {
+    if AUTOMATION_CONFIRMED.load(Ordering::Relaxed) {
+        if let Ok(mut backend) = crate::app_state::get().backend.lock() {
+            backend.note_automation_granted();
+        }
+    }
 }
 
 fn read_permissions() -> Result<Report, String> {
@@ -271,14 +289,21 @@ pub fn capture_open_needs_onboarding(
 }
 
 /// [`capture_open_needs_onboarding`] on this session's state: confirmed when the
-/// start-up probe (a release build's) or any earlier check said granted, else the
-/// same report this view shows. May block (the release osascript probe, only until
-/// Automation is confirmed): call it off the main thread.
+/// core's capture gate is open (a release build's start-up probe said granted) or
+/// any earlier check said granted, else the same report this view shows. May block
+/// (the release osascript probe, only until Automation is confirmed): call it off
+/// the main thread.
 pub fn opening_capture_routes_here() -> bool {
-    if crate::app_state::startup_automation() == ubilink_core::PermissionState::Granted {
+    let gate_open = crate::app_state::get()
+        .backend
+        .lock()
+        .is_ok_and(|b| b.automation_permission() == ubilink_core::PermissionState::Granted);
+    if gate_open {
         AUTOMATION_CONFIRMED.store(true, Ordering::Relaxed);
     }
-    capture_open_needs_onboarding(&AUTOMATION_CONFIRMED, read_permissions)
+    let routes = capture_open_needs_onboarding(&AUTOMATION_CONFIRMED, read_permissions);
+    open_capture_gate();
+    routes
 }
 
 /// Open `p`'s System Settings pane through the core's launcher, wrapped in the
