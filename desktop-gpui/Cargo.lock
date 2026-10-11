@@ -7785,6 +7785,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "ubilink"
+version = "0.1.0"
+dependencies = [
+ "global-hotkey",
+ "gpui-kit",
+ "interprocess",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-service-management",
+ "serde",
+ "serde_json",
+ "tray-icon",
+ "ubilink-app",
+ "ubilink-core",
+]
+
+[[package]]
 name = "ubilink-app"
 version = "0.1.0"
 dependencies = [
@@ -7802,24 +7820,6 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
-]
-
-[[package]]
-name = "ubilink-next"
-version = "0.1.0"
-dependencies = [
- "global-hotkey",
- "gpui-kit",
- "interprocess",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-service-management",
- "serde",
- "serde_json",
- "tray-icon",
- "ubilink-app",
- "ubilink-core",
 ]
 
 [[package]]
