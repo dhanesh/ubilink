@@ -16,11 +16,14 @@ you're looking at and keeps a two-way graph of the links you make.
   Things 3, plus any file.
 - **Link graph** with backlinks: link two resources and each shows the other.
 - **Link browser** (**Cmd+Shift+L**) to find, open and copy links.
-- **Settings** (**Cmd+Shift+,**): permissions, app adapters, and graph
-  export / import / reset.
+- **Settings** (**Cmd+Shift+,**): permissions (Automation's status and a way back
+  to permission setup), app adapters, and graph export / import / reset.
 - **Custom app adapters** from your own `adapters.json` — trusted local config that
   runs with your permissions (see `docs/SUPPORTED-APPS.md`).
-- **Permission onboarding** for macOS Automation and Accessibility.
+- **Permission onboarding** for macOS Automation, the one permission capture needs.
+  Until Automation is granted, opening capture takes you to it; once granted, it
+  stays out of the way. It also shows Accessibility's status, which no built-in
+  app adapter needs.
 - A universal (Apple silicon + Intel), notarized DMG.
 
 ### Changed
@@ -61,5 +64,5 @@ you're looking at and keeps a two-way graph of the links you make.
 - **Third-party integrations are not available in the app yet**; the sandbox,
   broker and registry are developer-facing and coming in a later release.
 - **No automatic updates** — download new versions from GitHub Releases.
-- If you ran a development build before, macOS asks for Automation and
-  Accessibility permission again once.
+- If you ran a development build before, macOS asks for Automation permission
+  again once.

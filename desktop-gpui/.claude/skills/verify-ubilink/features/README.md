@@ -25,6 +25,7 @@ JSON, fixtures, `theme/`, `login_item.rs`, `automation/store.rs`); each Phase 1 
 - [link-marking](link-marking.md) — Cmd-L marks two links and connects them both ways in the graph
 - [onboarding](onboarding.md) — each missing permission gets its own step, its own System Settings pane, and a re-check
 - [settings-adapters](settings-adapters.md) — every resource adapter toggles from the keyboard and the choice persists
+- [settings-permissions](settings-permissions.md) — Settings shows Automation's status and opens permission setup; capture goes to setup until Automation is granted
 - [graph-data](graph-data.md) — the graph exports and imports with no change, and Reset asks for confirmation first
 - [launch-at-login](launch-at-login.md) — a login-item switch shown and driven through a fixture-fed seam, never the real OS service
 - [theming](theming.md) — every view paints in the token-derived light and dark colours and switches live
