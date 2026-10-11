@@ -82,7 +82,7 @@ impl PanelBackend {
     /// gate (S4) now instead of at the next launch. Only ever upgrades; a revoked grant
     /// shows up as the capture's own osascript failure.
     pub fn note_automation_granted(&mut self) {
-        self.service.set_permission(PermissionState::Granted);
+        self.service.grant_automation();
     }
 
     /// The automation permission the capture gate (S4) checks.
