@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ubilink for Mac</title>
+<meta name="description" content="A menu-bar app for macOS that copies a link to whatever you're looking at and keeps a two-way graph of the links you make.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta property="og:title" content="Ubilink for Mac">
+<meta property="og:description" content="Copy a link to whatever you're looking at. Link two things and each one shows the other.">
+<style>
+:root {
+  --bg: #ffffff;
+  --under: #f6f6f6;
+  --label: rgba(0,0,0,.85);
+  --secondary: rgba(0,0,0,.55);
+  --separator: rgba(0,0,0,.10);
+  --accent: #0072ef;
+  --accent-text: #ffffff;
+  --link: #0066d6;
+  --code-bg: #f2f2f4;
+  --card: #ffffff;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e1e;
+    --under: #282828;
+    --label: rgba(255,255,255,.85);
+    --secondary: rgba(255,255,255,.60);
+    --separator: rgba(255,255,255,.12);
+    --accent: #0072ef;
+    --accent-text: #ffffff;
+    --link: #4aa3ff;
+    --code-bg: #2c2c2e;
+    --card: #262626;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e1e1e; --under: #282828; --label: rgba(255,255,255,.85);
+  --secondary: rgba(255,255,255,.60); --separator: rgba(255,255,255,.12);
+  --accent: #0072ef; --accent-text: #ffffff; --link: #4aa3ff;
+  --code-bg: #2c2c2e; --card: #262626;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--label);
+  font: 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+header.hero { text-align: center; padding: 72px 0 56px; }
+.hero img { width: 128px; height: 128px; filter: drop-shadow(0 10px 18px rgba(38,87,214,.25)); }
+h1 { font: 700 44px/1.1 -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; letter-spacing: -.02em; margin: 20px 0 12px; }
+.lede { font-size: 21px; color: var(--secondary); max-width: 600px; margin: 0 auto 32px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+  padding: 10px 24px; border-radius: 980px; font-size: 17px; font-weight: 600;
+  background: var(--accent); color: var(--accent-text); border: 0; cursor: pointer;
+}
+.btn:hover { text-decoration: none; filter: brightness(.94); }
+.meta { margin-top: 14px; font-size: 14px; color: var(--secondary); }
+.brew {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  background: var(--code-bg); border-radius: 12px; padding: 6px 6px 6px 14px;
+  font: 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+}
+.brew code { overflow-x: auto; white-space: nowrap; }
+.copy {
+  font: 600 13px -apple-system, BlinkMacSystemFont, sans-serif; color: var(--label);
+  background: var(--card); border: 1px solid var(--separator); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; min-width: 64px;
+}
+section { padding: 56px 0; border-top: 1px solid var(--separator); }
+h2 { font: 700 28px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; letter-spacing: -.01em; margin: 0 0 24px; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.card { background: var(--under); border-radius: 18px; padding: 22px; }
+.card h3 { margin: 0 0 6px; font-size: 19px; }
+.card p { margin: 0; color: var(--secondary); font-size: 16px; }
+kbd {
+  font: 600 13px -apple-system, BlinkMacSystemFont, sans-serif; padding: 2px 7px; border-radius: 6px;
+  background: var(--card); border: 1px solid var(--separator); box-shadow: 0 1px 0 var(--separator); color: var(--label);
+  white-space: nowrap;
+}
+.apps { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.apps li { background: var(--under); border-radius: 980px; padding: 6px 14px; font-size: 15px; }
+.cols { display: grid; gap: 32px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.cols h3 { font-size: 19px; margin: 0 0 8px; }
+.cols p, .cols li { color: var(--secondary); font-size: 16px; }
+.cols ul { padding-left: 20px; margin: 0; }
+p code, li code { white-space: nowrap; }
+pre {
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--code-bg); border-radius: 12px; padding: 14px 16px; overflow-x: auto;
+  font: 14px/1.5 ui-monospace, "SF Mono", Menlo, monospace; margin: 8px 0 0;
+}
+footer { border-top: 1px solid var(--separator); padding: 32px 0 48px; color: var(--secondary); font-size: 14px; text-align: center; }
+footer a { color: var(--secondary); text-decoration: underline; }
+@media (max-width: 600px) {
+  header.hero { padding: 48px 0 40px; }
+  h1 { font-size: 34px; }
+  .lede { font-size: 18px; }
+  .hero img { width: 96px; height: 96px; }
+}
+</style>
+</head>
+<body>
+<header class="hero wrap">
+  <img src="icon.svg" alt="" width="128" height="128">
+  <h1>Ubilink</h1>
+  <p class="lede">Copy a link to whatever you're looking at, from the menu bar. Link two things together, and each one remembers the other.</p>
+  <div class="cta">
+    <a class="btn" id="download" href="https://github.com/dhanesh/ubilink/releases/latest">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>
+      <span id="download-label">Download for Mac</span>
+    </a>
+    <div class="brew">
+      <code id="brew-cmd">brew install --cask dhanesh/tap/ubilink</code>
+      <button class="copy" type="button" data-copy="brew-cmd">Copy</button>
+    </div>
+  </div>
+  <p class="meta" id="meta">Free and open source · macOS 10.15 or later · Apple silicon and Intel</p>
+</header>
+
+<main class="wrap">
+  <section aria-labelledby="what">
+    <h2 id="what">What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Capture <kbd>⌘⇧K</kbd></h3>
+        <p>Copies a link to the page, file, note or task in front of you, ready to paste anywhere.</p>
+      </div>
+      <div class="card">
+        <h3>Link two things</h3>
+        <p>Connect a doc to the ticket it answers, or a note to its source. Each side shows the other as a backlink.</p>
+      </div>
+      <div class="card">
+        <h3>Browse <kbd>⌘⇧L</kbd></h3>
+        <p>Find a link you made, then open it or copy it again. The panel opens over any app and closes with Esc.</p>
+      </div>
+      <div class="card">
+        <h3>Native and light</h3>
+        <p>A native Mac app with no web view. It uses the system font, follows your accent colour and light or dark mode, and stays out of the way in the menu bar.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="apps">
+    <h2 id="apps">Works with</h2>
+    <ul class="apps">
+      <li>Safari</li><li>Google Chrome</li><li>Arc</li><li>Brave</li><li>Microsoft Edge</li>
+      <li>Vivaldi</li><li>Opera</li><li>Finder</li><li>Bear</li><li>Things 3</li><li>Any file</li>
+    </ul>
+    <p class="meta" style="text-align:left">Add your own apps with an <code>adapters.json</code> file. See <a href="https://github.com/dhanesh/ubilink/blob/main/docs/SUPPORTED-APPS.md">supported apps</a>.</p>
+  </section>
+
+  <section aria-labelledby="install">
+    <h2 id="install">Install</h2>
+    <div class="cols">
+      <div>
+        <h3>Homebrew</h3>
+        <pre><code>brew install --cask dhanesh/tap/ubilink</code></pre>
+        <p>Update with <code>brew upgrade --cask ubilink</code>.</p>
+      </div>
+      <div>
+        <h3>Download</h3>
+        <p>Open the DMG and drag Ubilink to Applications. Each release is signed and notarized by Apple, and comes with a <code>SHA256SUMS</code> file:</p>
+        <pre><code>shasum -a 256 -c SHA256SUMS</code></pre>
+      </div>
+      <div>
+        <h3>First run</h3>
+        <p>macOS asks once for Automation permission, so Ubilink can read the page or file in the app you're using. You can turn on Open at Login in Settings (<kbd>⌘⇧,</kbd>).</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="privacy">
+    <h2 id="privacy">Private by design</h2>
+    <div class="cols">
+      <div><p>Your links live in a database on your Mac. Ubilink doesn't sign you in, sync, or send anything over the network.</p></div>
+      <div><p>Export your whole graph to a JSON file whenever you like, and import it back on another Mac.</p></div>
+      <div><p>Links open without a shell. Dangerous link types are refused, and apps or installers are shown in Finder instead of run.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p><a href="https://github.com/dhanesh/ubilink">Source on GitHub</a> · <a href="https://github.com/dhanesh/ubilink/releases">All releases</a> · <a href="https://github.com/dhanesh/ubilink/blob/main/CHANGELOG.md">Changelog</a> · <a href="https://github.com/dhanesh/ubilink/security/advisories/new">Report a security issue</a></p>
+</footer>
+
+<script>
+(function () {
+  // Point the button at the newest published DMG; without one, it keeps linking to the releases page.
+  var btn = document.getElementById('download');
+  var label = document.getElementById('download-label');
+  var meta = document.getElementById('meta');
+  try {
+    fetch('https://api.github.com/repos/dhanesh/ubilink/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        if (!rel || !rel.assets) return;
+        var dmg = rel.assets.filter(function (a) {
+          return /\.dmg$/.test(a.name) && a.name.indexOf('UNNOTARIZED') === -1;
+        })[0];
+        if (!dmg) return;
+        var v = String(rel.tag_name || '').replace(/^v/, '');
+        btn.href = dmg.browser_download_url;
+        label.textContent = 'Download for Mac';
+        meta.textContent = 'Version ' + v + ' · ' + (dmg.size / 1048576).toFixed(1) + ' MB · macOS 10.15 or later · Apple silicon and Intel';
+      })
+      .catch(function () {});
+  } catch (e) {}
+
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = document.getElementById(b.getAttribute('data-copy')).textContent;
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+  });
+})();
+</script>
+</body>
+</html>
