@@ -1,13 +1,18 @@
-//! The onboarding view (Phase 1 R9): one step per missing macOS permission, each
-//! with a button that opens that permission's System Settings pane, and a Re-check
-//! (`R`, or the Re-check button) that re-reads the permission state in place — the
-//! same window, the same steps, their statuses updated.
+//! The onboarding view (Phase 1 R9): one step per macOS permission capture needs,
+//! each with a button that opens that permission's System Settings pane, and a
+//! Re-check (`R`, or the Re-check button) that re-reads the permission state in
+//! place — the same window, the same steps, their statuses updated.
+//!
+//! Automation is the only such permission. Accessibility once had a step for Bear's
+//! menu scripting; Bear now captures through bearcli and no built-in adapter needs
+//! Accessibility, so onboarding never asks for it (the Tauri panel dropped it too;
+//! review S1 for rc.4). "All set" depends on Automation alone.
 //!
 //! What it renders (probes/README.md, "Onboarding (R9)"):
-//! - one `ListItem` row per step (`Accessibility`, `Automation`), its subtree holding
-//!   the permission's name and a status Label, `Not granted` or exactly `Granted`.
-//!   Rows stay listed once granted, so the user sees the step they just finished turn
-//!   green instead of watching it vanish. They are the only `ListItem`s in the view.
+//! - one `ListItem` row per step (`Automation`), its subtree holding the permission's
+//!   name and a status Label, `Not granted` or exactly `Granted`. A row stays listed
+//!   once granted, so the user sees the step they just finished turn green instead of
+//!   watching it vanish. They are the only `ListItem`s in the view.
 //! - in each row a `Button` whose text names the permission; Tab reaches it, Enter
 //!   or Space (or a click) opens `ubilink_app::settings_pane_url(<pane>)` through the
 //!   shell's [`Opener`] — the core's own launcher, recorded in the opener sink in
@@ -17,7 +22,8 @@
 //! Where the permission state comes from: the `permission` fixture when a probe has
 //! loaded one (`crate::fixtures::path(Fixture::Permission)`, a JSON file shaped like
 //! ubilink-app's `PermissionReport`); otherwise, in a release build, ubilink-app's
-//! `permission_status()` (AXIsProcessTrusted + the osascript Automation probe), run
+//! `permission_status()` (its osascript Automation probe; the report's Accessibility
+//! field is not read), run
 //! off the main thread since osascript can take a while. An automation build never
 //! runs that probe (it would raise a TCC prompt mid-probe, README "Shared state"):
 //! without a fixture it says so instead.
@@ -72,25 +78,24 @@ const NOT_GRANTED: &str = "Not granted";
 const UNKNOWN: &str = "Couldn't check";
 const CHECKING: &str = "Checking permissions…";
 
-const INTRO: &str = "Grant each permission below in System Settings, then press R to re-check.";
+const INTRO: &str = "Allow Automation for ubilink in System Settings, then press R to re-check.";
 const ALL_SET: &str = "All set — press ⌘⇧K from any supported app.";
 const STILL_WAITING: &str =
-    "Still waiting — open the step's settings, grant it there, then press R to re-check.";
+    "Still waiting on Automation — open its settings, allow ubilink there, then press R to re-check.";
 const OPENED: &str = "Opened System Settings — it may be behind this panel. Grant the permission there, then press R to re-check.";
 
-/// The two macOS permissions ubilink asks for, in the order their steps are shown.
+/// The macOS permissions ubilink asks for, in the order their steps are shown: only
+/// Automation, the one capture needs (see the module doc for Accessibility).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Permission {
-    Accessibility,
     Automation,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 2] = [Permission::Accessibility, Permission::Automation];
+    pub const ALL: [Permission; 1] = [Permission::Automation];
 
     pub fn name(self) -> &'static str {
         match self {
-            Permission::Accessibility => "Accessibility",
             Permission::Automation => "Automation",
         }
     }
@@ -98,14 +103,12 @@ impl Permission {
     /// The pane name ubilink-app's `settings_pane_url` / `open_settings_with` take.
     pub fn pane(self) -> &'static str {
         match self {
-            Permission::Accessibility => "accessibility",
             Permission::Automation => "automation",
         }
     }
 
     fn purpose(self) -> &'static str {
         match self {
-            Permission::Accessibility => "Lets ubilink use the menus of apps like Bear.",
             Permission::Automation => "Lets ubilink read the link of the app you're in.",
         }
     }
@@ -115,19 +118,18 @@ impl Permission {
     }
 }
 
-/// The permission state, shaped like ubilink-app's `PermissionReport` (and so like
-/// the `permission` fixture files: `{"accessibility": bool, "automation": "granted" |
-/// "denied" | "not_determined"}`).
+/// The permission state, read from ubilink-app's `PermissionReport` (and so from the
+/// `permission` fixture files: `{"accessibility": bool, "automation": "granted" |
+/// "denied" | "not_determined"}`). Only Automation is kept: the `accessibility` key
+/// is accepted and ignored, since nothing ubilink does needs it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Report {
-    pub accessibility: bool,
     pub automation: String,
 }
 
 impl Report {
     pub fn granted(&self, p: Permission) -> bool {
         match p {
-            Permission::Accessibility => self.accessibility,
             Permission::Automation => self.automation == "granted",
         }
     }
@@ -246,7 +248,6 @@ fn read_permissions() -> Result<Report, String> {
     {
         let report = ubilink_app::permission_status();
         Ok(Report {
-            accessibility: report.accessibility,
             automation: report.automation.into(),
         })
     }
@@ -254,8 +255,8 @@ fn read_permissions() -> Result<Report, String> {
 
 /// Phase 2 R1: does a failed capture take the user here? Only when the permission
 /// report says Automation is not granted — the one permission a capture needs (the
-/// Tauri panel's `canUseCapture`, "Defect 5"). A missing Accessibility grant alone,
-/// or no report at all (a failed check), leaves the failure on the capture view.
+/// Tauri panel's `canUseCapture`, "Defect 5"). No report at all (a failed check)
+/// leaves the failure on the capture view.
 pub fn capture_failure_needs_onboarding(check: &Result<Report, String>) -> bool {
     matches!(check, Ok(report) if !report.granted(Permission::Automation))
 }
@@ -622,13 +623,12 @@ mod tests {
     use super::{
         capture_failure_needs_onboarding, capture_open_needs_onboarding, read_report,
         recheck_message, state, status_text, steps_after, Permission, Report, ALL_SET, GRANTED,
-        NOT_GRANTED, UNKNOWN,
+        NOT_GRANTED, STILL_WAITING, UNKNOWN,
     };
-    use Permission::{Accessibility, Automation};
+    use Permission::Automation;
 
-    fn report(accessibility: bool, automation: &str) -> Result<Report, String> {
+    fn report(automation: &str) -> Result<Report, String> {
         Ok(Report {
-            accessibility,
             automation: automation.into(),
         })
     }
@@ -642,42 +642,57 @@ mod tests {
 
     #[test]
     fn onboarding_steps_one_per_missing_permission_and_kept_once_granted() {
-        let two_missing = report(false, "denied");
-        let steps = steps_after(&[], &two_missing);
-        assert_eq!(steps, [Accessibility, Automation]);
-        assert_eq!(status_text(Automation, &two_missing), NOT_GRANTED);
+        // Automation is the only step, whether it is denied or never asked.
+        let denied = report("denied");
+        let steps = steps_after(&[], &denied);
+        assert_eq!(steps, [Automation]);
+        assert_eq!(status_text(Automation, &denied), NOT_GRANTED);
+        assert_eq!(recheck_message(&denied), STILL_WAITING);
+        assert_eq!(steps_after(&[], &report("not_determined")), [Automation]);
 
-        // Only Automation missing: one step, and it stays when granted.
-        let one = steps_after(&[], &report(true, "not_determined"));
-        assert_eq!(one, [Automation]);
-        let granted = report(true, "granted");
-        assert_eq!(steps_after(&one, &granted), [Automation]);
+        // It stays listed once granted, and setup is complete.
+        let granted = report("granted");
+        assert_eq!(steps_after(&steps, &granted), [Automation]);
         assert_eq!(status_text(Automation, &granted), GRANTED);
         assert_eq!(recheck_message(&granted), ALL_SET);
 
-        // Re-check after both were granted keeps both rows.
-        assert_eq!(steps_after(&steps, &granted), [Accessibility, Automation]);
-
         // A failed check keeps the steps and says why.
         let failed: Result<Report, String> = Err("boom".into());
-        assert_eq!(steps_after(&one, &failed), [Automation]);
+        assert_eq!(steps_after(&steps, &failed), [Automation]);
         assert_eq!(status_text(Automation, &failed), UNKNOWN);
         assert_eq!(recheck_message(&failed), "boom");
 
-        // Nothing missing on first look: show every permission as granted.
+        // Nothing missing on first look: show the step as granted.
         assert_eq!(steps_after(&[], &granted), Permission::ALL);
+    }
+
+    /// Review S1 (rc.4): Automation granted with Accessibility not is a finished setup.
+    /// The fixture's `accessibility: false` is read and ignored: no step asks for it,
+    /// and Re-check says All set rather than waiting forever.
+    #[test]
+    fn automation_alone_completes_setup_whatever_accessibility_says() {
+        let dir = std::env::temp_dir().join(format!("onboarding-s1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ax-missing.json");
+        std::fs::write(
+            &path,
+            r#"{"accessibility": false, "automation": "granted"}"#,
+        )
+        .unwrap();
+        let check = read_report(&path);
+        assert_eq!(check, report("granted"));
+        assert_eq!(steps_after(&[], &check), [Automation]);
+        assert_eq!(status_text(Automation, &check), GRANTED);
+        assert_eq!(recheck_message(&check), ALL_SET);
+        assert!(!capture_failure_needs_onboarding(&check));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn failed_capture_routes_to_onboarding_only_when_automation_is_missing() {
-        assert!(capture_failure_needs_onboarding(&report(false, "denied")));
-        assert!(capture_failure_needs_onboarding(&report(
-            true,
-            "not_determined"
-        )));
-        // Automation granted: Accessibility alone never routes (Tauri "Defect 5").
-        assert!(!capture_failure_needs_onboarding(&report(true, "granted")));
-        assert!(!capture_failure_needs_onboarding(&report(false, "granted")));
+        assert!(capture_failure_needs_onboarding(&report("denied")));
+        assert!(capture_failure_needs_onboarding(&report("not_determined")));
+        assert!(!capture_failure_needs_onboarding(&report("granted")));
         // No report: stay on the capture view with its failure.
         assert!(!capture_failure_needs_onboarding(&Err("no report".into())));
     }
@@ -687,10 +702,9 @@ mod tests {
         let confirmed = AtomicBool::new(false);
         // Not granted (denied, or never asked): onboarding, and nothing remembered.
         assert!(capture_open_needs_onboarding(&confirmed, || report(
-            false, "denied"
+            "denied"
         )));
         assert!(capture_open_needs_onboarding(&confirmed, || report(
-            true,
             "not_determined"
         )));
         assert!(!confirmed.load(Ordering::Relaxed));
@@ -698,9 +712,8 @@ mod tests {
         assert!(!capture_open_needs_onboarding(&confirmed, || Err(
             "no report".into()
         )));
-        // Accessibility alone never routes.
         assert!(!capture_open_needs_onboarding(&confirmed, || report(
-            false, "granted"
+            "granted"
         )));
         // That check said granted: from now on the check is not even run, and a
         // stale not-granted report cannot bring onboarding back.
@@ -716,7 +729,6 @@ mod tests {
             ubilink_app::settings_pane_url(Automation.pane()),
             Ok("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
         );
-        assert!(ubilink_app::settings_pane_url(Accessibility.pane()).is_ok());
     }
 
     #[test]
@@ -725,7 +737,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let ok = dir.join("p.json");
         std::fs::write(&ok, r#"{"accessibility": false, "automation": "denied"}"#).unwrap();
-        assert_eq!(read_report(&ok), report(false, "denied"));
+        assert_eq!(read_report(&ok), report("denied"));
         let bad = dir.join("bad.json");
         std::fs::write(&bad, "nope").unwrap();
         let err = read_report(&bad).unwrap_err();

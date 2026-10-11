@@ -1,12 +1,13 @@
 {
-  "description": "R9: with two permissions missing, onboarding shows two steps; activating the Automation step opens its exact System Settings pane (opened sink); after the fixture flips and R (Re-check), the same window shows it granted",
+  "description": "R9: with Automation missing, onboarding shows its one step (no Accessibility step: nothing ubilink does needs it); activating the Automation step opens its exact System Settings pane (opened sink); after the fixture flips and R (Re-check), the same window shows it granted",
   "requirement": "R9 (GPUI Phase 1)",
   "notes": [
     "Steps are ListItem rows whose subtree names the permission and its status ('Not granted' / 'Granted'); each row has a Button naming the permission that opens its pane (README contract).",
     "The pane URL is ubilink-app's permissions::settings_pane_url(\"automation\"), recorded by the opener sink instead of opening System Settings (S2/O4).",
     "The Automation button is reached with Tab (key_until: U4 keyboard reach, without fixing the view's tab order) and activated with Enter.",
     "Flipping = loading permissions-all-granted.json as the permission fixture; R re-reads it. 'Granted' is matched exactly so 'Not granted' cannot satisfy it.",
-    "Same window: window_id is saved before and compared after (saved), and the process is unchanged."
+    "Same window: window_id is saved before and compared after (saved), and the process is unchanged.",
+    "rc.4 review S1: onboarding asks only for Automation, the one permission capture needs (Bear captures through bearcli). The two-missing fixture still says accessibility false; it is ignored, so there is one step, not two."
   ],
   "setup": {
     "fixtures": {
@@ -37,38 +38,40 @@
       }
     },
     {
-      "name": "two steps",
+      "name": "one step",
       "see": {
         "role": "ListItem"
       },
-      "count": 2,
+      "count": 1,
       "route": "onboarding",
       "timeout_ms": 3000
     },
     {
-      "name": "one per missing permission",
-      "see": [
-        {
-          "role": "ListItem",
-          "text": "Accessibility",
-          "deep": true
-        },
-        {
-          "role": "ListItem",
-          "text": "Automation",
-          "deep": true
-        }
-      ],
+      "name": "the Automation step, and no Accessibility step",
+      "see": {
+        "role": "ListItem",
+        "text": "Automation",
+        "deep": true
+      },
       "route": "onboarding"
     },
     {
-      "name": "both not granted",
+      "name": "no Accessibility step (review S1: no built-in adapter needs it)",
+      "see": {
+        "text": "Accessibility"
+      },
+      "absent": true,
+      "route": "onboarding",
+      "timeout_ms": 0
+    },
+    {
+      "name": "not granted",
       "see": {
         "role": "ListItem",
         "text": "Not granted",
         "deep": true
       },
-      "count": 2,
+      "count": 1,
       "route": "onboarding"
     },
     {
@@ -143,14 +146,14 @@
       "timeout_ms": 3000
     },
     {
-      "name": "both steps granted, none left 'Not granted'",
+      "name": "the step is granted, none left 'Not granted'",
       "see": {
         "role": "ListItem",
         "text": "Granted",
         "deep": true,
         "exact": true
       },
-      "count": 2,
+      "count": 1,
       "route": "onboarding"
     },
     {

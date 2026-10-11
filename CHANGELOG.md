@@ -22,8 +22,7 @@ you're looking at and keeps a two-way graph of the links you make.
   runs with your permissions (see `docs/SUPPORTED-APPS.md`).
 - **Permission onboarding** for macOS Automation, the one permission capture needs.
   Until Automation is granted, opening capture takes you to it; once granted, it
-  stays out of the way. It also shows Accessibility's status, which no built-in
-  app adapter needs.
+  stays out of the way. Ubilink does not ask for Accessibility.
 - A universal (Apple silicon + Intel), notarized DMG.
 
 ### Changed
