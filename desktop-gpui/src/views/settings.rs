@@ -69,9 +69,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::component::{ActiveTheme, Disableable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
@@ -84,7 +82,7 @@ use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
 use crate::login_item::{self, Report, Status};
-use crate::theme::tokens::{font_size, radius, spacing};
+use crate::theme::tokens::{font_size, font_weight, radius, size, spacing};
 
 /// The settings route's view-state, for Task 6's automation `state` verb.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,13 +118,15 @@ static SAMPLES: Samples = Samples::new();
 /// The newest settings view's measured layout (`views::layout`), written at prepaint.
 static LAYOUT: Layout = Layout::new();
 
-/// How an action button looks.
+/// How an action button looks (D26: macOS push buttons).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
+    /// A plain push button (Import, Reset…, Cancel).
     Plain,
-    /// The view's accent (primary) action, and its R14 accent sample.
-    Accent,
-    Danger,
+    /// The view's default action, accent-filled, and its R14 primary sample (Export).
+    Primary,
+    /// The confirmed destructive action: filled red (Delete everything).
+    Destructive,
 }
 
 // Settings' layout, in points. The view sets these on its rows, so `content_height`
@@ -135,8 +135,8 @@ enum Look {
 const PAD_X: Pixels = spacing::S5;
 const PAD_Y: Pixels = spacing::S2;
 const GAP: Pixels = spacing::S1;
-/// The title row (a 16 pt title's line box).
-const HEADER_H: Pixels = px(26.);
+/// The title row: a 13 pt headline's line box, at the control height.
+const HEADER_H: Pixels = size::CONTROL;
 /// The reset question's row: two 18 pt lines beside its buttons.
 const CONFIRM_H: Pixels = px(40.);
 const CONFIRM_LINE_H: Pixels = px(18.);
@@ -150,8 +150,6 @@ const ADAPTER_W: Pixels = px(140.);
 const ADAPTER_H: Pixels = px(16.);
 const ADAPTER_GAP: Pixels = spacing::S2;
 const HINT_H: Pixels = px(18.);
-/// A plain or danger action button's side padding (the Tauri `--pad-control`, 14 px).
-const BUTTON_PAD_X: Pixels = px(14.);
 
 /// What Settings' height depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,7 +189,7 @@ pub fn content_height(content: Content) -> f64 {
     };
     let mut parts = vec![
         pt(HEADER_H),
-        pt(theming::ACCENT_H),
+        pt(theming::CONTROL_H),
         pt(login),
         grid,
         pt(HINT_H),
@@ -571,8 +569,7 @@ impl SettingsView {
             .child(
                 // The visible label is the view's own text (below), so its size is the
                 // view's to choose and to measure; the switch keeps the accessible name.
-                Switch::new("launch-at-login")
-                    .small()
+                theming::switch("launch-at-login")
                     .accessibility_label(LOGIN_SWITCH)
                     .checked(on)
                     .on_click(
@@ -758,25 +755,18 @@ impl SettingsView {
                 }
             }))
             .map(|d| {
-                // One height for every action button, as the Tauri panel's `.set-btn`
-                // (6 pt + 14 pt padding around 13 pt text: 28 pt). Export keeps its
-                // accent look and wider padding (the R14 accent sample needs the fill).
+                // One height for every action button (macOS's 24 pt push button, as
+                // the Tauri panel's `.set-btn` were one height). Export keeps the
+                // default look and wider padding (the R14 primary sample needs fill).
                 let button = match look {
-                    Look::Accent => theming::accent_button(id),
-                    Look::Plain => Button::new(id)
-                        .small()
-                        .h(theming::ACCENT_H)
-                        .px(BUTTON_PAD_X),
-                    Look::Danger => Button::new(id)
-                        .small()
-                        .danger()
-                        .h(theming::ACCENT_H)
-                        .px(BUTTON_PAD_X),
+                    Look::Primary => theming::primary_button(id),
+                    Look::Plain => theming::push_button(id),
+                    Look::Destructive => theming::destructive_button(id),
                 }
                 .label(label)
                 .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)));
-                if look == Look::Accent {
-                    d.child(SAMPLES.mark(Sample::Accent, button))
+                if look == Look::Primary {
+                    d.child(SAMPLES.mark(Sample::Primary, button))
                 } else {
                     d.child(button)
                 }
@@ -791,10 +781,12 @@ impl SettingsView {
     }
 
     /// `last`: the grid's last switch, whose place the layout reports (`last_adapter`).
+    /// `sample`: this checked switch is the view's R14/D26 accent sample.
     fn adapter_switch(
         &self,
         plugin: &PluginView,
         last: bool,
+        sample: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let app: SharedString = plugin.app.clone().into();
@@ -819,8 +811,7 @@ impl SettingsView {
                 }))
             })
             .child(
-                Switch::new(switch_id(&app))
-                    .small()
+                theming::switch(switch_id(&app))
                     .label(app.clone())
                     .checked(enabled)
                     .disabled(locked)
@@ -829,6 +820,7 @@ impl SettingsView {
                         this.set_enabled(&click_app, *next, cx)
                     })),
             )
+            .when(sample, |d| d.child(SAMPLES.probe(Sample::Accent)))
             .when(last, |d| d.child(LAYOUT.bounds("last_adapter")))
             .into_any_element()
     }
@@ -844,14 +836,21 @@ impl Render for SettingsView {
         LAYOUT.clear();
         self.appearance.ensure(window, cx);
         let (switches, list_error) = match ubilink_app::list_plugins(crate::app_state::get()) {
-            Ok(plugins) => (
-                plugins
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| self.adapter_switch(p, i + 1 == plugins.len(), cx))
-                    .collect::<Vec<_>>(),
-                None,
-            ),
+            Ok(plugins) => {
+                // The accent sample: the first switch that is on and togglable (a
+                // built-in one is drawn disabled, at half strength).
+                let sample = plugins.iter().position(|p| p.enabled && !p.builtin);
+                (
+                    plugins
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| {
+                            self.adapter_switch(p, i + 1 == plugins.len(), sample == Some(i), cx)
+                        })
+                        .collect::<Vec<_>>(),
+                    None,
+                )
+            }
             Err(e) => (Vec::new(), Some(list_error_message(&e))),
         };
         let (stats, stats_failed) = match ubilink_app::graph_stats(crate::app_state::get()) {
@@ -861,7 +860,7 @@ impl Render for SettingsView {
         let export_button = self.action_button(
             "settings-export",
             "Export",
-            Look::Accent,
+            Look::Primary,
             |v, _, cx| v.export(cx),
             cx,
         );
@@ -875,7 +874,9 @@ impl Render for SettingsView {
         let reset_button = self.action_button(
             "settings-reset",
             "Reset…",
-            Look::Danger,
+            // A push button, as macOS's: it only asks; the confirmation's Delete
+            // everything is the destructive (red) one.
+            Look::Plain,
             Self::ask_reset,
             cx,
         );
@@ -883,7 +884,7 @@ impl Render for SettingsView {
             let confirm = self.action_button(
                 "settings-reset-confirm",
                 RESET_CONFIRM,
-                Look::Danger,
+                Look::Destructive,
                 Self::confirm_reset,
                 cx,
             );
@@ -942,7 +943,7 @@ impl Render for SettingsView {
             .px(PAD_X)
             .py(PAD_Y)
             .rounded(radius::CARD)
-            // The opaque token surface (R14): the panel's blur stays behind the card.
+            // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
             .child(
                 div()
@@ -956,6 +957,7 @@ impl Render for SettingsView {
                         div()
                             .relative()
                             .text_size(font_size::TITLE)
+                            .font_weight(font_weight::HEADLINE)
                             .text_color(foreground)
                             .child(text!(Route::Settings.title()))
                             .child(SAMPLES.probe(Sample::Text)),
@@ -976,7 +978,7 @@ impl Render for SettingsView {
             )
             .child(
                 div()
-                    .h(theming::ACCENT_H)
+                    .h(theming::CONTROL_H)
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
@@ -999,7 +1001,7 @@ impl Render for SettingsView {
                         div()
                             .flex_1()
                             .min_w(px(theming::SAMPLE_MIN + 8.))
-                            .h(theming::ACCENT_H)
+                            .h(theming::CONTROL_H)
                             .relative()
                             .child(SAMPLES.probe(Sample::Surface)),
                     )
@@ -1140,17 +1142,18 @@ mod tests {
                 login_explained,
             })
         };
-        // pad 8+8, title 26, actions 28, login 20, hint 18, 4 gaps of 4: 124 + grid.
-        assert_eq!(h(0, false, false), 124.0);
+        // pad 8+8, title 24, actions 24 (D26: macOS's 24 pt controls), login 20, hint
+        // 18, 4 gaps of 4: 118 + grid.
+        assert_eq!(h(0, false, false), 118.0);
         // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
-        assert_eq!(h(10, false, false), 188.0);
+        assert_eq!(h(10, false, false), 182.0);
         // ceil(n / 4) rows: 4 is one row, 5 is two.
-        assert_eq!(h(4, false, false), 124.0 + 16.0);
-        assert_eq!(h(5, false, false), 124.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(4, false, false), 118.0 + 16.0);
+        assert_eq!(h(5, false, false), 118.0 + 16.0 + 8.0 + 16.0);
         assert_eq!(h(8, false, false), h(5, false, false));
         // The reset question adds its row and a gap; an explanation up to three lines.
-        assert_eq!(h(10, true, false), 188.0 + 40.0 + 4.0);
-        assert_eq!(h(10, false, true), 188.0 + 30.0);
+        assert_eq!(h(10, true, false), 182.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 182.0 + 30.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
     }

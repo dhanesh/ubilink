@@ -228,6 +228,11 @@ fn run(verb: Verb, cx: &mut App) -> Outcome {
         Verb::SetAppearance(mode) => set_appearance(mode, cx),
         Verb::LoadFixture(kind, path) => {
             store::set_fixture(kind, path);
+            // D26: an accent fixture re-themes open windows in place, through the path
+            // the system's colour-change notification takes.
+            if kind == crate::fixtures::Fixture::Accent {
+                crate::theme::refresh_accent(cx);
+            }
             Ok(fixtures_json())
         }
         Verb::WindowId => {
@@ -258,6 +263,8 @@ fn state_json(cx: &mut App) -> Value {
         "appearance": {
             "override": store::appearance().as_str(),
             "theme": if cx.theme().mode.is_dark() { "dark" } else { "light" },
+            // D26: the accent the theme was built from.
+            "accent": crate::theme::roles(cx).accent.hex(),
         },
         "fixtures": fixtures_json(),
         // O1: the probe checks each instance resolved its own data dir.

@@ -80,9 +80,10 @@ fn main() {
         let mtm = MainThreadMarker::new().expect("GPUI runs this closure on the main thread");
         NSApplication::sharedApplication(mtm)
             .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-        // Satisfies R12: replace gpui-component's default light/dark themes
-        // with ubilink's own (design/ubilink-tokens.json), matching whichever
-        // mode the system is in right now. See desktop-gpui/src/theme/mod.rs.
+        // Satisfies R12, D26: replace gpui-component's default light/dark themes
+        // with ubilink's native macOS 27 ones (design/ubilink-tokens.json and the
+        // live system accent), matching whichever mode the system is in right now.
+        // See desktop-gpui/src/theme/mod.rs.
         theme::install(cx);
         // TN4: tray-icon and global-hotkey need the main thread and a running NSApp
         // loop, which exist only from here on.

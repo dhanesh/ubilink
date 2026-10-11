@@ -1949,6 +1949,10 @@ class AccentFixtures(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.assertTrue(probe._validate_accent(bad, "#f7821b"))
 
+    def test_kind_is_one_the_app_accepts(self):
+        src = (probe.REPO_ROOT / "desktop-gpui" / "src" / "automation" / "protocol.rs").read_text()
+        self.assertIn('(Fixture::Accent, "accent")', src)
+
 
 class FixRound1(unittest.TestCase):
     def test_ellipsis_floor_is_max_12_or_half(self):

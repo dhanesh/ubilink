@@ -196,6 +196,142 @@ pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
     })
 }
 
+/// One `NSColor` class colour (`controlAccentColor`, ...) in sRGB under the current
+/// drawing appearance: its RGB and alpha.
+fn system_color(
+    color_class: &AnyClass,
+    srgb: &AnyObject,
+    name: objc2::runtime::Sel,
+) -> Option<(crate::theme::accent::Rgb, f64)> {
+    // SAFETY: each selector is an NSColor class property returning an autoreleased
+    // NSColor; colorUsingColorSpace: returns nil or an NSColor; the component getters
+    // return CGFloat. Main thread (callers hold a MainThreadMarker).
+    unsafe {
+        let color: Option<Retained<AnyObject>> = msg_send![color_class, performSelector: name];
+        let color = color?;
+        let c: Option<Retained<AnyObject>> = msg_send![&*color, colorUsingColorSpace: srgb];
+        let c = c?;
+        let r: f64 = msg_send![&*c, redComponent];
+        let g: f64 = msg_send![&*c, greenComponent];
+        let b: f64 = msg_send![&*c, blueComponent];
+        let a: f64 = msg_send![&*c, alphaComponent];
+        let ch = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Some((crate::theme::accent::Rgb(ch(r), ch(g), ch(b)), a))
+    }
+}
+
+/// D26: the live system accent (`controlAccentColor`) and, under the light (Aqua) and
+/// dark (DarkAqua) appearances, `selectedContentBackgroundColor` and
+/// `keyboardFocusIndicatorColor`, in sRGB. Restores the current drawing appearance.
+pub fn read_accent(_mtm: MainThreadMarker) -> Option<crate::theme::accent::Source> {
+    use objc2::sel;
+    let color_class = AnyClass::get(c"NSColor")?;
+    let appearance_class = AnyClass::get(c"NSAppearance")?;
+    let space_class = AnyClass::get(c"NSColorSpace")?;
+    // SAFETY: +[NSColorSpace sRGBColorSpace] and +[NSAppearance currentAppearance] /
+    // appearanceNamed: / setCurrentAppearance: are class methods returning (or taking)
+    // nil or an autoreleased object; main thread.
+    unsafe {
+        let srgb: Option<Retained<AnyObject>> = msg_send![space_class, sRGBColorSpace];
+        let srgb = srgb?;
+        let previous: Option<Retained<AnyObject>> = msg_send![appearance_class, currentAppearance];
+        let mut selection = [None; 2];
+        let mut focus = [None; 2];
+        let mut accent = None;
+        for (ix, name) in ["NSAppearanceNameAqua", "NSAppearanceNameDarkAqua"]
+            .iter()
+            .enumerate()
+        {
+            let n = NSString::from_str(name);
+            let appearance: Option<Retained<AnyObject>> =
+                msg_send![appearance_class, appearanceNamed: &*n];
+            let _: () = msg_send![appearance_class, setCurrentAppearance: appearance.as_deref()];
+            if ix == 0 {
+                accent = system_color(color_class, &srgb, sel!(controlAccentColor)).map(|c| c.0);
+            }
+            selection[ix] =
+                system_color(color_class, &srgb, sel!(selectedContentBackgroundColor)).map(|c| c.0);
+            focus[ix] = system_color(color_class, &srgb, sel!(keyboardFocusIndicatorColor));
+        }
+        let _: () = msg_send![appearance_class, setCurrentAppearance: previous.as_deref()];
+        Some(crate::theme::accent::Source {
+            accent: accent?,
+            selection,
+            focus,
+        })
+    }
+}
+
+/// Where the accent observer posts: set once by [`observe_accent`].
+static ACCENT_INBOX: std::sync::OnceLock<super::Inbox> = std::sync::OnceLock::new();
+
+objc2::define_class!(
+    // SAFETY: NSObject has no subclassing requirements; the class adds one method and
+    // no ivars.
+    #[unsafe(super(objc2::runtime::NSObject))]
+    #[name = "UbilinkAccentObserver"]
+    struct AccentObserver;
+
+    impl AccentObserver {
+        /// Any of the colour notifications: hand the re-theme to the main-thread pump.
+        #[unsafe(method(colorsChanged:))]
+        fn colors_changed(&self, _note: &AnyObject) {
+            if let Some(inbox) = ACCENT_INBOX.get() {
+                inbox.post(super::ShellEvent::AccentChanged);
+            }
+        }
+    }
+);
+
+/// D26: observe the system accent. `NSSystemColorsDidChangeNotification` (local) is
+/// what AppKit posts when the accent or highlight colour changes;
+/// `AppleColorPreferencesChangedNotification` and `AppleAquaColorVariantChanged`
+/// (distributed) are the System Settings broadcasts. Each posts
+/// [`super::ShellEvent::AccentChanged`]. The observer lives for the process.
+pub fn observe_accent(_mtm: MainThreadMarker, inbox: super::Inbox) {
+    use objc2::{sel, ClassType};
+    if ACCENT_INBOX.set(inbox).is_err() {
+        return;
+    }
+    let (Some(local), Some(distributed)) = (
+        AnyClass::get(c"NSNotificationCenter"),
+        AnyClass::get(c"NSDistributedNotificationCenter"),
+    ) else {
+        return;
+    };
+    // SAFETY: +new on our NSObject subclass returns a retained instance; the centers'
+    // defaultCenter returns the shared center; addObserver:selector:name:object: takes
+    // the observer, a selector it implements (colorsChanged:, one object argument), an
+    // NSString and nil. The observer is leaked so it outlives every registration.
+    unsafe {
+        let observer: Retained<AnyObject> = msg_send![AccentObserver::class(), new];
+        for (center_class, names) in [
+            (local, &["NSSystemColorsDidChangeNotification"][..]),
+            (
+                distributed,
+                &[
+                    "AppleColorPreferencesChangedNotification",
+                    "AppleAquaColorVariantChanged",
+                ][..],
+            ),
+        ] {
+            let center: Option<Retained<AnyObject>> = msg_send![center_class, defaultCenter];
+            let Some(center) = center else { continue };
+            for name in names {
+                let n = NSString::from_str(name);
+                let _: () = msg_send![
+                    &*center,
+                    addObserver: &*observer,
+                    selector: sel!(colorsChanged:),
+                    name: &*n,
+                    object: Option::<&AnyObject>::None
+                ];
+            }
+        }
+        std::mem::forget(observer);
+    }
+}
+
 /// Move and resize panel `number` to `size` points with its top-left corner at
 /// `top_left` (global top-left points, as `placement`), flipped to AppKit's
 /// bottom-left frame (`placement::appkit_origin`). Returns whether the panel was

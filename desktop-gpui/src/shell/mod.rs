@@ -49,6 +49,9 @@ pub enum ShellEvent {
     Menu(String),
     /// A second instance (single-instance socket) asked for the panel.
     Show,
+    /// D26: AppKit reported a system colour change (the accent, `theme::accent`):
+    /// rebuild the theme and repaint in place.
+    AccentChanged,
     /// R6: a request from the automation socket, run on the main thread by the pump.
     /// The variant exists only in `automation` builds (S1).
     #[cfg(feature = "automation")]
@@ -203,6 +206,8 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
     // Clicks on the item itself open its menu natively. A no-op handler stops
     // tray-icon queueing every click on a channel nobody reads.
     TrayIconEvent::set_event_handler(Some(|_: TrayIconEvent| {}));
+    // D26: follow the system accent colour live.
+    crate::theme::accent::observe(inbox.clone());
 
     let mut state = startup_state();
 
@@ -327,6 +332,10 @@ pub fn handle_event(event: ShellEvent, cx: &mut App) {
         crate::automation::handle(call, cx);
         return;
     }
+    if let ShellEvent::AccentChanged = event {
+        crate::theme::refresh_accent(cx);
+        return;
+    }
     let Some(shell) = cx.try_global::<Shell>() else {
         return;
     };
@@ -374,6 +383,7 @@ fn command_for(event: &ShellEvent, hotkey_routes: &[(u32, Route)]) -> Option<Com
         ShellEvent::HotKey { pressed: false, .. } => None,
         ShellEvent::Menu(id) => tray::command_for(id),
         ShellEvent::Show => Some(Command::Open(Route::Capture)),
+        ShellEvent::AccentChanged => None,
         #[cfg(feature = "automation")]
         ShellEvent::Automation(_) => None,
     }
