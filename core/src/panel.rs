@@ -9,7 +9,7 @@
 // UbilinkService and is cargo-tested; keeping the logic out of the GUI layer is why
 // the panel's behaviour is verifiable without a GUI.
 
-use crate::adapter::{capture_active, ResourceAdapter};
+use crate::adapter::{capture_active, PermissionState, ResourceAdapter};
 use crate::resource::ResourceIdentity;
 use crate::service::UbilinkService;
 use serde::Serialize;
@@ -76,6 +76,18 @@ pub struct PanelBackend {
 impl PanelBackend {
     pub fn new(service: UbilinkService) -> PanelBackend {
         PanelBackend { service }
+    }
+
+    /// A permission check found Automation granted after start-up: open the capture
+    /// gate (S4) now instead of at the next launch. Only ever upgrades; a revoked grant
+    /// shows up as the capture's own osascript failure.
+    pub fn note_automation_granted(&mut self) {
+        self.service.set_permission(PermissionState::Granted);
+    }
+
+    /// The automation permission the capture gate (S4) checks.
+    pub fn automation_permission(&self) -> PermissionState {
+        self.service.permission()
     }
 
     /// The `capture_current` command: capture the active resource (permission-gated,
@@ -379,6 +391,40 @@ mod tests {
         let panel = Mutex::new(PanelBackend::new(svc));
         let err = PanelBackend::capture_current(&panel, &LiveAdapter, 1).unwrap_err();
         assert!(!err.trim().is_empty(), "U3: empty explanation");
+    }
+
+    #[test]
+    fn a_later_automation_grant_opens_the_capture_gate_without_a_relaunch() {
+        // The start-up probe said Denied; a later check found Automation granted.
+        struct LiveApp;
+        impl ResourceAdapter for LiveApp {
+            fn id(&self) -> &str {
+                "safari.macos"
+            }
+            fn needs_permission(&self) -> bool {
+                true
+            }
+            fn capture(&self) -> Result<ResourceIdentity, CaptureFailure> {
+                Ok(ResourceIdentity::new("Example", "https://example.com/"))
+            }
+            fn open_plan(&self, r: &ResourceIdentity) -> OpenPlan {
+                OpenPlan {
+                    program: "open".into(),
+                    args: vec![r.uri.clone()],
+                }
+            }
+        }
+        let svc = UbilinkService::new(LinkGraph::open_in_memory().unwrap())
+            .with_permission(PermissionState::Denied);
+        let panel = Mutex::new(PanelBackend::new(svc));
+        assert!(PanelBackend::capture_current(&panel, &LiveApp, 1).is_err());
+        panel.lock().unwrap().note_automation_granted();
+        assert_eq!(
+            panel.lock().unwrap().automation_permission(),
+            PermissionState::Granted
+        );
+        let view = PanelBackend::capture_current(&panel, &LiveApp, 2).unwrap();
+        assert_eq!(view.resource.uri, "https://example.com/");
     }
 
     /// An app adapter whose capture blocks until released, standing in for a

@@ -108,6 +108,12 @@ impl UbilinkService {
         self.permission
     }
 
+    /// Replace the permission the capture gate checks: a later check's answer, so a
+    /// grant made after the start-up probe takes effect without a relaunch.
+    pub fn set_permission(&mut self, p: PermissionState) {
+        self.permission = p;
+    }
+
     /// The second half of `capture`, for a caller that ran `capture_active` itself
     /// (so the slow adapter call need not hold a lock on this service): validate
     /// the adapter's output through the bounded API (S5), then persist it.

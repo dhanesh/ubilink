@@ -40,9 +40,6 @@ pub const GRAPH_FILE: &str = "ubilink-graph.sqlite";
 struct Shared {
     state: AppState,
     error: Option<String>,
-    /// What the start-up probe said about Automation (always `NotDetermined` in an
-    /// automation build, which never runs it).
-    permission: PermissionState,
 }
 
 static SHARED: OnceLock<Shared> = OnceLock::new();
@@ -74,22 +71,12 @@ pub fn startup_error() -> Option<&'static str> {
     shared().error.as_deref()
 }
 
-/// The Automation state the start-up probe found (rc.4: a release build that found it
-/// granted never checks again when capture opens, `onboarding::opening_capture_routes_here`).
-pub fn startup_automation() -> PermissionState {
-    shared().permission
-}
-
 fn shared() -> &'static Shared {
     SHARED.get_or_init(|| {
         let data_dir = crate::paths::data_dir();
         let permission = startup_permission(&ubilink_core::OsaScriptRunner);
         let (state, error) = build(&data_dir, permission);
-        Shared {
-            state,
-            error,
-            permission,
-        }
+        Shared { state, error }
     })
 }
 
