@@ -74,6 +74,7 @@ use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use ubilink_core::BrowseEntry;
 
+use super::escape::{self, EscapeAction, EscapeState};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
@@ -764,6 +765,34 @@ impl BrowserView {
         cx.notify();
     }
 
+    /// Escape: cancel a pending mark, else clear a non-empty filter (every row shows
+    /// again), else dismiss the panel (`views::escape`, the Tauri browser's order).
+    fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let filter = self.filter.clone();
+        let state = EscapeState {
+            marked: self.marked.is_some(),
+            filtering: filter
+                .as_ref()
+                .is_some_and(|f| !f.read(cx).value().is_empty()),
+            ..EscapeState::default()
+        };
+        match escape::escape_action(Route::Browser, state) {
+            EscapeAction::Unmark => {
+                self.marked = None;
+                cx.notify();
+            }
+            EscapeAction::ClearFilter => {
+                if let Some(filter) = filter {
+                    // `set_value` emits no change event, so re-filter here.
+                    filter.update(cx, |input, cx| input.set_value("", window, cx));
+                    self.refilter(window, cx);
+                }
+            }
+            EscapeAction::Dismiss => escape::dismiss_panel(window, cx),
+            EscapeAction::CloseConfirmation => {}
+        }
+    }
+
     /// Left: back out one level and restore the selection left there; at the top
     /// level with an empty filter, close the panel (Phase 2 R3).
     fn drill_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -782,12 +811,8 @@ impl BrowserView {
             LeftKey::Edit => return,
             LeftKey::Back(row) => row,
             LeftKey::Close => {
-                // Hide as a dismiss does, once this key's dispatch is over (the shell
-                // removes this very window). Nothing is opened.
-                cx.spawn(async move |_, cx| {
-                    cx.update(|cx| crate::shell::execute(crate::shell::Command::Hide, cx));
-                })
-                .detach();
+                // Hide as a dismiss does (as Escape does). Nothing is opened.
+                escape::dismiss_panel(window, cx);
                 return;
             }
         };
@@ -998,15 +1023,21 @@ impl Render for BrowserView {
                 this.open_selected(cx);
                 cx.stop_propagation();
             }))
-            // Escape cancels a pending mark first (Tauri); otherwise it goes on.
-            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
-                if this.marked.take().is_some() {
-                    cx.stop_propagation();
-                    cx.notify();
-                }
+            // Escape (Tauri, `views::escape`): cancel a pending mark, else clear the
+            // filter, else dismiss. The focused filter Input maps the key to its own
+            // `Escape` action; take it first, in the capture phase.
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                this.escape(window, cx);
+                cx.stop_propagation();
             }))
-            // ⌘L marks or links (R8); the Input binds nothing to it.
+            // ⌘L marks or links (R8); the Input binds nothing to it. Escape lands here
+            // only when the filter Input is not focused.
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if escape::is_escape(&event.keystroke) {
+                    this.escape(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if is_mark_key(&event.keystroke) {
                     this.mark_selected(window, cx);
                     cx.stop_propagation();
@@ -1216,7 +1247,7 @@ mod tests {
         assert_eq!(entries[4999].uri, uri("04747"), "row 5000");
 
         // The list's viewport on the panel, and what the virtual list builds in it.
-        let (_, panel_h) = crate::shell::panel::PANEL_SIZE;
+        let panel_h = crate::views::height_for(crate::views::Route::Browser);
         let viewport =
             panel_h as f32 - 2. * f32::from(PAD_Y) - f32::from(HEADER_H) - f32::from(GAP);
         let built = rows_built(viewport, f32::from(ROW_H), entries.len());

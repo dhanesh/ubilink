@@ -59,20 +59,23 @@ pub struct Display {
     pub work: Rect,
 }
 
-/// Where to open a panel: which display, and the top-left corner both relative to that
-/// display's frame (what GPUI's `WindowOptions::window_bounds` wants) and globally.
+/// Where to open a panel: which display, the top-left corner both relative to that
+/// display's frame (what GPUI's `WindowOptions::window_bounds` wants) and globally,
+/// and its size, the height capped to the display's usable area.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     pub display_id: u32,
     pub local: (f64, f64),
     pub global: (f64, f64),
+    pub size: (f64, f64),
 }
 
 /// Placement for a panel of `(width, height)` points. The display is chosen by its
 /// FRAME, so a cursor up in the menu bar still counts as on that display; the panel is
-/// placed within its usable area. If the cursor is on no display, the first is used
-/// (the caller lists the primary display first). `None` when there are no displays:
-/// let GPUI fall back to its default.
+/// placed within its usable area, and a panel taller than that area is cut to it (its
+/// view scrolls inside). If the cursor is on no display, the first is used (the caller
+/// lists the primary display first). `None` when there are no displays: let GPUI fall
+/// back to its default.
 pub fn place_panel(
     displays: &[Display],
     cursor: (f64, f64),
@@ -84,16 +87,52 @@ pub fn place_panel(
         .or_else(|| displays.first())?;
     let s = d.work;
     let x = s.x + ((s.width - width) / 2.0).max(0.0);
-    // Near the top, but moved up rather than hanging off the bottom edge, and never
-    // above the top edge.
-    let y = (s.y + s.height * TOP_FRACTION)
-        .min(s.y + s.height - height)
-        .max(s.y);
-    Some(Placement {
+    Some(fit_on(
+        d,
+        (x, s.y + s.height * TOP_FRACTION),
+        (width, height),
+    ))
+}
+
+/// The panel resized to `(width, height)` on display `d`, keeping its left edge and,
+/// when it still fits, its top edge (the Tauri shell's `resize_panel`: the panel grows
+/// downward with its content). Width and height are cut to the display's usable area,
+/// and the panel is moved inside it: up rather than past the bottom, and back onto the
+/// display when its old place is elsewhere (the display it was on went away).
+pub fn fit_on(d: &Display, (x, top): (f64, f64), (width, height): (f64, f64)) -> Placement {
+    let s = d.work;
+    let width = width.min(s.width).max(0.0);
+    let height = height.min(s.height).max(0.0);
+    let x = x.min(s.x + s.width - width).max(s.x);
+    let y = top.min(s.y + s.height - height).max(s.y);
+    Placement {
         display_id: d.id,
         local: (x - d.frame.x, y - d.frame.y),
         global: (x, y),
-    })
+        size: (width, height),
+    }
+}
+
+/// AppKit's bottom-left frame origin for a rect at `top_left` (global top-left
+/// points) of `size`, given the primary display's height: the inverse of
+/// [`Rect::from_appkit`].
+pub fn appkit_origin(top_left: (f64, f64), size: (f64, f64), primary_height: f64) -> (f64, f64) {
+    (top_left.0, primary_height - (top_left.1 + size.1))
+}
+
+/// [`fit_on`] the display with id `display_id`, else the first (a display that was
+/// unplugged while the panel was open). `None` when there are no displays.
+pub fn refit(
+    displays: &[Display],
+    display_id: u32,
+    top_left: (f64, f64),
+    size: (f64, f64),
+) -> Option<Placement> {
+    let d = displays
+        .iter()
+        .find(|d| d.id == display_id)
+        .or_else(|| displays.first())?;
+    Some(fit_on(d, top_left, size))
 }
 
 #[cfg(test)]
@@ -186,6 +225,76 @@ mod tests {
         let p = place_panel(&[tiny], (200.0, 100.0), (640.0, 900.0)).unwrap();
         assert_eq!(p.global, (100.0, 50.0), "pinned to the top-left edge");
         assert_eq!(p.local, (0.0, 0.0));
+        assert_eq!(p.size, (500.0, 300.0), "cut to the usable width and height");
+    }
+
+    // ── refit: a panel resized in place (route switch, content change) ──
+
+    const WORK: Rect = Rect {
+        x: 0.0,
+        y: 25.0,
+        width: 1440.0,
+        height: 805.0,
+    };
+
+    fn docked() -> Display {
+        Display {
+            id: 1,
+            frame: rect(0.0, 0.0, 1440.0, 900.0),
+            work: WORK,
+        }
+    }
+
+    #[test]
+    fn a_panel_that_fits_keeps_its_place_and_takes_its_new_height() {
+        let p = refit(&[docked()], 1, (400.0, 200.0), (640.0, 300.0)).unwrap();
+        assert_eq!((p.global, p.size), ((400.0, 200.0), (640.0, 300.0)));
+        let p = refit(&[docked()], 1, (400.0, 200.0), (640.0, 140.0)).unwrap();
+        assert_eq!(
+            (p.global, p.size),
+            ((400.0, 200.0), (640.0, 140.0)),
+            "shrinks in place"
+        );
+    }
+
+    #[test]
+    fn growing_past_the_bottom_moves_the_panel_up() {
+        // Top at 213 with 700 pt would end at 913, below the usable bottom (830).
+        let p = refit(&[docked()], 1, (400.0, 213.0), (640.0, 700.0)).unwrap();
+        assert_eq!(p.global, (400.0, 830.0 - 700.0));
+        assert_eq!(p.size.1, 700.0);
+    }
+
+    #[test]
+    fn taller_than_the_usable_area_is_cut_to_it_below_the_menu_bar() {
+        let p = refit(&[docked()], 1, (400.0, 213.0), (640.0, 900.0)).unwrap();
+        assert_eq!(p.global.1, 25.0);
+        assert_eq!(p.size.1, 805.0);
+    }
+
+    #[test]
+    fn refit_stays_on_the_panels_display() {
+        let main = display(1, 0.0, 0.0, 1440.0, 900.0);
+        let right = display(2, 1440.0, 0.0, 1920.0, 1080.0);
+        let p = refit(&[main, right], 2, (2080.0, 216.0), (640.0, 400.0)).unwrap();
+        assert_eq!(p.display_id, 2);
+        assert_eq!(p.local, (640.0, 216.0), "display-local origin");
+        // Its display is gone: the first one takes it, and the panel moves onto it
+        // (its old x lay on the vanished display, right of the primary).
+        let p = refit(&[main], 2, (2080.0, 216.0), (640.0, 400.0)).unwrap();
+        assert_eq!(p.display_id, 1);
+        assert_eq!(
+            p.global,
+            (1440.0 - 640.0, 216.0),
+            "pulled back inside the work area"
+        );
+        let p = refit(&[main], 2, (-900.0, 216.0), (640.0, 400.0)).unwrap();
+        assert_eq!(p.global.0, 0.0, "from the left too");
+        // A display narrower than the panel cuts the width.
+        let narrow = display(3, 0.0, 0.0, 500.0, 900.0);
+        let p = refit(&[narrow], 3, (0.0, 100.0), (640.0, 200.0)).unwrap();
+        assert_eq!((p.global.0, p.size.0), (0.0, 500.0));
+        assert_eq!(refit(&[], 1, (0.0, 0.0), (640.0, 140.0)), None);
     }
 
     #[test]
@@ -209,6 +318,23 @@ mod tests {
         );
         let p = place_panel(&[d], (700.0, 5.0), (640.0, 800.0)).unwrap();
         assert_eq!(p.global.1, 25.0 + 805.0 - 800.0, "clear of the Dock");
+    }
+
+    #[test]
+    fn a_top_left_rect_flips_to_an_appkit_origin_and_back() {
+        // Primary 900 high: a 640x200 panel at top y=100 has its AppKit origin at
+        // y = 900 - 300 = 600; flipping that rect back gives the same place.
+        assert_eq!(
+            appkit_origin((400.0, 100.0), (640.0, 200.0), 900.0),
+            (400.0, 600.0)
+        );
+        let back = Rect::from_appkit(400.0, 600.0, 640.0, 200.0, 900.0);
+        assert_eq!((back.x, back.y), (400.0, 100.0));
+        // A display above the primary has negative top-left y.
+        assert_eq!(
+            appkit_origin((0.0, -1080.0), (640.0, 140.0), 900.0),
+            (0.0, 1840.0)
+        );
     }
 
     #[test]

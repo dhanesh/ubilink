@@ -69,6 +69,37 @@ class PathAndMatchers(unittest.TestCase):
         self.assertTrue(ok({"len": 1, "x": 2}, {"len": 1, "x": 2}))
         self.assertFalse(ok([1], {"len": 1, "x": 2}))
 
+    def test_path_operands_compare_two_values_of_one_result(self):
+        doc = {"view": {"layout": {
+            "viewport": {"h": 140.0},
+            "last_adapter": {"bottom": 152.5},
+            "a": {"h": 28.0}, "b": {"h": 28.0}, "c": {"h": 24.0},
+        }}}
+        L = "view.layout."
+        # The last toggle below the viewport's bottom edge: a miss that names both values.
+        misses = probe.check_expect(doc, {L + "last_adapter.bottom": {"le": {"path": L + "viewport.h"}}})
+        self.assertEqual(len(misses), 1)
+        self.assertEqual(misses[0][1]["paths"], {L + "viewport.h": 140.0})
+        doc["view"]["layout"]["viewport"]["h"] = 200.0
+        self.assertEqual(probe.check_expect(doc, {L + "last_adapter.bottom": {"le": {"path": L + "viewport.h"}}}), [])
+        self.assertEqual(probe.check_expect(doc, {L + "b.h": {"eq": {"path": L + "a.h"}}}), [])
+        self.assertTrue(probe.check_expect(doc, {L + "c.h": {"eq": {"path": L + "a.h"}}}))
+        # A missing operand path never passes, whatever the operator.
+        for op in probe._PATH_OPS:
+            self.assertTrue(probe.check_expect(doc, {L + "a.h": {op: {"path": L + "nope.h"}}}), op)
+        # Nor does an unresolved one reaching match_value directly.
+        self.assertFalse(probe.match_value(1, {"le": {"path": "x"}}))
+
+    def test_path_operands_are_validated(self):
+        step = {"call": "state", "expect": {"a": {"le": {"path": "b"}}}}
+        probe.validate_step(step, "s")
+        for bad in ({"le": {"path": ""}}, {"contains": {"path": "b"}}, {"le": {"path": 3}}):
+            with self.assertRaises(probe.ScenarioError, msg=bad):
+                probe.validate_step({"call": "state", "expect": {"a": bad}}, "s")
+        # Only a call's expect: an a11y state flag cannot point at another path.
+        with self.assertRaises(probe.ScenarioError):
+            probe.validate_matcher({"eq": {"path": "b"}}, "s")
+
 
 class TextMatching(unittest.TestCase):
     def test_contains_normalised(self):

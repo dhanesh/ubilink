@@ -102,6 +102,71 @@ struct Panel {
     handle: AnyWindowHandle,
     view: Entity<panel::PanelView>,
     route: Route,
+    /// Where the panel is and how big (`None` when there were no displays to place it
+    /// on). A route switch or a content change refits it from here.
+    placement: Option<placement::Placement>,
+    /// The panel's AppKit window number, so native calls act on this window only.
+    number: Option<isize>,
+}
+
+/// How long the deactivation after a file dialog is given to settle before the panel
+/// takes key status again (see `end_file_dialog`).
+const DEACTIVATE_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Whether a file dialog the panel opened is up: at most one at a time (a second
+/// press must not stack another), and closing it restores the panel exactly once.
+/// It also remembers whether opening it activated the app, which closing must undo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DialogGate {
+    open: bool,
+    activated: bool,
+}
+
+impl DialogGate {
+    /// Open a dialog; `app_was_active` is whether Ubilink was already the active app
+    /// (the panel is non-activating, so normally it was not). False (do nothing) when
+    /// one is already up.
+    pub fn begin(&mut self, app_was_active: bool) -> bool {
+        if self.open {
+            return false;
+        }
+        *self = DialogGate {
+            open: true,
+            activated: !app_was_active,
+        };
+        true
+    }
+
+    /// A dialog is up right now.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// The dialog is gone (answered, cancelled, or its panel went away): what to undo,
+    /// only for the first call; `None` after that.
+    pub fn end(&mut self, panel_stays: bool) -> Option<DialogEnd> {
+        if !self.open {
+            return None;
+        }
+        let activated = self.activated;
+        *self = DialogGate::default();
+        Some(DialogEnd {
+            deactivate: activated,
+            refocus_panel: panel_stays,
+        })
+    }
+}
+
+/// What closing a file dialog undoes, to get back to the state before Import: the app
+/// not active (the user's previous app frontmost, as the non-activating panel left
+/// it) and, if the panel stays, the panel key at its pop-up level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DialogEnd {
+    /// Opening the dialog activated Ubilink: deactivate it, so the previous app is
+    /// frontmost again and gets the keystrokes once the panel goes.
+    pub deactivate: bool,
+    /// The panel is still open (Settings): back to its level, and key again.
+    pub refocus_panel: bool,
 }
 
 /// Owns the OS integrations for the app's lifetime: dropping the tray removes the
@@ -113,6 +178,7 @@ pub struct Shell {
     hotkey_routes: Vec<(u32, Route)>,
     events: Receiver<ShellEvent>,
     panel: Option<Panel>,
+    dialog: DialogGate,
 }
 
 impl Global for Shell {}
@@ -160,6 +226,7 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
         hotkey_routes: reg.routes,
         events,
         panel: None,
+        dialog: DialogGate::default(),
     });
     log_state(cx);
     prewarm(cx);
@@ -340,8 +407,11 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
         return;
     };
     let (displays, primary_height) = native::displays(mtm);
-    let placement =
-        placement::place_panel(&displays, native::cursor(primary_height), panel::PANEL_SIZE);
+    let placement = placement::place_panel(
+        &displays,
+        native::cursor(primary_height),
+        panel::size_for(route),
+    );
     let opened = gpui_kit::open_window(panel::options(placement), cx, |window, cx| {
         cx.new(|cx| panel::PanelView::new(route, hotkey_at, window, cx))
     });
@@ -355,11 +425,14 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
     // Read back what AppKit actually built (the window is ordered front synchronously
     // by GPUI's open), so the state reports facts rather than the request.
     let facts = native::inspect_panel(mtm);
+    let number = native::newest_panel_number(mtm);
     cx.update_global::<Shell, _>(|shell, _| {
         shell.panel = Some(Panel {
             handle,
             view,
             route,
+            placement,
+            number,
         });
         let s = &mut shell.state;
         s.visible = true;
@@ -373,6 +446,8 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
 }
 
 fn switch_route(route: Route, cx: &mut App) {
+    // A file dialog belongs to the view being replaced: close it and restore the panel.
+    end_file_dialog(true, cx);
     let Some(view) = cx.update_global::<Shell, _>(|shell, _| {
         shell.panel.as_mut().map(|p| {
             p.route = route;
@@ -384,9 +459,73 @@ fn switch_route(route: Route, cx: &mut App) {
     view.update(cx, |v, cx| v.set_route(route, cx));
     cx.update_global::<Shell, _>(|shell, _| shell.state.route = Some(route.as_str().into()));
     log_state(cx);
+    // The same window takes the new route's height (the Tauri panel refit on every
+    // view switch).
+    fit_panel(views_height(route), cx);
+}
+
+fn views_height(route: Route) -> f64 {
+    crate::views::height_for(route)
+}
+
+/// Resize the open panel to `height` points (clamped as `panel::clamp_height`) on the
+/// display it is on: its top stays unless the taller panel would run off the bottom,
+/// and it is cut to the display's usable area (`placement::fit_on`; the Tauri shell's
+/// `resize_panel`). A route switch calls this, and so does a view whose content
+/// changed size (Settings' reset question). No panel, or no change: nothing to do.
+///
+/// The frame is set from a foreground task, never inside this call: AppKit reports
+/// the resize back to GPUI synchronously (windowDidResize), and GPUI handles that by
+/// updating the app, which must not be borrowed at the time. GPUI's own
+/// `Window::resize` defers for the same reason (and keeps the bottom edge, not the
+/// top, which is why it is not used).
+pub fn fit_panel(height: f64, cx: &mut App) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some((handle, Some(current), Some(number))) = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .map(|p| (p.handle, p.placement, p.number))
+    else {
+        return;
+    };
+    let (displays, primary_height) = native::displays(mtm);
+    let Some(next) = placement::refit(
+        &displays,
+        current.display_id,
+        current.global,
+        // The nominal width, not the current one: a narrow display may have cut it.
+        (panel::PANEL_WIDTH, panel::clamp_height(height)),
+    ) else {
+        return;
+    };
+    if next == current {
+        return;
+    }
+    cx.update_global::<Shell, _>(|shell, _| {
+        if let Some(p) = shell.panel.as_mut().filter(|p| p.handle == handle) {
+            p.placement = Some(next);
+        }
+    });
+    cx.spawn(async move |cx| {
+        // Still the same panel? (It may have been hidden meanwhile.)
+        let same = cx.update(|cx| {
+            cx.try_global::<Shell>()
+                .and_then(|s| s.panel.as_ref())
+                .is_some_and(|p| p.handle == handle)
+        });
+        if same {
+            if let Some(mtm) = MainThreadMarker::new() {
+                native::set_panel_frame(mtm, number, next.global, next.size, primary_height);
+            }
+        }
+    })
+    .detach();
 }
 
 fn hide(cx: &mut App) {
+    end_file_dialog(false, cx);
     let Some(p) = cx.update_global::<Shell, _>(|shell, _| shell.panel.take()) else {
         return;
     };
@@ -408,8 +547,122 @@ pub fn panel_closed(id: WindowId, cx: &mut App) {
         current
     });
     if was_current {
+        end_file_dialog(false, cx);
         mark_hidden(cx);
     }
+}
+
+/// Hide the panel only if `handle` is still the shell's panel: a dismiss asked for
+/// by one window (Escape) must never hide a newer one opened since.
+pub fn hide_if_current(handle: AnyWindowHandle, cx: &mut App) {
+    let current = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .is_some_and(|p| p.handle == handle);
+    if current {
+        hide(cx);
+    }
+}
+
+/// Settings' Import is about to open a file dialog. GPUI opens it with
+/// `beginWithCompletionHandler` and neither activates the app nor sets a level, while
+/// the panel is a non-activating NSPanel at the pop-up level (101) of an accessory
+/// app: the dialog would open behind the panel, unseen. So activate the app and drop
+/// the panel to the normal level until [`end_file_dialog`]. False (open nothing) when
+/// a dialog is already up: presses never stack dialogs.
+pub fn begin_file_dialog(cx: &mut App) -> bool {
+    if cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .is_none()
+    {
+        return false;
+    }
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let was_active = native::app_is_active(mtm);
+    if !cx.update_global::<Shell, _>(|shell, _| shell.dialog.begin(was_active)) {
+        return false;
+    }
+    // Lower the panel so the dialog is not under it. Without the recorded window
+    // number, fall back to the newest visible panel (file dialogs are skipped); if
+    // there is none either, the dialog still opens, but may sit under the panel.
+    let number = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .and_then(|p| p.number)
+        .or_else(|| native::newest_panel_number(mtm));
+    if let Some(number) = number {
+        native::lower_panel_for_dialog(mtm, number);
+    }
+    cx.activate(true);
+    true
+}
+
+/// The file dialog is over: it was answered (`panel_stays`), or the view that opened
+/// it is going away (a route switch: the panel stays; a hide or a click-away close: it
+/// does not). Close any dialog still up, deactivate the app if opening the dialog
+/// activated it, and, when the panel stays, put it back at its level with key status.
+/// Once, from a foreground task (outside this update: the dialog's completion handler
+/// and the key change call back into AppKit and GPUI).
+pub fn end_file_dialog(panel_stays: bool, cx: &mut App) {
+    if cx.try_global::<Shell>().is_none() {
+        return;
+    }
+    let Some(end) = cx.update_global::<Shell, _>(|shell, _| shell.dialog.end(panel_stays)) else {
+        return;
+    };
+    let target = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .and_then(|p| p.number.map(|n| (p.handle, n)));
+    cx.spawn(async move |cx| {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        native::cancel_file_dialogs(mtm);
+        // Deactivate first: the previous app becomes active again. A non-activating
+        // panel can then take key status without activating Ubilink, which is the
+        // state the panel was in before Import. App switching completes on a later
+        // run-loop turn, so the panel takes key after a short wait, not before the
+        // switch could take it away again.
+        if end.deactivate {
+            native::deactivate_app(mtm);
+            if end.refocus_panel {
+                cx.background_executor().timer(DEACTIVATE_SETTLE).await;
+            }
+        }
+        let Some((handle, number)) = target.filter(|_| end.refocus_panel) else {
+            return;
+        };
+        // Re-check after the wait: a new Import may have opened a dialog (the panel
+        // must stay under it), or the panel may have been replaced or hidden.
+        let refocus = cx.update(|cx| {
+            cx.try_global::<Shell>().is_some_and(|s| {
+                should_refocus(
+                    s.dialog.is_open(),
+                    s.panel.as_ref().map(|p| p.handle),
+                    handle,
+                )
+            })
+        });
+        if refocus {
+            native::restore_panel_after_dialog(mtm, number);
+        }
+    })
+    .detach();
+}
+
+/// After a file dialog closed and the deactivation settled: give the panel key status
+/// back only if no new dialog has opened since and the panel is still the one that
+/// opened the dialog (same window handle).
+pub fn should_refocus<H: PartialEq>(
+    dialog_open_now: bool,
+    current: Option<H>,
+    ended_on: H,
+) -> bool {
+    !dialog_open_now && current.is_some_and(|h| h == ended_on)
 }
 
 fn mark_hidden(cx: &mut App) {
@@ -424,7 +677,96 @@ fn mark_hidden(cx: &mut App) {
 mod tests {
     // Not `super::*`: that glob carries gpui-kit's re-exported `test` macro, which
     // would shadow Rust's `#[test]`.
-    use super::{command_for, startup_state, Command, Route, ShellEvent};
+    use super::{
+        command_for, should_refocus, startup_state, Command, DialogEnd, DialogGate, Route,
+        ShellEvent,
+    };
+
+    /// One file dialog at a time, and its end restores the panel exactly once (a
+    /// route switch and the dialog's own answer may both report the end).
+    #[test]
+    fn the_dialog_gate_admits_one_dialog_and_ends_it_once() {
+        let mut g = DialogGate::default();
+        assert!(g.begin(false), "the first press opens a dialog");
+        assert!(
+            !g.begin(false),
+            "a second press while it is up does not stack another"
+        );
+        assert!(g.end(true).is_some(), "the first end restores the panel");
+        assert_eq!(
+            g.end(true),
+            None,
+            "a later end (the cancelled answer) does nothing"
+        );
+        assert!(g.begin(false), "a new dialog may open afterwards");
+    }
+
+    /// Closing the dialog returns to the state before Import: Ubilink inactive (the
+    /// previous app frontmost) and, if the panel stays, the panel key again.
+    #[test]
+    fn closing_the_dialog_undoes_the_activation_it_caused() {
+        let end = |was_active, panel_stays| {
+            let mut g = DialogGate::default();
+            assert!(g.begin(was_active));
+            g.end(panel_stays).unwrap()
+        };
+        // The usual case: the non-activating panel left Ubilink inactive.
+        assert_eq!(
+            end(false, true),
+            DialogEnd {
+                deactivate: true,
+                refocus_panel: true
+            },
+            "answered, Settings stays: deactivate, then the panel is key again"
+        );
+        assert_eq!(
+            end(false, false),
+            DialogEnd {
+                deactivate: true,
+                refocus_panel: false
+            },
+            "hidden while the dialog was up: deactivate, nothing to refocus"
+        );
+        // Ubilink was already active before Import: leave it so.
+        assert_eq!(
+            end(true, true),
+            DialogEnd {
+                deactivate: false,
+                refocus_panel: true
+            }
+        );
+        assert_eq!(
+            end(true, false),
+            DialogEnd {
+                deactivate: false,
+                refocus_panel: false
+            }
+        );
+    }
+
+    /// The delayed refocus re-checks: Import pressed again within the settle window
+    /// opens a new dialog, and the old refocus must not raise the panel over it; a
+    /// replaced or hidden panel is not refocused either.
+    #[test]
+    fn a_stale_refocus_never_raises_the_panel_over_a_new_dialog() {
+        let mut g = DialogGate::default();
+        assert!(g.begin(false));
+        let ended = g.end(true).unwrap();
+        assert!(ended.refocus_panel);
+        // Within the settle window, Import again.
+        assert!(g.begin(false));
+        assert!(
+            !should_refocus(g.is_open(), Some(1u8), 1),
+            "a new dialog is up"
+        );
+        // No new dialog: refocus only the same panel.
+        assert!(should_refocus(false, Some(1u8), 1));
+        assert!(
+            !should_refocus(false, Some(2u8), 1),
+            "replaced by another panel"
+        );
+        assert!(!should_refocus(false, None::<u8>, 1), "hidden");
+    }
 
     #[test]
     fn startup_state_claims_no_window_kind_or_background() {

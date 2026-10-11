@@ -1,0 +1,156 @@
+{
+  "description": "Parity: the panel fits Settings' content. With the 10 adapters of fixtures/adapters.json (3 rows of 4), the last adapter switch lies inside its scroll box and the box inside the window, also while the reset confirmation adds its row; once the question closes the panel shrinks back to its shown height; and the window stays on its display.",
+  "requirement": "P2-settings-fit (GPUI Phase 2b parity, Tauri ee80e70:desktop/src/main.rs resize_panel + dist/panel.js fitWindow)",
+  "notes": [
+    "The a11y dump carries no bounds, so the view reports measured layout (views/layout.rs), all in window points from one frame: view.layout.last_adapter (the last switch), view.layout.adapters_box (the grid's scroll box, which clips what it does not show) and view.layout.viewport (the window's content size). A {\"path\": ...} operand compares them (README, Expectations): the last switch ends inside the scroll box, and the box ends inside the window.",
+    "Tauri fitted the window to its content (clamped 96..900, capped to the display's work area, moved up rather than off the bottom). At a fixed 640x140 the grid is clipped after its first row.",
+    "Must fail before the fix (on the instrumentation commit) at 'shown: the last adapter switch is fully visible (inside its scroll box, inside the window)'."
+  ],
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "settings is drawn and measured",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "window_verified": true,
+        "route": "settings",
+        "view.layout.viewport.h": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "shown: the last adapter switch is fully visible (inside its scroll box, inside the window)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_adapter.y": {
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
+        },
+        "view.layout.last_adapter.bottom": {
+          "le": {
+            "path": "view.layout.adapters_box.bottom"
+          }
+        },
+        "view.layout.adapters_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      },
+      "save": {
+        "shown_h": "view.layout.viewport.h"
+      }
+    },
+    {
+      "name": "shown: the panel is on its display",
+      "winframe": "state"
+    },
+    {
+      "name": "Tab to Reset",
+      "key_until": {
+        "role": "Button",
+        "text": "Reset",
+        "state": {
+          "focused": true
+        }
+      },
+      "route": "settings"
+    },
+    {
+      "name": "ask to reset",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "the confirmation shows",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "confirming: the last adapter switch is fully visible (inside its scroll box, inside the window)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_adapter.y": {
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
+        },
+        "view.layout.last_adapter.bottom": {
+          "le": {
+            "path": "view.layout.adapters_box.bottom"
+          }
+        },
+        "view.layout.adapters_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "confirming: the panel is on its display",
+      "winframe": "state"
+    },
+    {
+      "name": "Escape closes the confirmation",
+      "call": "key",
+      "args": {
+        "keys": "escape"
+      }
+    },
+    {
+      "name": "the confirmation is gone",
+      "see": {
+        "text": "Delete all captured links and connections?"
+      },
+      "absent": true,
+      "route": "settings",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "closed again: the last adapter switch is fully visible and the panel is back to its shown height",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_adapter.y": {
+          "ge": {
+            "path": "view.layout.adapters_box.y"
+          }
+        },
+        "view.layout.last_adapter.bottom": {
+          "le": {
+            "path": "view.layout.adapters_box.bottom"
+          }
+        },
+        "view.layout.adapters_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        },
+        "view.layout.viewport.h": {
+          "saved": "shown_h"
+        }
+      }
+    }
+  ]
+}

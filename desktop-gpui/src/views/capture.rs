@@ -26,6 +26,7 @@
 //! it), and settled only by the newest view's capture, so a stale result from an
 //! earlier show can never overwrite a newer one.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -35,6 +36,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
+use super::escape::{self, EscapeAction, EscapeState};
+use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
@@ -52,6 +55,36 @@ pub const COPIED_TEXT: &str = "Copied";
 /// sees it (probes/README.md, "Phase 1 view-state contract"), and well inside the 3 s
 /// from the key by which the panel must be gone.
 pub const COPIED_HOLD: Duration = Duration::from_millis(1300);
+
+// The layout with backlinks, in points. The view sets these, so `content_height` adds
+// up what it lays out, and the panel grows to show every row (the Tauri panel's
+// `fitWindow`) up to `MAX_ROWS`, past which the list scrolls.
+const PAD_Y: Pixels = spacing::S2;
+const GAP: Pixels = spacing::S1;
+/// The one-line name and URI above the backlinks.
+const BODY_LINE_H: Pixels = px(20.);
+const HEADING_LINE_H: Pixels = px(16.);
+const ROW_LINE_H: Pixels = px(18.);
+/// Between the heading and the list, and between rows.
+const ROW_GAP: Pixels = px(2.);
+/// The most backlink rows the panel grows to show; more scroll.
+pub const MAX_ROWS: usize = 8;
+
+/// The capture panel's height with `backlinks` rows: none keeps the route's 140 pt;
+/// otherwise padding, the header, the name line, the heading and the rows (at most
+/// [`MAX_ROWS`]), with their gaps, and never less than 140 pt.
+pub fn content_height(backlinks: usize) -> f64 {
+    let base = crate::shell::panel::PANEL_HEIGHT;
+    if backlinks == 0 {
+        return base;
+    }
+    let pt = |p: Pixels| f64::from(f32::from(p));
+    let rows = backlinks.min(MAX_ROWS) as f64;
+    let list = rows * pt(ROW_LINE_H) + (rows - 1.0) * pt(ROW_GAP);
+    let section = pt(HEADING_LINE_H) + pt(ROW_GAP) + list;
+    let h = 2.0 * pt(PAD_Y) + pt(theming::ACCENT_H) + pt(GAP) + pt(BODY_LINE_H) + pt(GAP) + section;
+    h.max(base)
+}
 
 /// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
 pub const BACKLINKS_HEADING: &str = "Linked to this";
@@ -104,6 +137,10 @@ pub struct State {
     /// `views::theming`).
     #[serde(default)]
     pub theme_samples: ThemeSamples,
+    /// Measured places (`views::layout`): `viewport`, the backlinks' scroll box
+    /// (`backlinks_box`) and its last row (`last_backlink`), when there are backlinks.
+    #[serde(default)]
+    pub layout: BTreeMap<String, serde_json::Value>,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
@@ -112,11 +149,15 @@ pub fn state() -> super::ViewState {
         view: Route::Capture.as_str().into(),
         phase: lock().phase.into(),
         theme_samples: SAMPLES.get(),
+        layout: LAYOUT.get(),
     })
 }
 
 /// The newest capture view's theme sample regions (R14), written at prepaint.
 static SAMPLES: Samples = Samples::new();
+
+/// The newest capture view's measured layout (`views::layout`), written at prepaint.
+static LAYOUT: Layout = Layout::new();
 
 /// The copy button's label (R2's click path; Enter and ⌘C are the keyboard path).
 pub const COPY_BUTTON: &str = "Copy link";
@@ -455,6 +496,8 @@ pub struct CaptureView {
     _dismiss: Option<Task<()>>,
     /// Repaints in the system's light or dark tokens while open (R14).
     appearance: FollowAppearance,
+    /// The backlink count the panel was last fitted to; a change refits it.
+    fitted: Option<usize>,
     /// The in-flight capture; dropped (cancelled) with the view when the panel hides.
     _capture: Task<()>,
 }
@@ -506,6 +549,7 @@ impl CaptureView {
             copied: false,
             _dismiss: None,
             appearance: FollowAppearance::default(),
+            fitted: None,
             _capture: capture,
         }
     }
@@ -597,10 +641,13 @@ fn backlinks_section(
                 .flex()
                 .flex_row()
                 .items_baseline()
-                .line_height(px(18.))
+                .line_height(ROW_LINE_H)
                 .gap(spacing::S3)
                 .w_full()
                 .min_w_0()
+                .when(ix + 1 == count, |d| {
+                    d.relative().child(LAYOUT.bounds("last_backlink"))
+                })
                 .child(
                     div()
                         .flex_shrink_0()
@@ -632,25 +679,36 @@ fn backlinks_section(
         .flex_col()
         .flex_1()
         .min_h_0()
-        .gap(px(2.))
+        .gap(ROW_GAP)
         .child(
             div()
                 .text_size(font_size::META)
-                .line_height(px(16.))
+                .line_height(HEADING_LINE_H)
                 .text_color(muted)
                 .child(text!(BACKLINKS_HEADING)),
         )
         .child(
+            // The scroll box, wrapped so its own place can be measured (a canvas
+            // inside it would scroll with the rows).
             div()
-                .id("backlinks")
-                .role(Role::List)
+                .relative()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .children(rows),
+                .child(
+                    div()
+                        .id("backlinks")
+                        .role(Role::List)
+                        .flex()
+                        .flex_col()
+                        .gap(ROW_GAP)
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .children(rows),
+                )
+                .child(LAYOUT.bounds("backlinks_box")),
         )
         .into_any_element()
 }
@@ -662,6 +720,7 @@ impl Render for CaptureView {
             window.focus(&self.focus, cx);
         }
         SAMPLES.clear();
+        LAYOUT.clear();
         self.appearance.ensure(window, cx);
         let copied = self.copied;
         let captured = matches!(self.phase, Phase::Captured { .. });
@@ -673,6 +732,17 @@ impl Render for CaptureView {
             self.rows = (0..row_count)
                 .map(|_| cx.focus_handle().tab_stop(true))
                 .collect();
+        }
+        let shown = match &self.phase {
+            Phase::Captured { backlinks, .. } => backlinks.len(),
+            _ => 0,
+        };
+        if self.fitted != Some(shown) {
+            // The capture landed with backlinks (or a new one replaced it): the panel
+            // takes the rows' height, after this frame. Unchanged: nothing happens.
+            self.fitted = Some(shown);
+            let height = content_height(shown);
+            cx.defer(move |cx| crate::shell::fit_panel(height, cx));
         }
         let backlinks = match &self.phase {
             Phase::Captured { backlinks, .. } if !backlinks.is_empty() => {
@@ -695,7 +765,7 @@ impl Render for CaptureView {
                 .flex()
                 .flex_row()
                 .items_baseline()
-                .line_height(px(20.))
+                .line_height(BODY_LINE_H)
                 .gap(spacing::S3)
                 .min_w_0()
                 .child(
@@ -751,6 +821,16 @@ impl Render for CaptureView {
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                // Escape dismisses (Tauri's generic handler, `views::escape`).
+                if escape::is_escape(&event.keystroke) {
+                    if escape::escape_action(Route::Capture, EscapeState::default())
+                        == EscapeAction::Dismiss
+                    {
+                        escape::dismiss_panel(window, cx);
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
                 match key_action(&event.keystroke, this.focused_row(window)) {
                     Some(KeyAction::Open(row)) => {
                         this.open_backlink(row, cx);
@@ -767,7 +847,7 @@ impl Render for CaptureView {
                 d.justify_center().gap(spacing::S2).p(spacing::S5)
             })
             .when(backlinks.is_some(), |d| {
-                d.gap(spacing::S1).px(spacing::S5).py(spacing::S2)
+                d.gap(GAP).px(spacing::S5).py(PAD_Y)
             })
             .rounded(radius::CARD)
             // The opaque token surface (R14): the panel's blur stays behind the card.
@@ -856,7 +936,8 @@ mod tests {
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::fixture::{capture_through_core, parse_fixture};
     use super::{
-        is_copy_key, key_action, order_by_recency, state, KeyAction, Phase, Tracker, COPIED_HOLD,
+        content_height, is_copy_key, key_action, order_by_recency, state, KeyAction, Phase,
+        Tracker, COPIED_HOLD, MAX_ROWS,
     };
     use std::sync::Mutex;
     use std::time::Duration;
@@ -966,6 +1047,19 @@ mod tests {
         // Malformed fixtures fail with a message, not a panic.
         assert!(parse_fixture("{}").is_err());
         assert!(parse_fixture("not json").is_err());
+    }
+
+    /// Parity (Tauri `fitWindow`): the panel shows every backlink row, up to
+    /// MAX_ROWS, past which the list scrolls; without backlinks it stays 140 pt.
+    #[test]
+    fn capture_height_fits_its_backlinks() {
+        assert_eq!(content_height(0), 140.0);
+        // pad 8+8, header 28, gap 4, name line 20, gap 4, heading 16, gap 2: 90 + rows.
+        assert_eq!(content_height(1), 140.0, "one row fits the old panel");
+        assert_eq!(content_height(3), 90.0 + 3.0 * 18.0 + 2.0 * 2.0);
+        assert!(content_height(3) > 140.0, "the third row used to be cut");
+        assert_eq!(content_height(4), 90.0 + 4.0 * 18.0 + 3.0 * 2.0);
+        assert_eq!(content_height(MAX_ROWS + 5), content_height(MAX_ROWS));
     }
 
     /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)
