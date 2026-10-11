@@ -92,8 +92,8 @@ python3 "$SKILL"/scripts/verify_evidence.py record --worktree "$WT" --instance "
 - **Measurement limits.** A button's height is its wrapper's, and the wrapper holds
   nothing but the button. A text size is the one GPUI resolves on the element holding
   the text, not one read from glyphs (probes/README.md).
-- **The settings height depends on login state.** It includes the login row's second
-  line whenever there is an explanation or an error. Without a `login_item` fixture
-  that line is an error, so the panel is 14 pt taller.
+- **The settings height depends on login state.** Whenever there is an explanation or
+  an error, the login row reserves up to three lines for it, which makes the panel
+  30 pt taller. Without a `login_item` fixture that line is an error.
 - **Not provable here.** Settings' Import dialog in front of the panel, and the
   Finder reveal after Export, are hand checks (docs/RUNBOOK-gui-panel.md, O4).

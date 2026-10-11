@@ -214,7 +214,7 @@ pub fn panel_height() -> f64 {
     })
 }
 
-/// Whether the launch-at-login row shows a second line (an explanation or an error).
+/// Whether the launch-at-login row shows its explanation (or error) line, up to three lines.
 fn login_explained(login: &Result<Report, String>) -> bool {
     login.as_ref().map_or(true, |r| r.explanation.is_some())
 }
@@ -694,7 +694,7 @@ impl SettingsView {
             // Every way out (a file, Cancel or Escape, an error) restores the panel.
             // If this view goes away first (a route switch, a hide), the shell has
             // already closed the dialog and restored the panel, and this task is gone.
-            cx.update(crate::shell::end_file_dialog);
+            cx.update(|cx| crate::shell::end_file_dialog(true, cx));
             let result = match answer {
                 Ok(Ok(Some(paths))) => paths
                     .first()

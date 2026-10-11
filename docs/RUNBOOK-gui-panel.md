@@ -93,7 +93,10 @@ keychain the first time.
    the path. **Import**: the open dialog must come to the front, above the panel. Pick
    the exported file: the counts come back. Then press Import again and cancel with
    Escape: Settings is still open and takes Tab and Escape. Pressing Import while its
-   dialog is open does nothing; it never stacks a second dialog. No probe can do this:
+   dialog is open does nothing; it never stacks a second dialog. In all three cases
+   (a file picked, Cancel, a capture or browser hotkey pressed while the dialog is up)
+   the dialog closes, and once the panel hides, keystrokes go to the app you were in
+   before, not to Ubilink. No probe can do this:
    automation builds never open host dialogs (O4).
 6. **O2 — in-app capability disclosure.** The `capabilities` command returns the matrix
    derived from the loaded adapters (tested), but no view shows it yet. The Settings

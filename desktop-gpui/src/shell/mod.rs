@@ -109,24 +109,59 @@ struct Panel {
     number: Option<isize>,
 }
 
+/// How long the deactivation after a file dialog is given to settle before the panel
+/// takes key status again (see `end_file_dialog`).
+const DEACTIVATE_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
+
 /// Whether a file dialog the panel opened is up: at most one at a time (a second
 /// press must not stack another), and closing it restores the panel exactly once.
+/// It also remembers whether opening it activated the app, which closing must undo.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DialogGate {
     open: bool,
+    activated: bool,
 }
 
 impl DialogGate {
-    /// Open a dialog: false (do nothing) when one is already up.
-    pub fn begin(&mut self) -> bool {
-        !std::mem::replace(&mut self.open, true)
+    /// Open a dialog; `app_was_active` is whether Ubilink was already the active app
+    /// (the panel is non-activating, so normally it was not). False (do nothing) when
+    /// one is already up.
+    pub fn begin(&mut self, app_was_active: bool) -> bool {
+        if self.open {
+            return false;
+        }
+        *self = DialogGate {
+            open: true,
+            activated: !app_was_active,
+        };
+        true
     }
 
-    /// The dialog is gone (answered, cancelled, or its panel went away): true only for
-    /// the first call, the one that must restore the panel.
-    pub fn end(&mut self) -> bool {
-        std::mem::replace(&mut self.open, false)
+    /// The dialog is gone (answered, cancelled, or its panel went away): what to undo,
+    /// only for the first call; `None` after that.
+    pub fn end(&mut self, panel_stays: bool) -> Option<DialogEnd> {
+        if !self.open {
+            return None;
+        }
+        let activated = self.activated;
+        *self = DialogGate::default();
+        Some(DialogEnd {
+            deactivate: activated,
+            refocus_panel: panel_stays,
+        })
     }
+}
+
+/// What closing a file dialog undoes, to get back to the state before Import: the app
+/// not active (the user's previous app frontmost, as the non-activating panel left
+/// it) and, if the panel stays, the panel key at its pop-up level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DialogEnd {
+    /// Opening the dialog activated Ubilink: deactivate it, so the previous app is
+    /// frontmost again and gets the keystrokes once the panel goes.
+    pub deactivate: bool,
+    /// The panel is still open (Settings): back to its level, and key again.
+    pub refocus_panel: bool,
 }
 
 /// Owns the OS integrations for the app's lifetime: dropping the tray removes the
@@ -407,7 +442,7 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
 
 fn switch_route(route: Route, cx: &mut App) {
     // A file dialog belongs to the view being replaced: close it and restore the panel.
-    end_file_dialog(cx);
+    end_file_dialog(true, cx);
     let Some(view) = cx.update_global::<Shell, _>(|shell, _| {
         shell.panel.as_mut().map(|p| {
             p.route = route;
@@ -455,7 +490,8 @@ pub fn fit_panel(height: f64, cx: &mut App) {
         &displays,
         current.display_id,
         current.global,
-        (current.size.0, panel::clamp_height(height)),
+        // The nominal width, not the current one: a narrow display may have cut it.
+        (panel::PANEL_WIDTH, panel::clamp_height(height)),
     ) else {
         return;
     };
@@ -484,7 +520,7 @@ pub fn fit_panel(height: f64, cx: &mut App) {
 }
 
 fn hide(cx: &mut App) {
-    end_file_dialog(cx);
+    end_file_dialog(false, cx);
     let Some(p) = cx.update_global::<Shell, _>(|shell, _| shell.panel.take()) else {
         return;
     };
@@ -506,7 +542,7 @@ pub fn panel_closed(id: WindowId, cx: &mut App) {
         current
     });
     if was_current {
-        end_file_dialog(cx);
+        end_file_dialog(false, cx);
         mark_hidden(cx);
     }
 }
@@ -530,43 +566,68 @@ pub fn hide_if_current(handle: AnyWindowHandle, cx: &mut App) {
 /// the panel to the normal level until [`end_file_dialog`]. False (open nothing) when
 /// a dialog is already up: presses never stack dialogs.
 pub fn begin_file_dialog(cx: &mut App) -> bool {
-    let Some(number) = cx
+    if cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .is_none()
+    {
+        return false;
+    }
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let was_active = native::app_is_active(mtm);
+    if !cx.update_global::<Shell, _>(|shell, _| shell.dialog.begin(was_active)) {
+        return false;
+    }
+    // Without the panel's window number the dialog still opens; it just cannot lower
+    // the panel (activating the app still brings the dialog forward).
+    if let Some(number) = cx
         .try_global::<Shell>()
         .and_then(|s| s.panel.as_ref())
         .and_then(|p| p.number)
-    else {
-        return false;
-    };
-    if !cx.update_global::<Shell, _>(|shell, _| shell.dialog.begin()) {
-        return false;
-    }
-    if let Some(mtm) = MainThreadMarker::new() {
+    {
         native::lower_panel_for_dialog(mtm, number);
     }
     cx.activate(true);
     true
 }
 
-/// The file dialog is over: it was answered, or the view that opened it is going away
-/// (a route switch, a hide). Close any dialog still up and put the panel back at its
-/// level with key status, once, from a foreground task (outside this update: the
-/// dialog's completion handler and the key change call back into AppKit and GPUI).
-pub fn end_file_dialog(cx: &mut App) {
-    if cx.try_global::<Shell>().is_none()
-        || !cx.update_global::<Shell, _>(|shell, _| shell.dialog.end())
-    {
+/// The file dialog is over: it was answered (`panel_stays`), or the view that opened
+/// it is going away (a route switch: the panel stays; a hide or a click-away close: it
+/// does not). Close any dialog still up, deactivate the app if opening the dialog
+/// activated it, and, when the panel stays, put it back at its level with key status.
+/// Once, from a foreground task (outside this update: the dialog's completion handler
+/// and the key change call back into AppKit and GPUI).
+pub fn end_file_dialog(panel_stays: bool, cx: &mut App) {
+    if cx.try_global::<Shell>().is_none() {
         return;
     }
+    let Some(end) = cx.update_global::<Shell, _>(|shell, _| shell.dialog.end(panel_stays)) else {
+        return;
+    };
     let number = cx
         .try_global::<Shell>()
         .and_then(|s| s.panel.as_ref())
         .and_then(|p| p.number);
-    cx.spawn(async move |_| {
-        if let Some(mtm) = MainThreadMarker::new() {
-            native::cancel_file_dialogs(mtm);
-            if let Some(number) = number {
-                native::restore_panel_after_dialog(mtm, number);
+    cx.spawn(async move |cx| {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        native::cancel_file_dialogs(mtm);
+        // Deactivate first: the previous app becomes active again. A non-activating
+        // panel can then take key status without activating Ubilink, which is the
+        // state the panel was in before Import. App switching completes on a later
+        // run-loop turn, so the panel takes key after a short wait, not before the
+        // switch could take it away again.
+        if end.deactivate {
+            native::deactivate_app(mtm);
+            if end.refocus_panel {
+                cx.background_executor().timer(DEACTIVATE_SETTLE).await;
             }
+        }
+        if let (true, Some(number)) = (end.refocus_panel, number) {
+            native::restore_panel_after_dialog(mtm, number);
         }
     })
     .detach();
@@ -584,24 +645,56 @@ fn mark_hidden(cx: &mut App) {
 mod tests {
     // Not `super::*`: that glob carries gpui-kit's re-exported `test` macro, which
     // would shadow Rust's `#[test]`.
-    use super::{command_for, startup_state, Command, DialogGate, Route, ShellEvent};
+    use super::{command_for, startup_state, Command, DialogEnd, DialogGate, Route, ShellEvent};
 
     /// One file dialog at a time, and its end restores the panel exactly once (a
     /// route switch and the dialog's own answer may both report the end).
     #[test]
     fn the_dialog_gate_admits_one_dialog_and_ends_it_once() {
         let mut g = DialogGate::default();
-        assert!(g.begin(), "the first press opens a dialog");
+        assert!(g.begin(false), "the first press opens a dialog");
         assert!(
-            !g.begin(),
+            !g.begin(false),
             "a second press while it is up does not stack another"
         );
-        assert!(g.end(), "the first end restores the panel");
-        assert!(
-            !g.end(),
-            "a later end (the cancelled dialog's answer) does nothing"
+        assert!(g.end(true).is_some(), "the first end restores the panel");
+        assert_eq!(
+            g.end(true),
+            None,
+            "a later end (the cancelled answer) does nothing"
         );
-        assert!(g.begin(), "a new dialog may open afterwards");
+        assert!(g.begin(false), "a new dialog may open afterwards");
+    }
+
+    /// Closing the dialog returns to the state before Import: Ubilink inactive (the
+    /// previous app frontmost) and, if the panel stays, the panel key again.
+    #[test]
+    fn closing_the_dialog_undoes_the_activation_it_caused() {
+        let end = |was_active, panel_stays| {
+            let mut g = DialogGate::default();
+            assert!(g.begin(was_active));
+            g.end(panel_stays).unwrap()
+        };
+        // The usual case: the non-activating panel left Ubilink inactive.
+        assert_eq!(
+            end(false, true),
+            DialogEnd {
+                deactivate: true,
+                refocus_panel: true
+            },
+            "answered, Settings stays: deactivate, then the panel is key again"
+        );
+        assert_eq!(
+            end(false, false),
+            DialogEnd {
+                deactivate: true,
+                refocus_panel: false
+            },
+            "hidden while the dialog was up: deactivate, nothing to refocus"
+        );
+        // Ubilink was already active before Import: leave it so.
+        assert!(!end(true, true).deactivate);
+        assert!(!end(true, false).deactivate);
     }
 
     #[test]

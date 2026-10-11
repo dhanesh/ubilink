@@ -85,7 +85,12 @@ pub fn write_new_file(
             .open(&path)
         {
             Ok(mut f) => {
-                f.write_all(contents)?;
+                // A write that fails partway must not leave a truncated export behind.
+                if let Err(e) = f.write_all(contents).and_then(|()| f.sync_all()) {
+                    drop(f);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(e);
+                }
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

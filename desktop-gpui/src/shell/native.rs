@@ -112,6 +112,21 @@ fn visible_panel(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
         })
 }
 
+/// Whether Ubilink is the active (frontmost) app.
+pub fn app_is_active(mtm: MainThreadMarker) -> bool {
+    NSApplication::sharedApplication(mtm).isActive()
+}
+
+/// Give up being the active app: the app that was active before Ubilink becomes
+/// active again. Ubilink is an accessory app, so this is what puts the user's
+/// keystrokes back where they were after a file dialog activated it.
+pub fn deactivate_app(mtm: MainThreadMarker) {
+    let app = NSApplication::sharedApplication(mtm);
+    if app.isActive() {
+        app.deactivate();
+    }
+}
+
 /// The newest visible panel's window number, read right after the shell opens one,
 /// so later calls act on exactly that window (never a file dialog, never a closing
 /// predecessor).
