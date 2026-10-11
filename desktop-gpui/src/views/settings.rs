@@ -56,6 +56,15 @@
 //! show) and replaced by the result of each register/unregister; a failed call says
 //! what failed and what to do (U3).
 //!
+//! Permissions (rc.4, the Tauri panel's Settings › Permissions, `dist/index.html`
+//! `set-auto` / `set-open-perms`), the first section: an `Automation` row with the
+//! purpose `Read the active app's link.` and a status Label, exactly `Allowed`, `Not
+//! allowed` or `Not checked yet` ([`automation_status_text`]); and an `Open permission
+//! setup…` Button that switches the panel to onboarding. The status comes from the
+//! check onboarding uses (`onboarding::check_permissions`: the `permission` fixture,
+//! or a release build's live probe), run off the main thread each time Settings is
+//! shown, so it never blocks a frame; it reads `Checking…` until it answers.
+//!
 //! Keyboard: the view focuses itself when shown, so Tab (gpui-base `Root`'s
 //! `focus_next`) reaches the first switch. The automation `key` verb only sends
 //! key-down events, while GPUI's own Space/Enter-activates-a-focused-switch path fires
@@ -78,6 +87,7 @@ use ubilink_core::GraphStats;
 
 use super::escape::{self, EscapeAction, EscapeState};
 use super::layout::Layout;
+use super::onboarding::{self, Permission};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
@@ -150,6 +160,8 @@ const ADAPTER_W: Pixels = px(140.);
 const ADAPTER_H: Pixels = px(16.);
 const ADAPTER_GAP: Pixels = spacing::S2;
 const HINT_H: Pixels = px(18.);
+/// The `App adapters` heading line above the grid.
+const SECTION_H: Pixels = px(16.);
 
 /// What Settings' height depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,9 +181,9 @@ pub fn adapter_columns(panel_w: f64) -> usize {
     (((inner + pt(ADAPTER_GAP)) / (pt(ADAPTER_W) + pt(ADAPTER_GAP))).floor() as usize).max(1)
 }
 
-/// Settings' panel height for `content`: padding, the title, the stats and actions
-/// row, the reset question when it shows, the launch-at-login row, every grid row of
-/// adapters and the hint line, with the gaps between them. The shell clamps it
+/// Settings' panel height for `content`: padding, the title, the Permissions row, the
+/// stats and actions row, the reset question when it shows, the launch-at-login row, every grid row of
+/// adapters under their heading and the hint line, with the gaps between them. The shell clamps it
 /// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
 pub fn content_height(content: Content) -> f64 {
     let pt = |p: Pixels| f64::from(f32::from(p));
@@ -189,8 +201,11 @@ pub fn content_height(content: Content) -> f64 {
     };
     let mut parts = vec![
         pt(HEADER_H),
+        // The Permissions row (rc.4).
+        pt(theming::CONTROL_H),
         pt(theming::CONTROL_H),
         pt(login),
+        pt(SECTION_H),
         grid,
         pt(HINT_H),
     ];
@@ -215,6 +230,28 @@ pub fn panel_height() -> f64 {
 /// Whether the launch-at-login row shows its explanation (or error) line, up to three lines.
 fn login_explained(login: &Result<Report, String>) -> bool {
     login.as_ref().map_or(true, |r| r.explanation.is_some())
+}
+
+/// The Permissions section (rc.4): its heading, the Automation row's name and purpose
+/// (Tauri wording), the status texts, and the button that opens onboarding.
+pub const PERMISSIONS_HEADING: &str = "Permissions";
+pub const AUTOMATION_PURPOSE: &str = "Read the active app's link.";
+pub const AUTOMATION_ALLOWED: &str = "Allowed";
+pub const AUTOMATION_NOT_ALLOWED: &str = "Not allowed";
+pub const AUTOMATION_NOT_CHECKED: &str = "Not checked yet";
+pub const AUTOMATION_CHECKING: &str = "Checking…";
+pub const OPEN_PERMISSION_SETUP: &str = "Open permission setup…";
+
+/// The Automation status Label for a check: `None` while it runs; a report says
+/// `Allowed` (granted) or `Not allowed` (denied, or never asked: the Tauri pill's
+/// `automation === 'granted'`); a check that could not decide says `Not checked yet`.
+pub fn automation_status_text(check: Option<&Result<onboarding::Report, String>>) -> &'static str {
+    match check {
+        None => AUTOMATION_CHECKING,
+        Some(Ok(report)) if report.granted(Permission::Automation) => AUTOMATION_ALLOWED,
+        Some(Ok(_)) => AUTOMATION_NOT_ALLOWED,
+        Some(Err(_)) => AUTOMATION_NOT_CHECKED,
+    }
 }
 
 const ADAPTERS_HINT: &str =
@@ -487,6 +524,7 @@ fn layout_key(id: &'static str) -> &'static str {
         "settings-reset" => "reset_button",
         "settings-reset-confirm" => "reset_confirm_button",
         "settings-reset-cancel" => "reset_cancel_button",
+        "settings-open-permissions" => "permissions_button",
         other => other,
     }
 }
@@ -519,10 +557,26 @@ pub struct SettingsView {
     appearance: FollowAppearance,
     /// The content the panel was last fitted to; a change refits it.
     fitted: Option<Content>,
+    /// The Automation check's answer (rc.4); `None` while it runs.
+    automation: Option<Result<onboarding::Report, String>>,
+    /// The in-flight permission check; dropped (cancelled) with the view.
+    _permission_check: Task<()>,
 }
 
 impl SettingsView {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        // A fresh view per show, so the status is re-read each time Settings opens,
+        // off the main thread (the release probe runs osascript).
+        let permission_check = cx.spawn(async move |this, cx| {
+            let check = cx
+                .background_executor()
+                .spawn(async { onboarding::check_permissions() })
+                .await;
+            let _ = this.update(cx, |view, cx| {
+                view.automation = Some(check);
+                cx.notify();
+            });
+        });
         SettingsView {
             message: None,
             focus: cx.focus_handle(),
@@ -532,7 +586,84 @@ impl SettingsView {
             login: login_status().map_err(|e| login_status_error_message(&e)),
             appearance: FollowAppearance::default(),
             fitted: None,
+            automation: None,
+            _permission_check: permission_check,
         }
+    }
+
+    /// Open permission setup…: the same panel switches to onboarding (the Tauri
+    /// panel's `openSetup`), once this click's dispatch is over.
+    fn open_permission_setup(&mut self, cx: &mut Context<Self>) {
+        cx.defer(|cx| crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx));
+    }
+
+    /// The Permissions section (rc.4): heading, the Automation row's name, purpose and
+    /// status, and the button that opens onboarding.
+    fn permissions_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let button = self.action_button(
+            "settings-open-permissions",
+            OPEN_PERMISSION_SETUP,
+            Look::Plain,
+            |v, _, cx| v.open_permission_setup(cx),
+            cx,
+        );
+        let status = automation_status_text(self.automation.as_ref());
+        let foreground = theming::primary_text(cx);
+        let theme = cx.theme();
+        let status_color = match status {
+            AUTOMATION_ALLOWED => theme.success,
+            AUTOMATION_NOT_ALLOWED => theme.danger,
+            _ => theme.muted_foreground,
+        };
+        div()
+            .id("settings-permissions")
+            .h(theming::CONTROL_H)
+            .flex_shrink_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(spacing::S2)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(font_size::META)
+                    .text_color(theme.muted_foreground)
+                    .child(text!(
+                        id = "settings-permissions-heading",
+                        PERMISSIONS_HEADING
+                    )),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(font_size::ROW)
+                    .text_color(foreground)
+                    .child(text!(
+                        id = "settings-automation-name",
+                        Permission::Automation.name()
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(font_size::META)
+                    .text_color(theme.muted_foreground)
+                    .child(text!(
+                        id = "settings-automation-purpose",
+                        AUTOMATION_PURPOSE
+                    )),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(font_size::META)
+                    .text_color(status_color)
+                    .child(text!(id = "settings-automation-status", status)),
+            )
+            .child(button)
+            .into_any_element()
     }
 
     /// Whether the launch-at-login switch shows on (off while the status is unknown).
@@ -915,6 +1046,7 @@ impl Render for SettingsView {
             cx.defer(move |cx| crate::shell::fit_panel(height, cx));
         }
         let login_row = self.login_row(cx);
+        let permissions_row = self.permissions_row(cx);
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
@@ -964,18 +1096,13 @@ impl Render for SettingsView {
                     )
                     .child(
                         div()
-                            .text_size(font_size::META)
-                            .text_color(theme.muted_foreground)
-                            .child(text!(id = "settings-adapters-heading", "App adapters")),
-                    )
-                    .child(
-                        div()
                             .ml_auto()
                             .text_size(font_size::META)
                             .text_color(theme.muted_foreground)
                             .child(text!(id = "settings-version", version_text())),
                     ),
             )
+            .child(permissions_row)
             .child(
                 div()
                     .h(theming::CONTROL_H)
@@ -1047,6 +1174,15 @@ impl Render for SettingsView {
             })
             .child(login_row)
             .child(
+                div()
+                    .h(SECTION_H)
+                    .flex_shrink_0()
+                    .line_height(SECTION_H)
+                    .text_size(font_size::META)
+                    .text_color(theme.muted_foreground)
+                    .child(text!(id = "settings-adapters-heading", "App adapters")),
+            )
+            .child(
                 // The grid's scroll box, wrapped so its own place can be measured (a
                 // canvas inside it would scroll with the switches).
                 div()
@@ -1099,13 +1235,14 @@ mod tests {
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
     use super::{
-        adapter_columns, content_height, export_dir_in, export_message, export_to, home_from,
-        import_from, import_message, list_error_message, login_status_error_message,
-        login_toggle_error_message, reset, reset_message, reveal_command, state,
-        stats_error_message, stats_text, toggle, toggle_message, version_text, Content,
-        LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION, RESET_CANCEL,
-        RESET_CONFIRM, RESET_QUESTION,
+        adapter_columns, automation_status_text, content_height, export_dir_in, export_message,
+        export_to, home_from, import_from, import_message, list_error_message,
+        login_status_error_message, login_toggle_error_message, reset, reset_message,
+        reveal_command, state, stats_error_message, stats_text, toggle, toggle_message,
+        version_text, Content, LOGIN_SWITCH, NOT_FOUND_EXPLANATION, REQUIRES_APPROVAL_EXPLANATION,
+        RESET_CANCEL, RESET_CONFIRM, RESET_QUESTION,
     };
+    use crate::views::onboarding::Report;
     use std::collections::HashSet;
     use std::sync::Mutex;
     use ubilink_app::{
@@ -1144,20 +1281,54 @@ mod tests {
                 login_explained,
             })
         };
-        // pad 8+8, title 24, actions 24 (D26: macOS's 24 pt controls), login 20, hint
-        // 18, 4 gaps of 4: 118 + grid.
-        assert_eq!(h(0, false, false), 118.0);
+        // pad 8+8, title 24, permissions 24 and actions 24 (D26: macOS's 24 pt
+        // controls), login 20, the App adapters heading 16, hint 18, 6 gaps of 4:
+        // 166 + grid.
+        assert_eq!(h(0, false, false), 166.0);
         // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
-        assert_eq!(h(10, false, false), 182.0);
+        assert_eq!(h(10, false, false), 230.0);
         // ceil(n / 4) rows: 4 is one row, 5 is two.
-        assert_eq!(h(4, false, false), 118.0 + 16.0);
-        assert_eq!(h(5, false, false), 118.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(4, false, false), 166.0 + 16.0);
+        assert_eq!(h(5, false, false), 166.0 + 16.0 + 8.0 + 16.0);
         assert_eq!(h(8, false, false), h(5, false, false));
         // The reset question adds its row and a gap; an explanation up to three lines.
-        assert_eq!(h(10, true, false), 182.0 + 40.0 + 4.0);
-        assert_eq!(h(10, false, true), 182.0 + 30.0);
+        assert_eq!(h(10, true, false), 230.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 230.0 + 30.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
+    }
+
+    /// rc.4: the Automation status Label, from the check onboarding uses. Granted is
+    /// exactly `Allowed`; denied and never-asked are `Not allowed` (the Tauri pill's
+    /// `automation === 'granted'`); a check that could not decide never claims either.
+    #[test]
+    fn automation_status_maps_the_permission_report() {
+        let report = |automation: &str| -> Result<Report, String> {
+            Ok(Report {
+                accessibility: false,
+                automation: automation.into(),
+            })
+        };
+        assert_eq!(automation_status_text(None), "Checking…");
+        assert_eq!(automation_status_text(Some(&report("granted"))), "Allowed");
+        assert_eq!(
+            automation_status_text(Some(&report("denied"))),
+            "Not allowed"
+        );
+        assert_eq!(
+            automation_status_text(Some(&report("not_determined"))),
+            "Not allowed"
+        );
+        assert_eq!(
+            automation_status_text(Some(&Err("no permission fixture".into()))),
+            "Not checked yet"
+        );
+        // Accessibility does not count toward Automation's status.
+        let ax_only = Ok(Report {
+            accessibility: true,
+            automation: "denied".into(),
+        });
+        assert_eq!(automation_status_text(Some(&ax_only)), "Not allowed");
     }
 
     /// Export as the Tauri app did: into Downloads when there is one, else home.
