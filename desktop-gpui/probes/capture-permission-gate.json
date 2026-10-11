@@ -1,0 +1,239 @@
+{
+  "description": "rc.4: opening capture (the hotkey, or the tray's Open) while the permission report says Automation is not granted switches the same panel window to onboarding before capturing (nothing captured, nothing opened); with Automation granted the capture runs and stays on route capture; once a check has said granted, a later not-granted report does not bring onboarding back in that session",
+  "requirement": "P2-capture-permission-gate (rc.4 parity, Tauri dist/panel.js refreshPermissions/showOnboarding: onboarding until Automation is granted)",
+  "notes": [
+    "Tauri reference (c82d048^): dist/panel.js refreshPermissions() at boot showed onboarding until canUseCapture(report) (Automation 'granted'); desktop/src/main.rs showed the panel at launch. The GPUI app routes at capture open instead, so nothing pops up at launch.",
+    "The capture fixture SUCCEEDS (capture-ok.json): capture-permission-route.json covers the failed-capture route, which already exists on main. Here only the permission report can move the panel to onboarding, so on main (no pre-capture check) the route stays capture and the round-1 route step fails.",
+    "The report is the `permission` fixture onboarding reads (views/onboarding.rs check_permissions); automation builds never run the osascript probe.",
+    "Round 1: hotkey with permissions-two-missing.json: route onboarding in the same window and process, no link stored (graph resource_count 0: the capture was skipped), nothing opened.",
+    "Round 2: restart (replays two-missing) and open capture through the tray path (`open_view`, shell Command::Open): also onboarding.",
+    "Round 3: restart, load permissions-all-granted.json: the hotkey captures (Example Domain shown, phase captured) and the route is still capture a second later.",
+    "Round 4, same instance: hide, load permissions-two-missing.json, capture again: Automation was confirmed granted this session, so onboarding does not reappear (the stale report is not re-read); the capture runs."
+  ],
+  "setup": {
+    "fixtures": {
+      "capture": "capture-ok.json",
+      "permission": "permissions-two-missing.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "automation missing: hotkey opens capture",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "automation missing: remember the panel window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "type": "number",
+          "gt": 0
+        }
+      },
+      "save": {
+        "wid": "window_id"
+      }
+    },
+    {
+      "name": "automation missing: capture open routes to onboarding",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "automation missing: onboarding shows the Automation step, not granted",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "Automation",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Not granted",
+          "deep": true
+        }
+      ],
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation missing: same window id",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "name": "automation missing: same process",
+      "process": "unchanged"
+    },
+    {
+      "name": "automation missing: nothing was captured",
+      "graph": true,
+      "resource_count": 0
+    },
+    {
+      "name": "automation missing: nothing opened",
+      "call": "opened",
+      "expect": {
+        "": {
+          "eq": []
+        }
+      }
+    },
+    {
+      "name": "fresh instance for the tray round",
+      "restart": true
+    },
+    {
+      "name": "tray: Open on capture",
+      "call": "open_view",
+      "args": {
+        "route": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "tray: capture open routes to onboarding",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "tray: nothing was captured",
+      "graph": true,
+      "resource_count": 0
+    },
+    {
+      "name": "fresh instance for the automation-granted round",
+      "restart": true
+    },
+    {
+      "name": "automation granted: load the all-granted report (after the restart's replay)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-all-granted.json"
+      }
+    },
+    {
+      "name": "automation granted: hotkey opens capture",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "automation granted: the captured link shows",
+      "see": {
+        "role": "Label",
+        "text": "Example Domain"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "automation granted: let any late route switch happen",
+      "sleep_ms": 1000
+    },
+    {
+      "name": "automation granted: still on capture, phase captured",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "captured"
+      }
+    },
+    {
+      "name": "automation granted: no onboarding steps",
+      "see": {
+        "role": "ListItem",
+        "text": "Automation",
+        "deep": true
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "automation granted: the link was stored",
+      "graph": true,
+      "resource_count": 1
+    },
+    {
+      "name": "granted once: hide the panel (the hotkey toggles it)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false
+      }
+    },
+    {
+      "name": "granted once: the report says not granted again",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-two-missing.json"
+      }
+    },
+    {
+      "name": "granted once: hotkey opens capture",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "granted once: the capture runs",
+      "see": {
+        "role": "Label",
+        "text": "Example Domain"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "granted once: let any late route switch happen",
+      "sleep_ms": 1000
+    },
+    {
+      "name": "granted once: onboarding does not reappear",
+      "call": "state",
+      "expect": {
+        "shell.visible": true,
+        "route": "capture",
+        "view.phase": "captured"
+      }
+    }
+  ]
+}
