@@ -2,11 +2,11 @@
 
 Capture is declarative. The desktop asks System Events for the frontmost app's name
 (`FRONTMOST_APP_SCRIPT`), picks that app's adapter from the `AdapterRegistry`
-(built-ins in `src-tauri/src/adapters.default.json` plus your `adapters.json`), and
+(built-ins in `core/src/adapters.default.json` plus your `adapters.json`), and
 `ConfiguredAdapter::capture` runs the adapter's AppleScript with `osascript -e`,
 then renders its `uri`/`name` templates. Every `osascript` call (frontmost-app
 detection, the permission probe and each adapter) goes through `OsaScriptRunner`,
-bounded by `OSASCRIPT_TIMEOUT` (15 s) in `src-tauri/src/live_capture.rs`.
+bounded by `OSASCRIPT_TIMEOUT` (15 s) in `core/src/live_capture.rs`.
 
 All of that is unit-tested with a fake `CommandRunner` except the **real
 `osascript` call against a live app**, which needs a Mac, the app, and a TCC

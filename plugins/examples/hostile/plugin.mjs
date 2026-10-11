@@ -1,5 +1,5 @@
 // Satisfies: S1 (invariant), S5 (DoS bounds), TN1 (capability broker) — ATTACKER
-// fixture for the sandbox-hardening proofs in src-tauri/tests/sandbox.rs.
+// fixture for the sandbox-hardening proofs in core/tests/sandbox.rs.
 // See DECISIONS.md D1/D3/D4 and plugins/README.md.
 //
 // `probe.mode` selects one attack. The harness never trusts this plugin's

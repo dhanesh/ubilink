@@ -17,7 +17,7 @@ generator).
 ## Graph JSON (`graph-*.json`)
 
 Every `graph-*.json` file is ubilink-core's own export/import JSON
-(`src-tauri/src/graph.rs`, `LinkGraph::export_json`/`import_json`), schema
+(`core/src/graph.rs`, `LinkGraph::export_json`/`import_json`), schema
 `"ubilink.graph.v3"` — the same shape `export_json` writes and `import_json` reads,
 so these fixtures load through the real core import path, not a probe-only parser:
 
@@ -270,11 +270,11 @@ file:
 
 Not a `load_fixture` kind (settings reads its adapter list the same way
 `ubilink-app`'s `list_plugins` does — `ubilink_core::AdapterRegistry::defaults()`,
-embedded at compile time from `src-tauri/src/adapters.default.json` — there is
+embedded at compile time from `core/src/adapters.default.json` — there is
 nothing for a probe to swap out). This file is the **expected** result of that
 read with no `plugins-state.json` override, for a scenario's `expect`/`see` to
 check Settings against; `--check` cross-validates it against
-`src-tauri/src/adapters.default.json` directly so it can't drift. A JSON list,
+`core/src/adapters.default.json` directly so it can't drift. A JSON list,
 sorted case-insensitively by `app` (matching `list_plugins`'s own sort):
 
 ```json

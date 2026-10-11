@@ -430,7 +430,7 @@ def cmd_cargo_test(args: argparse.Namespace) -> int:
 #
 # desktop-gpui/probes/fixtures/*.json is committed test data, not code: capture
 # results, permission states, link-graph JSON in ubilink-core's own export/import
-# schema (src-tauri/src/graph.rs's `export_json`/`import_json`, schema
+# schema (core/src/graph.rs's `export_json`/`import_json`, schema
 # "ubilink.graph.v3") and a settings adapter list. Phase 1's views (R1, R3, R4,
 # R5, R9, R10, R11) build their consuming code against
 # desktop-gpui/probes/fixtures/README.md's documented shapes, so `--check`
@@ -841,7 +841,7 @@ def _validate_permissions_accessibility_missing(doc) -> list:
     return issues
 
 
-_ADAPTER_DEFAULTS_JSON = REPO_ROOT / "src-tauri" / "src" / "adapters.default.json"
+_ADAPTER_DEFAULTS_JSON = REPO_ROOT / "core" / "src" / "adapters.default.json"
 
 
 def _validate_adapters(doc) -> list:
@@ -1215,7 +1215,7 @@ def _sha256_file(path: Path) -> str:
 
 
 # The build inputs whose uncommitted edits make a binary differ from its commit.
-_BUILD_INPUTS = ("desktop-gpui", "app", "src-tauri", "design")
+_BUILD_INPUTS = ("desktop-gpui", "app", "core", "design")
 
 
 def source_revision(repo: Path = None) -> tuple:
@@ -3213,7 +3213,7 @@ def run_sleep(ctx: RunContext, step: dict) -> str:
 # ── Phase 1 Task 11 step runners ──────────────────────────────────────────
 
 GRAPH_DB_NAME = "ubilink-graph.sqlite"
-# ubilink-core's graph schema (src-tauri/src/graph.rs `create_base_tables`, the v1
+# ubilink-core's graph schema (core/src/graph.rs `create_base_tables`, the v1
 # migration; v2/v3 add nothing to a fresh DB) and the version its MIGRATIONS bring a
 # DB to. `seed_graph` writes exactly this so `LinkGraph::open` takes its fast path.
 # test_probe.py pins both against graph.rs, so a core schema change fails the

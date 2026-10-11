@@ -1704,7 +1704,7 @@ class SeedGraph(unittest.TestCase):
     """seed_graph writes what ubilink-core's import_json writes, in core's schema."""
 
     def test_schema_matches_ubilink_core(self):
-        src = (probe.REPO_ROOT / "src-tauri" / "src" / "graph.rs").read_text()
+        src = (probe.REPO_ROOT / "core" / "src" / "graph.rs").read_text()
         m = re.search(r"fn create_base_tables.*?r#\"(.*?)\"#", src, re.S)
         self.assertIsNotNone(m, "create_base_tables's SQL not found in graph.rs")
 

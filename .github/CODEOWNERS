@@ -7,8 +7,8 @@
 *                       @dhanesh
 
 # Security-critical surfaces — always want an explicit look.
-/src-tauri/src/broker.rs        @dhanesh
-/src-tauri/src/sandbox.rs       @dhanesh
-/src-tauri/src/release.rs       @dhanesh
+/core/src/broker.rs             @dhanesh
+/core/src/sandbox.rs            @dhanesh
+/core/src/release.rs            @dhanesh
 /.github/                       @dhanesh
 /.claude/settings.json          @dhanesh

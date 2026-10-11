@@ -33,7 +33,7 @@ python3 -m unittest scripts/test_probe.py           # the engine's self-tests (n
    instances run that copy. Another probe rebuilding the shared target for a
    different commit cannot swap the binary under this run. The run prints the
    copy's sha256 and the source commit (`git rev-parse HEAD`, plus `+dirty` if
-   `desktop-gpui/`, `app/`, `src-tauri/` or `design/` have uncommitted changes) at
+   `desktop-gpui/`, `app/`, `core/` or `design/` have uncommitted changes) at
    the start (`probe: automation binary sha256=... commit=...`) and again on the
    last line (`ran: ...`), so the evidence names exactly what ran.
 2. Compiles the Swift helpers (`scripts/probe-helpers/quartz.swift`, plus
@@ -140,7 +140,7 @@ which is shown in the report, and a `block` id: consecutive steps with the same
 | `restart` | `true` | | Stops the instance and relaunches it with the same temp root (data survives), then replays every fixture loaded so far, since fixtures live in app memory. |
 | `sleep_ms` | milliseconds | | Waits. Prefer `retry_ms` or `timeout_ms`. |
 | `key_until` | a node query (as in `see`) | `key` (default `tab`), `max_presses` (default 40, at most 200), `route` | Checks the query, then presses `key` (the `key` verb) and checks again, until it holds; FAIL after `max_presses`. "This control is reachable from the keyboard" (Phase 1 U4) without the probe hard-coding a view's tab order: the target is usually `{"role": "Button", "text": "Export", "state": {"focused": true}}`. |
-| `seed_graph` | a `ubilink.graph.v3` fixture path | `replace` (default false) | Writes the fixture into the instance's `{data_dir}/ubilink-graph.sqlite` with ubilink-core's own schema and the same statements `LinkGraph::import_json` runs (upsert by URI, guids kept, `updated_at = created_at`, resources in file order, one row per unordered link, dangling and self links skipped); `replace` first deletes every link and resource like `LinkGraph::clear`. Merges into a live instance's graph (SQLite locking makes it one more writer). It skips only the core's URI validation, so fixtures use allowed schemes. `test_probe.py` pins the schema to `src-tauri/src/graph.rs`. |
+| `seed_graph` | a `ubilink.graph.v3` fixture path | `replace` (default false) | Writes the fixture into the instance's `{data_dir}/ubilink-graph.sqlite` with ubilink-core's own schema and the same statements `LinkGraph::import_json` runs (upsert by URI, guids kept, `updated_at = created_at`, resources in file order, one row per unordered link, dangling and self links skipped); `replace` first deletes every link and resource like `LinkGraph::clear`. Merges into a live instance's graph (SQLite locking makes it one more writer). It skips only the core's URI validation, so fixtures use allowed schemes. `test_probe.py` pins the schema to `core/src/graph.rs`. |
 | `process` | `"unchanged"` | | The instance is still the process this scenario launched (or last restarted), and alive: "the same pid" (Phase 1 R14). |
 | `screenshot` | a file-name-safe label | | Captures the panel like `ocr` and keeps the PNG at `~/Library/Caches/ubilink-probe/shots/<run>/<scenario>-<label>.png` (instance temp roots are deleted; the run prints the directory). Needs Screen Recording. |
 | `release_budget` | `true` | `cpu_pct_lt`, `footprint_mb_lt`, `binary_mb_lt` (all required), `idle_s` (default 60), `settle_s` (default 5) | Builds the stripped release build (no automation channel) and launches it as a second isolated instance (see [Release-build instances](#release-build-instances)), waits `settle_s`, then measures idle CPU as the `ps -o time=` CPU-time delta over `idle_s` seconds of wall time, physical footprint with `vmmap --summary`'s `Physical footprint:` line (Activity Monitor's Memory number) at the end, and the binary's size after `strip` (a copy). Each must be under its budget. Saves `idle_cpu_percent`, `physical_footprint_mb`, `stripped_binary_mb`. A `vmmap` refusal is ENV-BLOCKED. |
@@ -354,7 +354,7 @@ scripts/probe.py ...`. Every input of these scenarios lives under
 `desktop-gpui/probes/` or `scripts/` (fixtures, Swift helpers), except
 `docs/PERFORMANCE.md`, which is R15's product output under judgment, not an input.
 Expected colours, URIs, row orders and the golden table are written into the
-scenario files, never read from `design/`, `src-tauri/` or `app/` at run time.
+scenario files, never read from `design/`, `core/` or `app/` at run time.
 
 ## Phase 2 parity acceptance scenarios
 

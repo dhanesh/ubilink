@@ -852,6 +852,7 @@ and D23's data-dir bullet (`org.ubilink.next`); both entries stay as written, as
   cargo target dir. `desktop-gpui/Cargo.toml` is the single version source
   (`scripts/version.sh`, `check-version.sh`). The Cargo package keeps the name
   `ubilink-next`, so the committed `Cargo.lock` and `--locked` builds are unchanged.
+  (Superseded by D25, which renamed the package to `ubilink`.)
 - **Why.** The measured case D22 made (one native process, no second WebKit process,
   under half the binary size, 0.0% idle CPU), now with all four views and the Phase 2
   parity behaviours proven by probes on the running app. Keeping two shells meant two
@@ -887,3 +888,36 @@ and D23's data-dir bullet (`org.ubilink.next`); both entries stay as written, as
   registration (SMAppService), the native save and open dialogs, VoiceOver, live
   capture per app, the recorded performance budget, a real hotkey press and a second
   display; and the RC checklist in `docs/RUNBOOK-release.md` on the notarized DMG.
+
+## D25 — Tauri-era names retired: `core/` and package `ubilink`
+
+**Date:** 2026-10-11 · **Constraints:** S2, O1 · **Source:** user-approved cleanup after
+GPUI Phase 2b (D24), branch `factory/tauri-cleanup`
+
+D24 deleted the Tauri app but left two names from it in the live tree. Both are now
+retired; the Tauri app survives only in history.
+
+- **What.** The directory `src-tauri/` is renamed to `core/`. The crate keeps its name
+  (`ubilink-core`, lib `ubilink_core`) and its own `Cargo.lock`; only the path moves.
+  Every live reference follows it: the path dependencies in `app/`, `registry/` and
+  `desktop-gpui/`, the Makefile's `CORE`, the CI cache workspaces, the package-dry-run
+  paths filter, the signer job's working directory and artifact path
+  (`core/dist/*.signed.json`), CODEOWNERS, `scripts/` (probe.py's build inputs and
+  adapter defaults, `check-version.sh`), the verify-ubilink skill, `.gitignore`, and the
+  README, CONTRIBUTING and live runbooks. The `.manifold` evidence and artifact `path`
+  fields move too, because `manifold verify` and `manifold validate --evidence` resolve
+  them at check time.
+- **The package.** `desktop-gpui/`'s Cargo package is renamed from `ubilink-next` to
+  `ubilink`, matching its binary (D24 kept the old name only to leave `Cargo.lock`
+  alone). The lock change is the root package's name and nothing else; no dependency
+  version moves. There is no `[lib]` target, so the name cannot clash.
+- **Orphan removed.** `design/ubilink-tokens.css` is deleted: nothing read it after the
+  Tauri web panel went; the GPUI app embeds `design/ubilink-tokens.json`.
+- **Why.** A directory named after a framework the crate does not use misleads every
+  reader and tool, and a package named `ubilink-next` for the only app is the same
+  problem one level down. With no release yet, renaming costs nothing but churn.
+- **History keeps the old names.** Dated specs under `docs/superpowers/`, D1-D24 above,
+  older CHANGELOG lines, `.manifold` narrative and the `.verify.json` hash snapshot are
+  records of their time and are not rewritten. `ee80e70` is the last commit with the
+  Tauri app (`desktop/`, `dist/`); `6e913b2` is the last commit with `src-tauri/` and
+  `ubilink-next`.

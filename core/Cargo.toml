@@ -2,8 +2,8 @@
 # See .manifold/linking-manifesto-app.md
 #
 # Minimal crate for the plugin-sandbox spike (manifold evidence E8/E9).
-# Deliberately depends on no GUI stack (the directory name is from the Tauri era;
-# the app is now native GPUI, D22/D24): the capability broker is plain Rust and is
+# Deliberately depends on no GUI stack (the app is native GPUI, D22/D24; the directory
+# was `src-tauri/` until D25 renamed it): the capability broker is plain Rust and is
 # unit/integration-testable without a windowing/runtime stack. The app reaches it
 # through the GUI-free ubilink-app crate (app/).
 # Dep tree kept tiny (serde + serde_json only) so `cargo test` builds fast.
