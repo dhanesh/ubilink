@@ -50,8 +50,13 @@ pub fn export_graph(state: &AppState, dir: &Path) -> Result<String, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let path = write_new_file(dir, &format!("ubilink-export-{stamp}"), "json", json.as_bytes())
-        .map_err(|e| format!("couldn't write export: {e}"))?;
+    let path = write_new_file(
+        dir,
+        &format!("ubilink-export-{stamp}"),
+        "json",
+        json.as_bytes(),
+    )
+    .map_err(|e| format!("couldn't write export: {e}"))?;
     Ok(path.to_string_lossy().to_string())
 }
 
