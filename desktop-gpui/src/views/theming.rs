@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Sizable, Size, Theme, ThemeMode};
+use gpui_kit::component::{ActiveTheme, Sizable, Theme, ThemeMode};
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
@@ -115,16 +115,30 @@ pub fn destructive_button(id: impl Into<ElementId>) -> Button {
 /// A text field's border: gpui-component's `Input` draws a 1 pt `border_1`.
 pub const TEXT_FIELD_BORDER: Pixels = px(1.);
 
-/// How far a single-line text field's content box sits inside its top and bottom
-/// edges: the border plus the vertical padding the field gets (gpui-component's
-/// default for a medium `Input`). The text is clipped to that box.
+/// A single-line text field's vertical padding. The field's 13 pt text lays out in a
+/// 1.25 rem (16.25 pt) line box that gpui-component clips to the field's content box,
+/// so the padding must leave at least that much of [`CONTROL_H`]: 24 − 2 × (1 + 2) =
+/// 18 pt, with the line centred in it (D26). gpui-component's own medium padding (8 pt)
+/// left 8 pt, which cut the text's top and descenders off.
+pub const TEXT_FIELD_PAD_Y: Pixels = px(2.);
+
+/// How far a single-line text field's content box (the box its text is clipped to)
+/// sits inside its top and bottom edges: the border plus [`TEXT_FIELD_PAD_Y`].
 pub fn text_field_inset_y() -> Pixels {
-    TEXT_FIELD_BORDER + Size::Medium.input_py()
+    TEXT_FIELD_BORDER + TEXT_FIELD_PAD_Y
 }
 
-/// A single-line text field at the control height with 13 pt text.
+/// A single-line text field at the control height with 13 pt text, vertically centred
+/// and never clipped.
+///
+/// The height goes through `Styled::h`: `Input`'s own `h` sets a multi-line input's
+/// height only, so on a single-line field it is a no-op and the field stays a 26 pt
+/// medium input. The style refinement is applied after the input's size defaults, so
+/// these override them.
 pub fn text_field(state: &Entity<InputState>) -> Input {
-    Input::new(state).h(CONTROL_H).text_size(font_size::ROW)
+    Styled::h(Input::new(state), CONTROL_H)
+        .py(TEXT_FIELD_PAD_Y)
+        .text_size(font_size::ROW)
 }
 
 /// A switch at AppKit's small size (gpui-component `small`, 28 x 16): checked takes
@@ -300,6 +314,31 @@ mod tests {
     use crate::theme::{dark_theme_config, light_theme_config};
     use gpui_kit::component::ThemeMode;
     use gpui_kit::{point, px, size, Bounds, Hsla, Rgba};
+
+    /// A single-line field's text lays out in gpui-component's 1.25 rem line box (its
+    /// `Input` `LINE_HEIGHT`), and the rem is the theme's base font size (body, 13 pt).
+    /// That box must fit the content box the field clips its text to, or the text's
+    /// top and descenders are cut off (rc.4).
+    #[test]
+    fn a_text_fields_line_fits_inside_its_clip_box() {
+        let blue = Source::bare(Rgb::parse("#007aff").unwrap());
+        let rem = light_theme_config(&derive(&blue, ThemeMode::Light))
+            .font_size
+            .expect("the theme sets the base size");
+        assert_eq!(
+            dark_theme_config(&derive(&blue, ThemeMode::Dark)).font_size,
+            Some(rem)
+        );
+        let line_h = 1.25 * rem;
+        let content_h = f32::from(CONTROL_H) - 2. * f32::from(super::text_field_inset_y());
+        assert!(
+            line_h <= content_h,
+            "line {line_h} pt > content box {content_h} pt"
+        );
+        // The macOS regular control range, at the 13 pt body size.
+        assert!((22.0..=28.0).contains(&f32::from(CONTROL_H)));
+        assert_eq!(super::font_size::ROW, px(rem));
+    }
 
     fn hsla(hex: &str) -> Hsla {
         Hsla::from(Rgba::try_from(hex).unwrap_or_else(|e| panic!("{hex}: {e}")))
