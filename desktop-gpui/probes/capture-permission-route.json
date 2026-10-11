@@ -7,6 +7,7 @@
     "The no-report case (capture fails, no permission fixture loaded: stay on capture, phase failed, message shown) is capture-view.json's second half and is not repeated here; this scenario must not contradict it.",
     "Round 1 uses permissions-two-missing.json (automation 'denied'): the route switches to onboarding in the SAME window (window_id saved before and compared after) and process, and nothing is opened.",
     "Round 2 restarts for a fresh instance (restart replays both setup fixtures), THEN loads permissions-all-granted.json so it overrides the replayed two-missing report. 'Stays on capture' is checked after a 1 s settle, so a late async route switch cannot pass it.",
+    "rc.4: opening capture now checks the report first while Automation is not confirmed this session (capture-permission-gate.json), so round 1 reaches onboarding through that check before the capture runs. The failed-capture route itself is exercised by the revoked-mid-session steps after round 2: the all-granted check confirmed the session, so the next capture is not checked at open; the report then says not granted (Automation revoked), the capture fails, and the failure route takes the panel to onboarding.",
     "Round 3 restarts again and loads permissions-accessibility-missing.json (accessibility false, automation 'granted'): only Automation decides the route (Tauri canUseCapture, 'Defect 5: capture needs only Automation'), so a missing Accessibility grant alone must NOT route to onboarding. This rules out routing on 'any permission missing' or on Accessibility."
   ],
   "setup": {
@@ -168,6 +169,61 @@
           "eq": []
         }
       }
+    },
+    {
+      "name": "revoked mid-session: hide the panel (the hotkey toggles it)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false
+      }
+    },
+    {
+      "name": "revoked mid-session: the report now says Automation is not granted",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-two-missing.json"
+      }
+    },
+    {
+      "name": "revoked mid-session: hotkey captures (the session is confirmed, so no open check; it fails)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "revoked mid-session: the failed capture routes to onboarding",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "shell.visible": true,
+        "route": "onboarding"
+      }
+    },
+    {
+      "name": "revoked mid-session: onboarding lists the Automation step, not granted",
+      "see": [
+        {
+          "role": "ListItem",
+          "text": "Automation",
+          "deep": true
+        },
+        {
+          "role": "ListItem",
+          "text": "Not granted",
+          "deep": true
+        }
+      ],
+      "route": "onboarding",
+      "timeout_ms": 3000
     },
     {
       "name": "fresh instance for the accessibility-only round",
