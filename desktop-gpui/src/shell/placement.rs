@@ -96,11 +96,14 @@ pub fn place_panel(
 
 /// The panel resized to `(width, height)` on display `d`, keeping its left edge and,
 /// when it still fits, its top edge (the Tauri shell's `resize_panel`: the panel grows
-/// downward with its content). The height is cut to the display's usable area, and a
-/// panel that would run past the bottom moves up, never above the top.
+/// downward with its content). Width and height are cut to the display's usable area,
+/// and the panel is moved inside it: up rather than past the bottom, and back onto the
+/// display when its old place is elsewhere (the display it was on went away).
 pub fn fit_on(d: &Display, (x, top): (f64, f64), (width, height): (f64, f64)) -> Placement {
     let s = d.work;
+    let width = width.min(s.width).max(0.0);
     let height = height.min(s.height).max(0.0);
+    let x = x.min(s.x + s.width - width).max(s.x);
     let y = top.min(s.y + s.height - height).max(s.y);
     Placement {
         display_id: d.id,
@@ -108,6 +111,13 @@ pub fn fit_on(d: &Display, (x, top): (f64, f64), (width, height): (f64, f64)) ->
         global: (x, y),
         size: (width, height),
     }
+}
+
+/// AppKit's bottom-left frame origin for a rect at `top_left` (global top-left
+/// points) of `size`, given the primary display's height: the inverse of
+/// [`Rect::from_appkit`].
+pub fn appkit_origin(top_left: (f64, f64), size: (f64, f64), primary_height: f64) -> (f64, f64) {
+    (top_left.0, primary_height - (top_left.1 + size.1))
 }
 
 /// [`fit_on`] the display with id `display_id`, else the first (a display that was
@@ -215,7 +225,7 @@ mod tests {
         let p = place_panel(&[tiny], (200.0, 100.0), (640.0, 900.0)).unwrap();
         assert_eq!(p.global, (100.0, 50.0), "pinned to the top-left edge");
         assert_eq!(p.local, (0.0, 0.0));
-        assert_eq!(p.size, (640.0, 300.0), "cut to the usable height");
+        assert_eq!(p.size, (500.0, 300.0), "cut to the usable width and height");
     }
 
     // ── refit: a panel resized in place (route switch, content change) ──
@@ -269,9 +279,21 @@ mod tests {
         let p = refit(&[main, right], 2, (2080.0, 216.0), (640.0, 400.0)).unwrap();
         assert_eq!(p.display_id, 2);
         assert_eq!(p.local, (640.0, 216.0), "display-local origin");
-        // Its display is gone: the first one takes it.
-        let p = refit(&[main], 2, (100.0, 100.0), (640.0, 400.0)).unwrap();
+        // Its display is gone: the first one takes it, and the panel moves onto it
+        // (its old x lay on the vanished display, right of the primary).
+        let p = refit(&[main], 2, (2080.0, 216.0), (640.0, 400.0)).unwrap();
         assert_eq!(p.display_id, 1);
+        assert_eq!(
+            p.global,
+            (1440.0 - 640.0, 216.0),
+            "pulled back inside the work area"
+        );
+        let p = refit(&[main], 2, (-900.0, 216.0), (640.0, 400.0)).unwrap();
+        assert_eq!(p.global.0, 0.0, "from the left too");
+        // A display narrower than the panel cuts the width.
+        let narrow = display(3, 0.0, 0.0, 500.0, 900.0);
+        let p = refit(&[narrow], 3, (0.0, 100.0), (640.0, 200.0)).unwrap();
+        assert_eq!((p.global.0, p.size.0), (0.0, 500.0));
         assert_eq!(refit(&[], 1, (0.0, 0.0), (640.0, 140.0)), None);
     }
 
@@ -296,6 +318,23 @@ mod tests {
         );
         let p = place_panel(&[d], (700.0, 5.0), (640.0, 800.0)).unwrap();
         assert_eq!(p.global.1, 25.0 + 805.0 - 800.0, "clear of the Dock");
+    }
+
+    #[test]
+    fn a_top_left_rect_flips_to_an_appkit_origin_and_back() {
+        // Primary 900 high: a 640x200 panel at top y=100 has its AppKit origin at
+        // y = 900 - 300 = 600; flipping that rect back gives the same place.
+        assert_eq!(
+            appkit_origin((400.0, 100.0), (640.0, 200.0), 900.0),
+            (400.0, 600.0)
+        );
+        let back = Rect::from_appkit(400.0, 600.0, 640.0, 200.0, 900.0);
+        assert_eq!((back.x, back.y), (400.0, 100.0));
+        // A display above the primary has negative top-left y.
+        assert_eq!(
+            appkit_origin((0.0, -1080.0), (640.0, 140.0), 900.0),
+            (0.0, 1840.0)
+        );
     }
 
     #[test]

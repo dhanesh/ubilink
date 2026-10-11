@@ -10,7 +10,7 @@
 //! toggle and the capture view's self-dismiss after a copy take, so the window really
 //! leaves the screen ([`dismiss_panel`]).
 
-use gpui_kit::{Context, Keystroke};
+use gpui_kit::{Context, Keystroke, Window};
 
 use super::Route;
 
@@ -55,10 +55,12 @@ pub fn escape_action(route: Route, state: EscapeState) -> EscapeAction {
 }
 
 /// Hide the panel as a dismiss does, once the current key's dispatch is over: the
-/// shell removes the very window that is dispatching it.
-pub fn dismiss_panel<V: 'static>(cx: &mut Context<V>) {
+/// shell removes the very window that is dispatching it. Only this `window`'s panel
+/// is hidden: if another panel has replaced it by then, nothing happens.
+pub fn dismiss_panel<V: 'static>(window: &Window, cx: &mut Context<V>) {
+    let handle = window.window_handle();
     cx.spawn(async move |_, cx| {
-        cx.update(|cx| crate::shell::execute(crate::shell::Command::Hide, cx));
+        cx.update(|cx| crate::shell::hide_if_current(handle, cx));
     })
     .detach();
 }

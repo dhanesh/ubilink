@@ -105,6 +105,28 @@ struct Panel {
     /// Where the panel is and how big (`None` when there were no displays to place it
     /// on). A route switch or a content change refits it from here.
     placement: Option<placement::Placement>,
+    /// The panel's AppKit window number, so native calls act on this window only.
+    number: Option<isize>,
+}
+
+/// Whether a file dialog the panel opened is up: at most one at a time (a second
+/// press must not stack another), and closing it restores the panel exactly once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DialogGate {
+    open: bool,
+}
+
+impl DialogGate {
+    /// Open a dialog: false (do nothing) when one is already up.
+    pub fn begin(&mut self) -> bool {
+        !std::mem::replace(&mut self.open, true)
+    }
+
+    /// The dialog is gone (answered, cancelled, or its panel went away): true only for
+    /// the first call, the one that must restore the panel.
+    pub fn end(&mut self) -> bool {
+        std::mem::replace(&mut self.open, false)
+    }
 }
 
 /// Owns the OS integrations for the app's lifetime: dropping the tray removes the
@@ -116,6 +138,7 @@ pub struct Shell {
     hotkey_routes: Vec<(u32, Route)>,
     events: Receiver<ShellEvent>,
     panel: Option<Panel>,
+    dialog: DialogGate,
 }
 
 impl Global for Shell {}
@@ -163,6 +186,7 @@ pub fn start(cx: &mut App, inbox: Inbox, events: Receiver<ShellEvent>) {
         hotkey_routes: reg.routes,
         events,
         panel: None,
+        dialog: DialogGate::default(),
     });
     log_state(cx);
     prewarm(cx);
@@ -361,12 +385,14 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
     // Read back what AppKit actually built (the window is ordered front synchronously
     // by GPUI's open), so the state reports facts rather than the request.
     let facts = native::inspect_panel(mtm);
+    let number = native::newest_panel_number(mtm);
     cx.update_global::<Shell, _>(|shell, _| {
         shell.panel = Some(Panel {
             handle,
             view,
             route,
             placement,
+            number,
         });
         let s = &mut shell.state;
         s.visible = true;
@@ -380,6 +406,8 @@ fn open(route: Route, hotkey_at: Option<std::time::Instant>, cx: &mut App) {
 }
 
 fn switch_route(route: Route, cx: &mut App) {
+    // A file dialog belongs to the view being replaced: close it and restore the panel.
+    end_file_dialog(cx);
     let Some(view) = cx.update_global::<Shell, _>(|shell, _| {
         shell.panel.as_mut().map(|p| {
             p.route = route;
@@ -415,10 +443,10 @@ pub fn fit_panel(height: f64, cx: &mut App) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let Some((handle, Some(current))) = cx
+    let Some((handle, Some(current), Some(number))) = cx
         .try_global::<Shell>()
         .and_then(|s| s.panel.as_ref())
-        .map(|p| (p.handle, p.placement))
+        .map(|p| (p.handle, p.placement, p.number))
     else {
         return;
     };
@@ -448,7 +476,7 @@ pub fn fit_panel(height: f64, cx: &mut App) {
         });
         if same {
             if let Some(mtm) = MainThreadMarker::new() {
-                native::set_panel_frame(mtm, next.global, next.size, primary_height);
+                native::set_panel_frame(mtm, number, next.global, next.size, primary_height);
             }
         }
     })
@@ -456,6 +484,7 @@ pub fn fit_panel(height: f64, cx: &mut App) {
 }
 
 fn hide(cx: &mut App) {
+    end_file_dialog(cx);
     let Some(p) = cx.update_global::<Shell, _>(|shell, _| shell.panel.take()) else {
         return;
     };
@@ -477,8 +506,70 @@ pub fn panel_closed(id: WindowId, cx: &mut App) {
         current
     });
     if was_current {
+        end_file_dialog(cx);
         mark_hidden(cx);
     }
+}
+
+/// Hide the panel only if `handle` is still the shell's panel: a dismiss asked for
+/// by one window (Escape) must never hide a newer one opened since.
+pub fn hide_if_current(handle: AnyWindowHandle, cx: &mut App) {
+    let current = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .is_some_and(|p| p.handle == handle);
+    if current {
+        hide(cx);
+    }
+}
+
+/// Settings' Import is about to open a file dialog. GPUI opens it with
+/// `beginWithCompletionHandler` and neither activates the app nor sets a level, while
+/// the panel is a non-activating NSPanel at the pop-up level (101) of an accessory
+/// app: the dialog would open behind the panel, unseen. So activate the app and drop
+/// the panel to the normal level until [`end_file_dialog`]. False (open nothing) when
+/// a dialog is already up: presses never stack dialogs.
+pub fn begin_file_dialog(cx: &mut App) -> bool {
+    let Some(number) = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .and_then(|p| p.number)
+    else {
+        return false;
+    };
+    if !cx.update_global::<Shell, _>(|shell, _| shell.dialog.begin()) {
+        return false;
+    }
+    if let Some(mtm) = MainThreadMarker::new() {
+        native::lower_panel_for_dialog(mtm, number);
+    }
+    cx.activate(true);
+    true
+}
+
+/// The file dialog is over: it was answered, or the view that opened it is going away
+/// (a route switch, a hide). Close any dialog still up and put the panel back at its
+/// level with key status, once, from a foreground task (outside this update: the
+/// dialog's completion handler and the key change call back into AppKit and GPUI).
+pub fn end_file_dialog(cx: &mut App) {
+    if cx.try_global::<Shell>().is_none()
+        || !cx.update_global::<Shell, _>(|shell, _| shell.dialog.end())
+    {
+        return;
+    }
+    let number = cx
+        .try_global::<Shell>()
+        .and_then(|s| s.panel.as_ref())
+        .and_then(|p| p.number);
+    cx.spawn(async move |_| {
+        if let Some(mtm) = MainThreadMarker::new() {
+            native::cancel_file_dialogs(mtm);
+            if let Some(number) = number {
+                native::restore_panel_after_dialog(mtm, number);
+            }
+        }
+    })
+    .detach();
 }
 
 fn mark_hidden(cx: &mut App) {
@@ -493,7 +584,25 @@ fn mark_hidden(cx: &mut App) {
 mod tests {
     // Not `super::*`: that glob carries gpui-kit's re-exported `test` macro, which
     // would shadow Rust's `#[test]`.
-    use super::{command_for, startup_state, Command, Route, ShellEvent};
+    use super::{command_for, startup_state, Command, DialogGate, Route, ShellEvent};
+
+    /// One file dialog at a time, and its end restores the panel exactly once (a
+    /// route switch and the dialog's own answer may both report the end).
+    #[test]
+    fn the_dialog_gate_admits_one_dialog_and_ends_it_once() {
+        let mut g = DialogGate::default();
+        assert!(g.begin(), "the first press opens a dialog");
+        assert!(
+            !g.begin(),
+            "a second press while it is up does not stack another"
+        );
+        assert!(g.end(), "the first end restores the panel");
+        assert!(
+            !g.end(),
+            "a later end (the cancelled dialog's answer) does nothing"
+        );
+        assert!(g.begin(), "a new dialog may open afterwards");
+    }
 
     #[test]
     fn startup_state_claims_no_window_kind_or_background() {

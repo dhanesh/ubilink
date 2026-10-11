@@ -826,7 +826,7 @@ impl Render for CaptureView {
                     if escape::escape_action(Route::Capture, EscapeState::default())
                         == EscapeAction::Dismiss
                     {
-                        escape::dismiss_panel(cx);
+                        escape::dismiss_panel(window, cx);
                     }
                     cx.stop_propagation();
                     return;

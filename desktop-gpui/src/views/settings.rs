@@ -74,7 +74,6 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use objc2::MainThreadMarker;
 use serde::{Deserialize, Serialize};
 use ubilink_app::PluginView;
 use ubilink_core::GraphStats;
@@ -85,7 +84,6 @@ use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::fixtures::{self, Fixture};
 use crate::login_item::{self, Report, Status};
-use crate::shell::native;
 use crate::theme::tokens::{font_size, radius, spacing};
 
 /// The settings route's view-state, for Task 6's automation `state` verb.
@@ -509,9 +507,6 @@ pub struct SettingsView {
     confirming_reset: bool,
     /// The open file dialog's task, if any; dropped (cancelled) with the view.
     _dialog: Task<()>,
-    /// Import's file dialog is up: a second press is ignored rather than stacking
-    /// another dialog.
-    dialog_open: bool,
     /// Launch at login: the status last read (on show) or reported by the last
     /// register/unregister, or the error line to show instead (U3).
     login: Result<Report, String>,
@@ -529,7 +524,6 @@ impl SettingsView {
             focused: false,
             confirming_reset: false,
             _dialog: Task::ready(()),
-            dialog_open: false,
             login: login_status().map_err(|e| login_status_error_message(&e)),
             appearance: FollowAppearance::default(),
             fitted: None,
@@ -676,22 +670,11 @@ impl SettingsView {
             let e = NO_FIXTURE.replace("{kind}", "import_path");
             return self.show(import_message(&Err(e)), cx);
         }
-        if self.dialog_open {
+        // The shell fronts the dialog (activates the app, lowers the panel) and
+        // refuses a second one while it is up; see `shell::begin_file_dialog`.
+        if !crate::shell::begin_file_dialog(cx) {
             return;
         }
-        // Why the dance around the dialog: GPUI opens it with
-        // `beginWithCompletionHandler` and neither activates the app nor sets a level.
-        // Ubilink is an accessory app whose panel is a non-activating NSPanel at the
-        // pop-up level (101), so the dialog opened behind the panel, in an inactive
-        // app, and each press stacked another unseen one. So: activate the app, drop
-        // the panel to the normal level while the dialog is up, and on every way out
-        // (a file, Cancel or Escape, an error) put the panel back at its level and make
-        // it key again, so Settings keeps taking Tab and Escape.
-        self.dialog_open = true;
-        if let Some(mtm) = MainThreadMarker::new() {
-            native::lower_panel_for_dialog(mtm);
-        }
-        cx.activate(true);
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -700,10 +683,10 @@ impl SettingsView {
         });
         self._dialog = cx.spawn(async move |this, cx| {
             let answer = chosen.await;
-            // Outside any update: becoming key notifies GPUI synchronously.
-            if let Some(mtm) = MainThreadMarker::new() {
-                native::restore_panel_after_dialog(mtm);
-            }
+            // Every way out (a file, Cancel or Escape, an error) restores the panel.
+            // If this view goes away first (a route switch, a hide), the shell has
+            // already closed the dialog and restored the panel, and this task is gone.
+            cx.update(crate::shell::end_file_dialog);
             let result = match answer {
                 Ok(Ok(Some(paths))) => paths
                     .first()
@@ -711,12 +694,9 @@ impl SettingsView {
                 Ok(Ok(None)) | Err(_) => None,
                 Ok(Err(e)) => Some(Err(format!("couldn't open the file dialog: {e}"))),
             };
-            let _ = this.update(cx, |view, cx| {
-                view.dialog_open = false;
-                if let Some(result) = result {
-                    view.show(import_message(&result), cx);
-                }
-            });
+            if let Some(result) = result {
+                let _ = this.update(cx, |view, cx| view.show(import_message(&result), cx));
+            }
         });
     }
 
@@ -943,7 +923,7 @@ impl Render for SettingsView {
                 };
                 match escape::escape_action(Route::Settings, state) {
                     EscapeAction::CloseConfirmation => this.cancel_reset(window, cx),
-                    _ => escape::dismiss_panel(cx),
+                    _ => escape::dismiss_panel(window, cx),
                 }
                 cx.stop_propagation();
             }))

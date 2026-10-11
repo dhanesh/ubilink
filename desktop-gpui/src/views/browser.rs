@@ -788,7 +788,7 @@ impl BrowserView {
                     self.refilter(window, cx);
                 }
             }
-            EscapeAction::Dismiss => escape::dismiss_panel(cx),
+            EscapeAction::Dismiss => escape::dismiss_panel(window, cx),
             EscapeAction::CloseConfirmation => {}
         }
     }
@@ -812,7 +812,7 @@ impl BrowserView {
             LeftKey::Back(row) => row,
             LeftKey::Close => {
                 // Hide as a dismiss does (as Escape does). Nothing is opened.
-                escape::dismiss_panel(cx);
+                escape::dismiss_panel(window, cx);
                 return;
             }
         };

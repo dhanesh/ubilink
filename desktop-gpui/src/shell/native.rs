@@ -112,20 +112,55 @@ fn visible_panel(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
         })
 }
 
-/// Settings' Import (release builds): before a file dialog opens, drop the panel to
-/// the normal window level, so the dialog (ordered front after it, at the normal
-/// level) is not hidden under a pop-up-level panel. Returns whether there was a panel.
-pub fn lower_panel_for_dialog(mtm: MainThreadMarker) -> bool {
-    visible_panel(mtm)
+/// The newest visible panel's window number, read right after the shell opens one,
+/// so later calls act on exactly that window (never a file dialog, never a closing
+/// predecessor).
+pub fn newest_panel_number(mtm: MainThreadMarker) -> Option<isize> {
+    visible_panel(mtm).map(|w| w.windowNumber())
+}
+
+/// The app's window whose `windowNumber` is `number`, if it still exists.
+fn window_numbered(mtm: MainThreadMarker, number: isize) -> Option<Retained<NSWindow>> {
+    let windows = NSApplication::sharedApplication(mtm).windows();
+    (0..windows.count())
+        .map(|i| windows.objectAtIndex(i))
+        .find(|w| w.windowNumber() == number)
+}
+
+/// Settings' Import (release builds): before a file dialog opens, drop panel `number`
+/// to the normal window level, so the dialog (ordered front after it, at the normal
+/// level) is not hidden under a pop-up-level panel. Returns whether it was there.
+pub fn lower_panel_for_dialog(mtm: MainThreadMarker, number: isize) -> bool {
+    window_numbered(mtm, number)
         .map(|w| w.setLevel(NORMAL_WINDOW_LEVEL))
         .is_some()
 }
 
-/// The dialog closed (chosen, cancelled or failed): the panel goes back to its
-/// pop-up level and takes key status again, so Tab and Escape reach Settings. Call
-/// outside any GPUI update: becoming key notifies GPUI synchronously.
-pub fn restore_panel_after_dialog(mtm: MainThreadMarker) {
-    if let Some(w) = visible_panel(mtm) {
+/// Close every open file dialog (NSSavePanel and its NSOpenPanel subclass) as if the
+/// user pressed Cancel: the panel that opened it is going away or changing route.
+/// Call outside any GPUI update (the dialog's completion handler runs inside).
+pub fn cancel_file_dialogs(mtm: MainThreadMarker) {
+    let Some(dialog_class) = AnyClass::get(c"NSSavePanel") else {
+        return;
+    };
+    let windows = NSApplication::sharedApplication(mtm).windows();
+    let dialogs: Vec<_> = (0..windows.count())
+        .map(|i| windows.objectAtIndex(i))
+        .filter(|w| w.isVisible() && w.isKindOfClass(dialog_class))
+        .collect();
+    for d in dialogs {
+        // SAFETY: -[NSSavePanel cancel:] takes a nullable sender; the receiver is an
+        // NSSavePanel (checked above), on the main thread (proven by `mtm`).
+        unsafe {
+            let _: () = msg_send![&*d, cancel: Option::<&AnyObject>::None];
+        }
+    }
+}
+
+/// The dialog is gone: panel `number` goes back to its pop-up level and takes key
+/// status again, so Tab and Escape reach it. Call outside any GPUI update.
+pub fn restore_panel_after_dialog(mtm: MainThreadMarker, number: isize) {
+    if let Some(w) = window_numbered(mtm, number).filter(|w| w.isVisible()) {
         w.setLevel(POPUP_WINDOW_LEVEL);
         w.makeKeyWindow();
     }
@@ -146,26 +181,23 @@ pub fn inspect_panel(mtm: MainThreadMarker) -> Option<PanelFacts> {
     })
 }
 
-/// Move and resize the visible panel to `size` points with its top-left corner at
-/// `top_left` (global top-left points, as `placement`), flipping to AppKit's
-/// bottom-left frame with the primary display's height. Returns whether there was a
-/// panel. GPUI hears of the new size through the window's resize notification and
+/// Move and resize panel `number` to `size` points with its top-left corner at
+/// `top_left` (global top-left points, as `placement`), flipped to AppKit's
+/// bottom-left frame (`placement::appkit_origin`). Returns whether the panel was
+/// there. GPUI hears of the new size through the window's resize notification and
 /// lays the view out again. Call outside any GPUI update (see `shell::fit_panel`).
 pub fn set_panel_frame(
     mtm: MainThreadMarker,
+    number: isize,
     top_left: (f64, f64),
     size: (f64, f64),
     primary_height: f64,
 ) -> bool {
-    let Some(w) = visible_panel(mtm) else {
+    let Some(w) = window_numbered(mtm, number) else {
         return false;
     };
-    let (x, y) = top_left;
-    let (width, height) = size;
-    let frame = NSRect::new(
-        NSPoint::new(x, primary_height - (y + height)),
-        NSSize::new(width, height),
-    );
+    let (x, y) = super::placement::appkit_origin(top_left, size, primary_height);
+    let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(size.0, size.1));
     w.setFrame_display(frame, true);
     true
 }
