@@ -439,6 +439,31 @@ Phase 2b view contract additions:
     label's `div`, the status's `div` around its `text!`). The marker reads the text
     style that element's children inherit. It is not read from rendered glyphs.
 
+## rc.4 permission scenarios
+
+Settings lost the Tauri app's Permissions section in the GPUI port, and capture no
+longer led to onboarding until Automation was granted. Two scenarios cover it, and
+`settings-buttons` also checks the new button's height. Each exits 1 on 364474e (main
+plus these scenarios, before the fix) at the step named; `settings-buttons` there
+fails at "Open permission setup… is as tall as Export". Run them by name.
+
+| Scenario | Requirement | Fails before the fix at |
+|---|---|---|
+| `settings-permissions` | Settings' first section, `Permissions`, has Labels `Automation`, `Read the active app's link.` and a status exactly `Not allowed` (two-missing fixture) or `Allowed` (all-granted), above `App adapters`. `Open permission setup…` is reached with Tab; Enter switches the same window (same `window_id` and process) to onboarding and opens nothing. Tauri `dist/index.html` `set-auto` / `set-open-perms`. | "not allowed: the Permissions section names Automation and its purpose" |
+| `capture-permission-gate` | With a succeeding capture fixture and Automation not granted, the hotkey and the tray's Open on capture both switch the same window to onboarding and store nothing (graph `resource_count` 0). With Automation granted the capture lands and stays on route `capture`. After a check said granted, a not-granted report no longer routes (the session is confirmed). Tauri `dist/panel.js` `refreshPermissions`. | "automation missing: capture open routes to onboarding" |
+
+rc.4 view contract additions:
+
+- **Capture open → onboarding.** Until a permission check (or a release build's
+  start-up probe) has said Automation is granted, opening capture first reads the
+  same permission report onboarding reads. A report saying Automation is not granted
+  switches the panel to onboarding and skips the capture. Granted confirms the
+  session; no report (a failed check) lets the capture run.
+- **Settings › Permissions.** A status Label `Allowed`, `Not allowed`, `Not checked
+  yet` (the check could not decide) or, while the check runs, `Checking…`, re-read
+  off the main thread each time Settings is shown, and a Button containing `Open
+  permission setup` that switches the panel to onboarding.
+
 ## Phase 1 view-state contract
 
 What the Phase 1 views must expose for these scenarios to pass. It is derived from
@@ -474,7 +499,7 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
 | browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
-| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
+| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button`, `permissions_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
 | capture | `layout` | object | as settings: `viewport`, and with backlinks `backlinks_box` and `last_backlink` | capture-fit |
 | every view | `theme_samples` | object | `{surface, text, primary, accent}`, each `{x, y, w, h}` in window points from the panel's top-left, or `null` while not drawn: a region of the opaque card the view paints in `color.windowBackground`, a region around a run of primary text (`color.label`) drawn on that card, a region inside the primary (default) button's fill clear of its label and corners, and (Settings only) a region around a checked, enabled Switch, whose track is the system accent; each at least 24 × 24 pt (the probe fails a smaller one) | theming, accent |
 
