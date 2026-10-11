@@ -59,7 +59,9 @@ const SURFACE_INSET: f32 = 2.0;
 /// A text run or a switch is its bounds, grown (about its centre) to at least this.
 const GROWN_MIN: f32 = 28.0;
 
-/// `color.windowBackground`: the opaque card every view paints itself on.
+/// `color.windowBackground`: the opaque card every view paints itself on. The theme
+/// carries it at alpha 0 (so gpui-component's window root does not cover the glass);
+/// the card is its RGB at full opacity.
 pub fn surface(cx: &App) -> Hsla {
     opaque(cx.theme().background)
 }
@@ -327,7 +329,8 @@ mod tests {
         ] {
             let c = &config.colors;
             let background = hsla(c.background.as_deref().expect("background"));
-            assert_eq!(background.a, 1.0, "{name}: the card is opaque");
+            assert_eq!(background.a, 0.0, "{name}: the window root stays clear");
+            let background = super::opaque(background);
             assert!(
                 close(rgb8(background), surface),
                 "{name} surface {:?}",

@@ -187,6 +187,12 @@ fn hex(value: &str) -> SharedString {
     SharedString::from(to_hex_color(value))
 }
 
+/// A `#rrggbb` token at alpha 0, as `#RRGGBB00`.
+fn clear(value: &str) -> SharedString {
+    let hex = to_hex_color(value);
+    SharedString::from(format!("{}00", &hex[..7]))
+}
+
 fn rgb_hex(c: Rgb) -> SharedString {
     SharedString::from(format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2))
 }
@@ -217,8 +223,11 @@ pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode, a: &Rol
     // built with struct-literal syntax from outside gpui-component: set the public
     // fields on the default.
     let mut colors = ThemeConfigColors::default();
-    // Surfaces and text.
-    colors.background = v(&c.window_background);
+    // Surfaces and text. `background` is windowBackgroundColor at alpha 0:
+    // gpui-component's Root paints the whole window in it, which would cover the
+    // panel's glass; each view paints the card itself, opaque
+    // (`theming::surface`), from the same RGB.
+    colors.background = Some(clear(side(&c.window_background, mode)));
     colors.popover = v(&c.window_background);
     colors.foreground = v(&c.label);
     colors.popover_foreground = v(&c.label);
@@ -260,6 +269,9 @@ pub(super) fn build_theme_config(tokens: &DesignTokens, mode: ThemeMode, a: &Rol
     colors.danger = v(&c.danger);
     colors.danger_foreground = white.clone();
     colors.button_danger = v(&c.danger_fill);
+    // Explicit, or gpui-component derives a pale tint that white text fails on.
+    colors.button_danger_hover = v(&c.danger_fill);
+    colors.button_danger_active = v(&c.danger_fill);
     colors.button_danger_foreground = white;
     colors.success = v(&c.success);
     colors.warning = v(&c.warning);

@@ -9,7 +9,7 @@
 //!
 //! | Token / role | gpui-component field | Note |
 //! |---|---|---|
-//! | `color.windowBackground` | `background`, `popover` | the opaque card (#ffffff / #1e1e1e) |
+//! | `color.windowBackground` | `background` (alpha 0), `popover` | the card's RGB; views paint it opaque (`theming::surface`), the window root stays clear so the glass shows |
 //! | `color.label` | `foreground`, `popover_foreground`, `secondary_foreground`, `accent_foreground` | |
 //! | `color.secondaryLabel` | `muted_foreground` | light raised to 0.54 for AA |
 //! | `color.underPageBackground` | `muted` | |
@@ -125,9 +125,10 @@ mod tests {
         let light = light_theme_config(&derive(&blue, ThemeMode::Light));
         let dark = dark_theme_config(&derive(&blue, ThemeMode::Dark));
 
-        // The opaque card: windowBackgroundColor.
-        assert_eq!(light.colors.background.as_deref(), Some("#FFFFFF"));
-        assert_eq!(dark.colors.background.as_deref(), Some("#1E1E1E"));
+        // windowBackgroundColor at alpha 0: the window root lets the glass show and
+        // each view paints the card opaque from the same RGB.
+        assert_eq!(light.colors.background.as_deref(), Some("#FFFFFF00"));
+        assert_eq!(dark.colors.background.as_deref(), Some("#1E1E1E00"));
         // labelColor, and secondaryLabelColor raised for AA in light mode.
         assert_eq!(
             light.colors.foreground.as_deref(),
