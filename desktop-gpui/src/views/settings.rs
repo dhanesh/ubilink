@@ -1305,7 +1305,6 @@ mod tests {
     fn automation_status_maps_the_permission_report() {
         let report = |automation: &str| -> Result<Report, String> {
             Ok(Report {
-                accessibility: false,
                 automation: automation.into(),
             })
         };
@@ -1323,12 +1322,6 @@ mod tests {
             automation_status_text(Some(&Err("no permission fixture".into()))),
             "Not checked yet"
         );
-        // Accessibility does not count toward Automation's status.
-        let ax_only = Ok(Report {
-            accessibility: true,
-            automation: "denied".into(),
-        });
-        assert_eq!(automation_status_text(Some(&ax_only)), "Not allowed");
     }
 
     /// Export as the Tauri app did: into Downloads when there is one, else home.

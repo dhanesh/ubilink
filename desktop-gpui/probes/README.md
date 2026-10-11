@@ -539,9 +539,11 @@ a `text!` element (role `Label`).
   `on_action::<MoveRight/MoveLeft>` (they reach it at the filter's text edges), and
   ⌘L with a parent `on_key_down`. The per-key table and the proven reference are in
   A11Y-NOTES.md ("Navigating a list while an Input keeps focus", a11y-spike.json).
-- **Onboarding (R9).** One `ListItem` per missing permission (`Accessibility`,
-  `Automation`), each subtree naming the permission and a status Label `Not granted`
-  or exactly `Granted`; rows stay listed when granted. Each row has a Button whose
+- **Onboarding (R9).** One `ListItem` per permission capture needs: since rc.4
+  (review S1) only `Automation`; no Accessibility step, since nothing ubilink does
+  needs it, and "All set" depends on Automation alone. Each subtree names the
+  permission and a status Label `Not granted` or exactly `Granted`; rows stay listed
+  when granted. Each row has a Button whose
   text contains the permission's name and opens `settings_pane_url(<permission>)`
   through the opener; Tab reaches it and Enter activates it. `R` re-reads the
   permission state in the same window.

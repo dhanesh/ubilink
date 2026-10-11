@@ -51,16 +51,11 @@
       }
     },
     {
-      "name": "automation missing: onboarding steps listed (Automation, Accessibility)",
+      "name": "automation missing: onboarding lists the Automation step, not granted",
       "see": [
         {
           "role": "ListItem",
           "text": "Automation",
-          "deep": true
-        },
-        {
-          "role": "ListItem",
-          "text": "Accessibility",
           "deep": true
         },
         {

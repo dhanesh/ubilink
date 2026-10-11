@@ -7,8 +7,9 @@
 
 ## What it is
 
-Onboarding shows one step per missing permission (Accessibility, Automation), each
-naming the permission and whether it is granted. Activating a step's button opens
+Onboarding shows one step per permission capture needs: since rc.4 only Automation
+(no Accessibility step; no built-in adapter needs it), naming the permission and
+whether it is granted. Activating a step's button opens
 that exact permission's System Settings pane; Re-check re-reads permission state in
 the same window, without reopening it. Phase 1 R9; spec S4 ("least-privilege OS
 automation with transparent rationale" — the view explains *why* each permission is
@@ -34,15 +35,16 @@ echo "exit $?"
 ```
 
 Expected: exit 0. `$OUT/onboarding/result.json`'s `verdict` is `"PASS"`;
-`transcript.txt` shows PASS for "two steps", "one per missing permission", "both
-not granted", "the opened sink reports the Automation pane URL exactly", "Automation
-now shows granted", "both steps granted, none left 'Not granted'", "same window id"
-and "same process".
+`transcript.txt` shows PASS for "one step", "the Automation step, and no
+Accessibility step", "no Accessibility step", "not granted", "the opened sink
+reports the Automation pane URL exactly", "Automation now shows granted", "the step
+is granted, none left 'Not granted'", "same window id" and "same process".
 
 ## Proof
 
-- **Two steps, named and unmet.** "two steps" and "both not granted" require
-  exactly two `ListItem` rows, each reading `Not granted`.
+- **One step, named and unmet.** "one step" and "not granted" require exactly one
+  `ListItem` row, reading `Not granted`; "no Accessibility step" requires no node
+  to mention Accessibility.
 - **The button opens the right pane.** "Tab to the Automation step's button"
   (`key_until`, so the proof never hard-codes a keyboard layout) then "the opened
   sink reports the Automation pane URL exactly" requires the sink's newest entry to
