@@ -326,4 +326,4 @@ colour-change notification takes. Release builds never read it.
 | file | accent |
 |---|---|
 | `accent-blue.json` | `#007aff`, the macOS default (blue / Multicolor) |
-| `accent-orange.json` | `#f7821b`, macOS's orange accent: white text fails AA on it |
+| `accent-orange.json` | `#f7821b`, an orange accent: white text fails AA on it |

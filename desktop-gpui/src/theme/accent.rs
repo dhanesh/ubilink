@@ -384,10 +384,11 @@ mod tests {
         );
     }
 
-    /// Every derived pair meets AA in both modes, for every macOS accent.
+    /// Every derived pair meets AA in both modes, for eight representative accents.
     #[test]
     fn every_accent_meets_aa() {
-        // Blue, purple, pink, red, orange, yellow, green, graphite (macOS 27).
+        // Blue, purple, pink, red, orange, yellow, green, graphite: representative
+        // values (this host confirms only blue).
         for accent in [
             "#007aff", "#953d96", "#f74f9e", "#e0383e", "#f7821b", "#ffc600", "#62ba46", "#8c8c8c",
         ] {

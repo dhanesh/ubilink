@@ -941,10 +941,25 @@ The Graphical guide stays in the repo (`GUI.md`, `gui/`, `.agents/skills/`) for 
 method (inventory, map by semantic role, convert shared components, audit), not its
 values. `CLAUDE.md` says so.
 
-**Who decided.** The font, the radii and sizes, and the colour source were scored with
-Jev (TypeSafe System One). The material and the accent went through a reasoning pass:
-glass with an opaque card, so contrast and the colour probes stay deterministic; the
-accent first as fixed #007aff, then, on the user's update, the live system accent.
+**Who decided.**
+
+- **Jev (TypeSafe System One), 2026-10-11 12:26, per `jev log`:**
+  - system font: yes 0.96
+  - native control sizes: yes 0.90
+  - concentric radii: yes 0.72
+  - material, scores out of 2: opaque 1.57 (confidence 0.37), glass 0.87 (0.70),
+    vibrancy 0.68 (0.43)
+  - accent, scores out of 2: fixed 1.53 (0.28), live 0.69 (0.35)
+- **Reasoning pass.** The material and accent scores were low-confidence, so they
+  went to a reasoning pass. It chose glass around an opaque card, which keeps AA and
+  the colour probes deterministic. It chose a fixed #007aff accent. The user then
+  asked for the live system accent.
+- **Executor judgement calls, for review:**
+  - Reset… is a plain push button.
+  - The primary button has 32 pt side padding.
+  - The glass frame is 4 pt.
+  - The darken limit for white button text is 0.12 lightness.
+  - Separators are treated as decorative (see below).
 
 ### What
 
@@ -961,6 +976,9 @@ accent first as fixed #007aff, then, on the user's update, the live system accen
   `theme/convert.rs` maps the tokens to gpui-component roles (the table is in
   `theme/mod.rs`).
 - **Material.**
+  - The theme carries windowBackgroundColor at alpha 0. gpui-component's window root
+    paints the whole window in the theme background, and an opaque one would cover
+    the glass.
   - On macOS 26+ an NSGlassEffectView (radius 18) is added as a sibling below GPUI's
     view, where GPUI's NSVisualEffectView was, and that view is hidden.
   - On older systems the vibrancy view stays.
@@ -976,8 +994,9 @@ accent first as fixed #007aff, then, on the user's update, the live system accen
     re-themes open windows in place;
   - "Multicolor" reports #007aff, as the default does.
 
-  The derivation (`accent::derive`) is pure and unit-tested for all eight macOS
-  accents in both modes:
+  The derivation (`accent::derive`) is pure and unit-tested in both modes for eight
+  representative accents (blue, purple, pink, red, orange, yellow, green, graphite).
+  This host confirms only the blue value.
 
   | Role | Rule |
   |---|---|
@@ -1017,7 +1036,7 @@ accent first as fixed #007aff, then, on the user's update, the live system accen
 | primary button fill (blue accent) | controlAccentColor #007aff (white 4.02:1) | #0072ef (4.51:1) | AA; the switch keeps #007aff (4.02:1 ≥ 3:1) |
 | focus ring | keyboardFocusIndicatorColor at 0.50 (2.16 / 2.60:1) | alpha raised to 3:1 (opaque accent for a fixture) | AA 3:1 non-text |
 | text field edge, switch-off track | separator-like, about 0.10 (1.26 / 1.36:1) | black 0.42 / white 0.34 (3.03 / 3.13:1) | AA 3:1 non-text; heavier than native |
-| separators | separatorColor 0.10 | unchanged (1.26 / 1.36:1) | decorative hairlines, not control boundaries (WCAG 1.4.11 does not apply); views draw none of their own |
+| separators | separatorColor 0.10 | unchanged (1.26 / 1.36:1) | **open decision for the user.** They are kept as decorative hairlines that are not control boundaries, so WCAG 1.4.11 would not apply. Views draw none of their own; gpui-component uses `border` for popup edges. Raising them to 3:1 would contradict "no heavy borders" |
 | primary button padding | about 12 pt | 32 pt a side | the theming probe needs 24 pt of solid fill beside the label |
 | switch size | NSSwitch small | gpui-component small (28×16) | the nearest size gpui-component offers |
 | letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
