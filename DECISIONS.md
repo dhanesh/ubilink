@@ -1015,8 +1015,15 @@ values. `CLAUDE.md` says so.
   | primary button | accent fill |
   | push button | `secondary`: a light control fill, no stroke |
   | destructive button | filled red, white text |
-  | text field | 24 pt, 13 pt text |
+  | text field | 24 pt, 13 pt text, 2 pt vertical padding (`TEXT_FIELD_PAD_Y`), text centred |
   | switch | gpui-component `small`, 28×16, the closest to AppKit's small switch |
+
+  Text field fix (rc.5): through rc.4 the field never reached 24 pt. `Input::h` sets
+  a multi-line input's height only, so `.h(CONTROL_H)` did nothing and the field stayed
+  a 26 pt medium Input with 8 pt vertical padding: an 8 pt box clipping a 16.25 pt line,
+  which cut off the text's top and descenders. `text_field` now sets the height through
+  `Styled::h` and the padding to 2 pt, leaving an 18 pt content box (24 − 2 × (1 + 2)).
+  No token changed; `browser-filter-text` and a unit test in `theming.rs` check it.
 
   List rows are 24 pt with an inset, rounded selection drawn by the view.
   gpui-component caps `list_active` at 20% alpha, so it is made transparent.

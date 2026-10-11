@@ -48,7 +48,7 @@
 //!   usual; only the dialog surface itself, and anything else using
 //!   `.focus_trap(..)`, loses its node. See `probes/A11Y-NOTES.md`.
 
-use gpui_kit::component::input::{Input, InputState, MoveDown, MoveEnd, MoveHome, MoveUp};
+use gpui_kit::component::input::{InputState, MoveDown, MoveEnd, MoveHome, MoveUp};
 use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt};
@@ -240,7 +240,7 @@ impl Render for A11ySpikeView {
                     .child(text!(Route::A11ySpike.title())),
             )
             .child(div().h(px(96.)).child(List::new(&list)))
-            .child(Input::new(&input))
+            .child(super::theming::text_field(&input))
             .child(
                 Switch::new("spike-switch")
                     .label("Spike switch")
