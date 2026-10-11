@@ -137,6 +137,11 @@ impl DialogGate {
         true
     }
 
+    /// A dialog is up right now.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// The dialog is gone (answered, cancelled, or its panel went away): what to undo,
     /// only for the first call; `None` after that.
     pub fn end(&mut self, panel_stays: bool) -> Option<DialogEnd> {
@@ -580,13 +585,15 @@ pub fn begin_file_dialog(cx: &mut App) -> bool {
     if !cx.update_global::<Shell, _>(|shell, _| shell.dialog.begin(was_active)) {
         return false;
     }
-    // Without the panel's window number the dialog still opens; it just cannot lower
-    // the panel (activating the app still brings the dialog forward).
-    if let Some(number) = cx
+    // Lower the panel so the dialog is not under it. Without the recorded window
+    // number, fall back to the newest visible panel (file dialogs are skipped); if
+    // there is none either, the dialog still opens, but may sit under the panel.
+    let number = cx
         .try_global::<Shell>()
         .and_then(|s| s.panel.as_ref())
         .and_then(|p| p.number)
-    {
+        .or_else(|| native::newest_panel_number(mtm));
+    if let Some(number) = number {
         native::lower_panel_for_dialog(mtm, number);
     }
     cx.activate(true);
@@ -606,10 +613,10 @@ pub fn end_file_dialog(panel_stays: bool, cx: &mut App) {
     let Some(end) = cx.update_global::<Shell, _>(|shell, _| shell.dialog.end(panel_stays)) else {
         return;
     };
-    let number = cx
+    let target = cx
         .try_global::<Shell>()
         .and_then(|s| s.panel.as_ref())
-        .and_then(|p| p.number);
+        .and_then(|p| p.number.map(|n| (p.handle, n)));
     cx.spawn(async move |cx| {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
@@ -626,11 +633,36 @@ pub fn end_file_dialog(panel_stays: bool, cx: &mut App) {
                 cx.background_executor().timer(DEACTIVATE_SETTLE).await;
             }
         }
-        if let (true, Some(number)) = (end.refocus_panel, number) {
+        let Some((handle, number)) = target.filter(|_| end.refocus_panel) else {
+            return;
+        };
+        // Re-check after the wait: a new Import may have opened a dialog (the panel
+        // must stay under it), or the panel may have been replaced or hidden.
+        let refocus = cx.update(|cx| {
+            cx.try_global::<Shell>().is_some_and(|s| {
+                should_refocus(
+                    s.dialog.is_open(),
+                    s.panel.as_ref().map(|p| p.handle),
+                    handle,
+                )
+            })
+        });
+        if refocus {
             native::restore_panel_after_dialog(mtm, number);
         }
     })
     .detach();
+}
+
+/// After a file dialog closed and the deactivation settled: give the panel key status
+/// back only if no new dialog has opened since and the panel is still the one that
+/// opened the dialog (same window handle).
+pub fn should_refocus<H: PartialEq>(
+    dialog_open_now: bool,
+    current: Option<H>,
+    ended_on: H,
+) -> bool {
+    !dialog_open_now && current.is_some_and(|h| h == ended_on)
 }
 
 fn mark_hidden(cx: &mut App) {
@@ -645,7 +677,10 @@ fn mark_hidden(cx: &mut App) {
 mod tests {
     // Not `super::*`: that glob carries gpui-kit's re-exported `test` macro, which
     // would shadow Rust's `#[test]`.
-    use super::{command_for, startup_state, Command, DialogEnd, DialogGate, Route, ShellEvent};
+    use super::{
+        command_for, should_refocus, startup_state, Command, DialogEnd, DialogGate, Route,
+        ShellEvent,
+    };
 
     /// One file dialog at a time, and its end restores the panel exactly once (a
     /// route switch and the dialog's own answer may both report the end).
@@ -693,8 +728,44 @@ mod tests {
             "hidden while the dialog was up: deactivate, nothing to refocus"
         );
         // Ubilink was already active before Import: leave it so.
-        assert!(!end(true, true).deactivate);
-        assert!(!end(true, false).deactivate);
+        assert_eq!(
+            end(true, true),
+            DialogEnd {
+                deactivate: false,
+                refocus_panel: true
+            }
+        );
+        assert_eq!(
+            end(true, false),
+            DialogEnd {
+                deactivate: false,
+                refocus_panel: false
+            }
+        );
+    }
+
+    /// The delayed refocus re-checks: Import pressed again within the settle window
+    /// opens a new dialog, and the old refocus must not raise the panel over it; a
+    /// replaced or hidden panel is not refocused either.
+    #[test]
+    fn a_stale_refocus_never_raises_the_panel_over_a_new_dialog() {
+        let mut g = DialogGate::default();
+        assert!(g.begin(false));
+        let ended = g.end(true).unwrap();
+        assert!(ended.refocus_panel);
+        // Within the settle window, Import again.
+        assert!(g.begin(false));
+        assert!(
+            !should_refocus(g.is_open(), Some(1u8), 1),
+            "a new dialog is up"
+        );
+        // No new dialog: refocus only the same panel.
+        assert!(should_refocus(false, Some(1u8), 1));
+        assert!(
+            !should_refocus(false, Some(2u8), 1),
+            "replaced by another panel"
+        );
+        assert!(!should_refocus(false, None::<u8>, 1), "hidden");
     }
 
     #[test]
