@@ -1,0 +1,129 @@
+# Homebrew tap update: when a maintainer publishes a release, point the `ubilink` cask
+# in dhanesh/homebrew-tap at its notarized DMG (runbook: docs/RUNBOOK-release.md).
+# - Runs on `release: published`, so the human gate stays the Publish click on the
+#   draft that release.yml creates. Nothing here builds or signs.
+# - The DMG is downloaded and hashed here, and must match the release's SHA256SUMS.
+# - A prerelease updates the cask only while the cask is itself on a prerelease, so
+#   an rc never replaces a stable version for brew users.
+# - The only credential is a write deploy key for dhanesh/homebrew-tap, held in the
+#   `homebrew-tap` environment (deployments limited to v* tags). It can't touch this
+#   repo. Every `uses:` is pinned to a commit SHA (same pins as ci.yml).
+# - Other repos publish to the same tap; the push rebases and retries when it races
+#   one of them, and only ever edits Casks/ubilink.rb.
+name: homebrew-tap
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    environment: homebrew-tap
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      PRERELEASE: ${{ github.event.release.prerelease }}
+    steps:
+      - name: Download the DMG and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p rel
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir rel \
+            --pattern '*-universal.dmg' --pattern SHA256SUMS
+          ls -l rel
+
+      - name: Hash the DMG and check it against SHA256SUMS
+        id: dmg
+        run: |
+          set -euo pipefail
+          cd rel
+          shopt -s nullglob
+          dmgs=(*-universal.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one notarized *-universal.dmg, found: ${dmgs[*]:-none}"
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          sha=$(sha256sum -- "$dmg" | cut -d' ' -f1)
+          listed=$(awk -v f="$dmg" '$2 == f || $2 == "*" f { print $1 }' SHA256SUMS)
+          if [ "$sha" != "$listed" ]; then
+            echo "::error::$dmg hashes to $sha but SHA256SUMS lists '${listed}'"
+            exit 1
+          fi
+          echo "name=$dmg" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: dhanesh/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Update Casks/ubilink.rb
+        id: cask
+        env:
+          VERSION: ${{ steps.dmg.outputs.version }}
+          SHA256: ${{ steps.dmg.outputs.sha256 }}
+          DMG: ${{ steps.dmg.outputs.name }}
+        run: |
+          set -euo pipefail
+          cask=tap/Casks/ubilink.rb
+          current=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$cask")
+          if [ "$PRERELEASE" = true ] && [[ "$current" != *-* ]]; then
+            echo "Cask is on stable $current; not moving it to prerelease $VERSION."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The cask derives the DMG name from the version (dropping any -rc.N); make
+          # sure it still lands on the file this release actually ships.
+          base="${VERSION%%-*}"
+          if [ "$DMG" != "Ubilink-$base-universal.dmg" ]; then
+            echo "::error::release ships $DMG, but the cask's url resolves to Ubilink-$base-universal.dmg"
+            exit 1
+          fi
+          sed -i -E \
+            -e "s/^  version \".*\"$/  version \"$VERSION\"/" \
+            -e "s/^  sha256 \".*\"$/  sha256 \"$SHA256\"/" "$cask"
+          git -C tap diff
+          if git -C tap diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.cask.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.dmg.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "ubilink $VERSION" \
+            -m "From https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          # Other repos' release workflows push their own formulae to the same tap, so
+          # a push can lose the race: rebase onto theirs (this commit touches only
+          # Casks/ubilink.rb, so it replays cleanly) and try again.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt); rebasing onto the tap's main"
+            sleep $((attempt * 5))
+            git pull --rebase origin main
+          done
+          echo "::error::could not push to the tap after 5 attempts"
+          exit 1
