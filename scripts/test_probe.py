@@ -1941,6 +1941,15 @@ class LoginItemFixtures(unittest.TestCase):
         self.assertIn('(Fixture::LoginItem, "login_item")', src)
 
 
+class AccentFixtures(unittest.TestCase):
+    def test_validator(self):
+        self.assertEqual(probe._validate_accent({"accent": "#f7821b"}, "#f7821b"), [])
+        for bad in ({"accent": "#F7821B"}, {"accent": "#f7821b80"}, {"accent": "orange"},
+                    {"accent": "#007aff"}, {"accent": "#f7821b", "selection": "#000000"}, {}):
+            with self.subTest(bad=bad):
+                self.assertTrue(probe._validate_accent(bad, "#f7821b"))
+
+
 class FixRound1(unittest.TestCase):
     def test_ellipsis_floor_is_max_12_or_half(self):
         uri = "https://fixture-00231.example.test/resource"   # 43 chars: need 22

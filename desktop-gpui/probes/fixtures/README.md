@@ -310,3 +310,20 @@ uses instead of `SMAppService.mainApp`, so no probe ever registers a real login 
 | `login-item-enabled.json` | `enabled` |
 | `login-item-requires-approval.json` | `requires_approval`, with an explanation naming System Settings > General > Login Items |
 | `login-item-not-found.json` | `not_found`, with an explanation saying to move the app to Applications |
+
+## `accent-*.json` (D26)
+
+`load_fixture {kind: "accent", path}`: the accent colour an automation build themes
+with instead of `NSColor.controlAccentColor` (`desktop-gpui/src/theme/accent.rs`), so
+a run does not depend on the host's System Settings > Appearance > Accent colour.
+Loading one re-themes the open panel in place, through the same path the system's
+colour-change notification takes. Release builds never read it.
+
+```json
+{ "accent": "#rrggbb" }
+```
+
+| file | accent |
+|---|---|
+| `accent-blue.json` | `#007aff`, the macOS default (blue / Multicolor) |
+| `accent-orange.json` | `#f7821b`, macOS's orange accent: white text fails AA on it |

@@ -965,6 +965,20 @@ def _validate_login_item(doc, on_register: str) -> list:
     return issues
 
 
+def _validate_accent(doc, accent: str) -> list:
+    # D26: the automation accent seam (desktop-gpui/src/theme/accent.rs) stands in for
+    # NSColor.controlAccentColor. One key, an opaque sRGB #rrggbb.
+    issues = []
+    if set(doc) != {"accent"}:
+        issues.append(f"must have exactly one key, accent (got {sorted(doc)})")
+    value = doc.get("accent")
+    if not (isinstance(value, str) and re.fullmatch(r"#[0-9a-f]{6}", value)):
+        issues.append("accent must be a lowercase #rrggbb string")
+    elif value != accent:
+        issues.append(f"accent must be {accent}")
+    return issues
+
+
 # Fixtures whose top level is a JSON list rather than an object.
 _LIST_FIXTURES = {"adapters.json", "ranking-golden.json"}
 
@@ -985,6 +999,8 @@ _FIXTURE_VALIDATORS = {
     "login-item-enabled.json": lambda d: _validate_login_item(d, "enabled"),
     "login-item-requires-approval.json": lambda d: _validate_login_item(d, "requires_approval"),
     "login-item-not-found.json": lambda d: _validate_login_item(d, "not_found"),
+    "accent-blue.json": lambda d: _validate_accent(d, "#007aff"),
+    "accent-orange.json": lambda d: _validate_accent(d, "#f7821b"),
 }
 
 # Every fixture `--check` walks, in the order desktop-gpui/probes/fixtures/README.md
@@ -1008,6 +1024,8 @@ FIXTURE_FILES = [
     "login-item-enabled.json",
     "login-item-requires-approval.json",
     "login-item-not-found.json",
+    "accent-blue.json",
+    "accent-orange.json",
 ]
 
 

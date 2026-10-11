@@ -1,19 +1,20 @@
 {
-  "description": "R14: each of the 4 views, in light and dark, switches appearance live (same pid and window id) and samples its opaque surface, primary text and accent control within ΔE 3 of the token colours, with screenshots of all 8 states recorded",
-  "requirement": "R14 (GPUI Phase 1)",
+  "description": "R14 + D26: each of the 4 views, in light and dark, switches appearance live (same pid and window id) and samples its opaque card, primary text and primary (default) button within ΔE 3 of the macOS 27 token colours, and Settings also its checked switch (the system accent); screenshots of all 8 states recorded",
+  "requirement": "R14 (GPUI Phase 1), D26 (native macOS 27 look)",
   "notes": [
-    "Expected colours come from design/ubilink-tokens.json via the converter's mapping (theme/mod.rs): surface = color.uiBg, text = color.text1, accent = color.accent. uiBg and text1 are translucent and the panel is blurred, so an 'opaque surface' is uiBg's RGB painted at full opacity (light #fafafc, dark #1c1c1e) and the expected text colour is text1 alpha-composited over that surface (light rgba(0,0,0,.88) -> #1e1e1e, dark rgba(255,255,255,.96) -> #f6f6f6). accent is opaque (#007aff / #0a84ff). The values are written here, not read from design/, so the proof cannot move with the tokens.",
-    "Where each sample is is the view's layout, so each view reports a region per sample in its state (view.theme_samples.surface/text/accent, window points, README contract); the colour is the probe's. The surface and accent are region means; the text is the best-matching pixel in its run (glyph cores carry the colour, antialiased edges do not).",
+    "Expected colours come from design/ubilink-tokens.json via theme/convert.rs and the accent derivation (theme/accent.rs), with the accent pinned by the accent-blue.json fixture (the macOS default, #007aff) so the run does not depend on the host's accent. surface = color.windowBackground (light #ffffff, dark #1e1e1e), the opaque card each view paints inside the glass frame. text = color.label (black/white at 0.85) composited over that card: light #262626, dark #dddddd. primary = the primary (default) button's fill: #007aff darkened just enough for white 13 pt text to reach 4.5:1, #0072ef in both modes (D26 deviation). accent (Settings only) = a checked, enabled Switch: the system accent itself, #007aff. The values are written here, not read from design/, so the proof cannot move with the tokens.",
+    "Where each sample is is the view's layout, so each view reports a region per sample in its state (view.theme_samples.surface/text/primary/accent, window points, README contract); the colour is the probe's. The surface and primary are region means; the text and the switch are the best-matching pixel in their region (glyph cores carry the colour, a 16 pt switch track cannot hold a 24 pt solid square).",
     "Same pid: the probe's own child process is still the one it launched (process: unchanged). Same window id: saved per view before the first switch.",
     "Screenshots go to ~/Library/Caches/ubilink-probe/shots/<run>/theming-<view>-<mode>.png (path printed at the end). Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL.",
     "Each reported region must be at least 24 x 24 pt (STATE_REGION_MIN_PT, ruling R-q), so a view cannot point the probe at a token-coloured swatch painted for it.",
-    "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions."
+    "Fixtures give every view real content to theme: a captured link, the ranking corpus, two missing permissions; and the accent."
   ],
   "setup": {
     "graph": "graph-ranking.json",
     "fixtures": {
       "capture": "capture-ok.json",
-      "permission": "permissions-two-missing.json"
+      "permission": "permissions-two-missing.json",
+      "accent": "accent-blue.json"
     }
   },
   "steps": [
@@ -75,20 +76,20 @@
     {
       "name": "capture/light: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#fafafc",
+      "color": "#ffffff",
       "delta_e": 3
     },
     {
       "name": "capture/light: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#1e1e1e",
+      "color": "#262626",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "capture/light: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#007aff",
+      "name": "capture/light: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -129,20 +130,20 @@
     {
       "name": "capture/dark: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#1c1c1e",
+      "color": "#1e1e1e",
       "delta_e": 3
     },
     {
       "name": "capture/dark: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#f6f6f6",
+      "color": "#dddddd",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "capture/dark: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#0a84ff",
+      "name": "capture/dark: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -207,20 +208,20 @@
     {
       "name": "browser/light: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#fafafc",
+      "color": "#ffffff",
       "delta_e": 3
     },
     {
       "name": "browser/light: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#1e1e1e",
+      "color": "#262626",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "browser/light: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#007aff",
+      "name": "browser/light: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -261,20 +262,20 @@
     {
       "name": "browser/dark: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#1c1c1e",
+      "color": "#1e1e1e",
       "delta_e": 3
     },
     {
       "name": "browser/dark: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#f6f6f6",
+      "color": "#dddddd",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "browser/dark: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#0a84ff",
+      "name": "browser/dark: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -339,20 +340,20 @@
     {
       "name": "onboarding/light: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#fafafc",
+      "color": "#ffffff",
       "delta_e": 3
     },
     {
       "name": "onboarding/light: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#1e1e1e",
+      "color": "#262626",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "onboarding/light: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#007aff",
+      "name": "onboarding/light: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -393,20 +394,20 @@
     {
       "name": "onboarding/dark: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#1c1c1e",
+      "color": "#1e1e1e",
       "delta_e": 3
     },
     {
       "name": "onboarding/dark: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#f6f6f6",
+      "color": "#dddddd",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "onboarding/dark: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#0a84ff",
+      "name": "onboarding/dark: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
     },
     {
@@ -471,21 +472,28 @@
     {
       "name": "settings/light: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#fafafc",
+      "color": "#ffffff",
       "delta_e": 3
     },
     {
       "name": "settings/light: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#1e1e1e",
+      "color": "#262626",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "settings/light: accent control",
+      "name": "settings/light: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "settings/light: checked switch (system accent)",
       "pixel": "view.theme_samples.accent",
       "color": "#007aff",
-      "delta_e": 3
+      "delta_e": 3,
+      "match": "best"
     },
     {
       "name": "settings/light: screenshot recorded",
@@ -525,21 +533,28 @@
     {
       "name": "settings/dark: opaque surface",
       "pixel": "view.theme_samples.surface",
-      "color": "#1c1c1e",
+      "color": "#1e1e1e",
       "delta_e": 3
     },
     {
       "name": "settings/dark: primary text run",
       "pixel": "view.theme_samples.text",
-      "color": "#f6f6f6",
+      "color": "#dddddd",
       "delta_e": 3,
       "match": "best"
     },
     {
-      "name": "settings/dark: accent control",
-      "pixel": "view.theme_samples.accent",
-      "color": "#0a84ff",
+      "name": "settings/dark: primary button fill",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
       "delta_e": 3
+    },
+    {
+      "name": "settings/dark: checked switch (system accent)",
+      "pixel": "view.theme_samples.accent",
+      "color": "#007aff",
+      "delta_e": 3,
+      "match": "best"
     },
     {
       "name": "settings/dark: screenshot recorded",
