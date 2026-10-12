@@ -4,7 +4,7 @@
   "notes": [
     "view.layout.adapters_scroll is the grid box's ScrollHandle at paint (views/layout.rs Layout::scroll): max_offset_y (how far it scrolls), visible_h and reachable_h = visible_h + max_offset_y. adapters_content is the grid itself (what the box scrolls through), adapters_box the box, hint the footnote, last_adapter the last switch.",
     "No probe verb scrolls, so reachability is the scroll range, not a scroll: GPUI scrolls a container up to max_offset, and reachable_h >= the grid's height means that range reaches the last row.",
-    "Fails on 2734997 (the form without the flex_1/min_h_0 chain): the box takes the grid's full height, so it does not scroll and runs past the window."
+    "Exits 1 on 6847c18 (before the fix) at \"drawn and measured\": that build reports no adapters_scroll or adapters_content. Its grid box had no flex_1/min_h_0 chain, so it took the grid's full height and ran past the window instead of scrolling."
   ],
   "setup": {
     "files": {
