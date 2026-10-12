@@ -26,7 +26,7 @@
     "controlHover": { "light": "rgba(0,0,0,0.10)", "dark": "rgba(255,255,255,0.20)" },
     "controlActive": { "light": "rgba(0,0,0,0.14)", "dark": "rgba(255,255,255,0.26)" },
     "rowHover": { "light": "rgba(0,0,0,0.05)", "dark": "rgba(255,255,255,0.06)" },
-    "rowSelected": { "light": "rgba(0,0,0,0.08)", "dark": "rgba(255,255,255,0.12)", "aa": "the link browser's selected-row pill (Things-style, not the accent): the darkest grey that keeps secondaryLabel at 4.5:1 on it (4.55 / 4.74:1; controlActive would be 4.37 / 3.41:1). The fill is 1.20 / 1.44:1 on the card, so the selected row also draws a 1 pt controlBorder edge (3:1)" },
+    "rowSelected": { "light": "rgba(0,0,0,0.08)", "dark": "rgba(255,255,255,0.12)", "aa": "the link browser's selected-row pill (Things-style, not the accent): the darkest grey that keeps secondaryLabel at 4.5:1 on it (4.54 / 4.71:1; controlActive would be 4.37 / 3.41:1). The fill is 1.19 / 1.45:1 on the card, so the selected row also draws a 1 pt controlBorder edge (3:1)" },
     "switchOff": { "light": "rgba(0,0,0,0.42)", "dark": "rgba(255,255,255,0.34)", "aa": "the off track on the card at 3:1" },
     "switchThumb": { "light": "#ffffff", "dark": "#ffffff", "aa": "white unless it is under 3:1 on the checked track; theme/accent.rs then uses black" },
     "danger": { "light": "#ee0005", "dark": "#ff4245", "aa": "light was systemRed #ff383c: 3.57:1 on #ffffff" },
