@@ -1,0 +1,695 @@
+{
+  "description": "D26 amendment (Things-style capture view, prototype, after Things' Quick Entry): the title with a leading glyph and the URL under it, backlinks as two-line rows whose focused row is a grey pill (not the accent), and a footer on the grouped surface with the context bottom left and Cancel then Copy link (the accent) as capsules bottom right; without and with backlinks, light and dark; screenshots recorded",
+  "requirement": "D26",
+  "notes": [
+    "view.layout (views/layout.rs, automation builds), window points, each {x, y, w, h, right, bottom}: footer = the footer bar under its hairline, cancel_button / copy_button = the two buttons, footer_fill = a 24 pt square at the right end of the footer's context (empty grouped surface), selected_fill = a 24 pt square inside the focused backlink row's pill, 8 pt in from its top and right edges; backlinks_box and last_backlink as in capture-fit.",
+    "Expected colours are written here, not read from design/: the footer is color.underPageBackground (#f6f6f6 / #282828); the focused row is rowSelected over the card (#ebebeb / #393939), far from rc.5's accent fill; Copy link is the primary fill #0072ef (blue fixture); the body is the card.",
+    "Exits 1 on 5ce08a9 (rc.5) at \"the footer: context, Cancel, Copy link\" (no Cancel button).",
+    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it."
+  ],
+  "setup": {
+    "graph": "graph-backlinks.json",
+    "fixtures": {
+      "capture": "capture-ok.json",
+      "permission": "permissions-all-granted.json",
+      "accent": "accent-blue.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "capture (no backlinks)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "captured: title and URL",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Example Domain"
+        },
+        {
+          "role": "Label",
+          "text": "https://example.com/"
+        }
+      ],
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the footer: context, Cancel, Copy link",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Capture",
+          "exact": true
+        },
+        {
+          "role": "Button",
+          "text": "Cancel"
+        },
+        {
+          "role": "Button",
+          "text": "Copy link"
+        }
+      ],
+      "route": "capture"
+    },
+    {
+      "name": "no backlink rows",
+      "see": {
+        "role": "ListItem"
+      },
+      "absent": true,
+      "route": "capture",
+      "timeout_ms": 0
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "plain/light: Copy link is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: Copy link is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: Copy link is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: Cancel is left of Copy link",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.right": {
+          "le": {
+            "path": "view.layout.copy_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: Cancel is inside the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: the title is above the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.y": {
+          "lt": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/light: Copy link is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "plain/light: the footer is the grouped surface (underPage)",
+      "pixel": "view.layout.footer_fill",
+      "color": "#f6f6f6",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/light: Copy link is the accent",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/light: the body is the card",
+      "pixel": "view.theme_samples.surface",
+      "color": "#ffffff",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/light: screenshot",
+      "screenshot": "plain-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "plain/dark: Copy link is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: Copy link is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: Copy link is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: Cancel is left of Copy link",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.right": {
+          "le": {
+            "path": "view.layout.copy_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: Cancel is inside the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: the title is above the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.y": {
+          "lt": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "plain/dark: Copy link is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "plain/dark: the footer is the grouped surface (underPage)",
+      "pixel": "view.layout.footer_fill",
+      "color": "#282828",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/dark: Copy link is the accent",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/dark: the body is the card",
+      "pixel": "view.theme_samples.surface",
+      "color": "#1e1e1e",
+      "delta_e": 3
+    },
+    {
+      "name": "plain/dark: screenshot",
+      "screenshot": "plain-dark"
+    },
+    {
+      "name": "close the panel",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false
+      }
+    },
+    {
+      "name": "the subject, with 3 backlinks",
+      "call": "load_fixture",
+      "args": {
+        "kind": "capture",
+        "path": "{fixtures}/capture-subject.json"
+      }
+    },
+    {
+      "name": "capture again",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "3 backlinks, two-line rows",
+      "see": {
+        "sequence": {
+          "role": "ListItem",
+          "texts": [
+            "Gamma Doc",
+            "Beta Post",
+            "Alpha Paper"
+          ],
+          "mode": "exact",
+          "deep": true
+        }
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "Tab focuses the first backlink row",
+      "key_until": {
+        "role": "ListItem",
+        "text": "Gamma Doc",
+        "deep": true,
+        "state": {
+          "focused": true
+        }
+      },
+      "max_presses": 8,
+      "route": "capture"
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "light"
+      }
+    },
+    {
+      "name": "backlinks/light: Copy link is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: Copy link is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: Copy link is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: Cancel is left of Copy link",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.right": {
+          "le": {
+            "path": "view.layout.copy_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: Cancel is inside the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: the title is above the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.y": {
+          "lt": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: Copy link is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: the rows end above the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.backlinks_box.bottom": {
+          "le": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: the last row is fully visible",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.last_backlink.bottom": {
+          "le": {
+            "path": "view.layout.backlinks_box.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/light: the focused row is the grey pill, not the accent",
+      "pixel": "view.layout.selected_fill",
+      "color": "#ebebeb",
+      "delta_e": 3
+    },
+    {
+      "name": "backlinks/light: screenshot",
+      "screenshot": "backlinks-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "capture",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "backlinks/dark: Copy link is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: Copy link is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: Copy link is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: Cancel is left of Copy link",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.right": {
+          "le": {
+            "path": "view.layout.copy_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: Cancel is inside the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.cancel_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: the title is above the footer",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.y": {
+          "lt": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: Copy link is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.copy_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "backlinks/dark: the focused row is the grey pill, not the accent",
+      "pixel": "view.layout.selected_fill",
+      "color": "#393939",
+      "delta_e": 3
+    },
+    {
+      "name": "backlinks/dark: screenshot",
+      "screenshot": "backlinks-dark"
+    },
+    {
+      "name": "⌘C copies",
+      "call": "key",
+      "args": {
+        "keys": "cmd-c"
+      }
+    },
+    {
+      "name": "the footer's context becomes the Copied confirmation",
+      "see": {
+        "role": "Label",
+        "text": "Copied"
+      },
+      "timeout_ms": 3000
+    },
+    {
+      "name": "back to the system appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "system"
+      }
+    }
+  ]
+}
