@@ -30,9 +30,20 @@ you're looking at and keeps a two-way graph of the links you make.
   blurred pop-up panel and a menu-bar icon. It keeps the name, bundle id
   (`org.dhanesh.ubilink`) and data folder of the earlier web-view build, so an
   existing link graph, adapter settings and `adapters.json` carry over unchanged.
-- A native macOS 27 look: the system font, system colours in light and dark, buttons,
-  switches and selection in your chosen accent colour (and following it when you change
-  it), and a Liquid Glass panel on macOS 26 and later.
+- A native macOS 27 look: the system font, system colours in light and dark, a Liquid
+  Glass panel on macOS 26 and later, and your chosen accent colour (followed live when
+  you change it) on each panel's one primary action, switches and the keyboard focus
+  ring only.
+- A calmer layout, in the style of Things and Apple Notes:
+  - the link browser lists each link as its title over its URL, marks the selected one
+    with a soft grey highlight instead of the accent, and keeps Open bottom right in a
+    footer that also shows how many links match;
+  - the capture panel shows the captured page's title large, its URL under it, and
+    links to it in the same two-line rows, with Cancel and Copy link bottom right;
+  - Settings is a two-column form with its labels on one edge and plain buttons;
+  - onboarding uses the same headings, descriptions and footer.
+- The capture panel names the app a link came from, with that app's icon (read from
+  macOS on your Mac, nothing is downloaded).
 
 ### Removed
 - The Tauri web-view app and its web panel. The packaged app, the DMG and the release

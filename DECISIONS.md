@@ -1056,8 +1056,11 @@ values. `CLAUDE.md` says so.
 | browser card height (amendment) | — | 281 pt, five two-line rows (`browser::panel_height`); was 140 | two-line rows (`size.rowTwoLine`, 40) and the footer |
 | footer hairline (amendment) | separatorColor | unchanged (1.26 / 1.36:1) | decorative, like the other separators (the open decision above) |
 | capture footer surface (amendment) | — | underPageBackground (`muted`), 1.08 / 1.13:1 against the card above it, with the hairline between | Things' Quick Entry bar. Its text: secondaryLabel 4.65 / 5.51:1, label 14.25 / 11.06:1, Cancel's label on its capsule 12.85 / 7.35:1. Status text stays off it (danger 4.19:1) |
-| capture leading glyph (amendment) | the source app's icon | Lucide `link` in secondaryLabel (decorative) | the capture carries no app; not a control |
+| capture leading icon (amendment) | the source app's icon | the app's icon (rc.6); Lucide `link` in secondaryLabel when no app is known (decorative) | not a control |
 | Cancel button (amendment) | push button, a tab stop | `push_capsule_button`, not a tab stop | Escape is its keyboard path (see the capture section) |
+| Settings' buttons (amendment) | the default button accent-filled | no accent-filled button; grey capsules (Export included), Delete everything red | Notes' settings form: nothing there is the panel's one default action (the accent rule) |
+| Settings' group labels (amendment) | — | right-aligned in a 112 pt column (`size.formLabel`), label colour 15.13 / 12.27:1, the colon outside the accessible name | Notes' form layout |
+| source-app icon (amendment) | — | the app's NSImage at 16 pt (decorative) beside its name | the capture view's context; not a control |
 
 ### AA (final tokens, blue accent; `scratchpad` contrast script)
 
@@ -1110,17 +1113,27 @@ in both modes. The exceptions are decorative separators (above) and disabled con
   card only (danger is 4.19:1 on the under-page surface). No view puts a status line
   anywhere else; `theme::tests::text_on_every_surface_meets_aa` pins this.
 
-### Amendment (2026-10-12): native materials, Things-style layout (link browser and capture prototype)
+### Amendment (2026-10-12): native materials, Things/Notes-style layout (rc.6)
 
-**Source:** the user's request for a Things 3-style layout for v0.1.0, as a prototype
-for approval before the rest of the app changes. It started with the link browser.
-The capture view was added on the same branch, modelled on Things' Quick Entry panel.
-Branch `design/things-style-browser`. The native materials above (system font, glass,
-AppKit colours, the live accent) stay. Only the two views' layout and states change.
-They share one implementation in `views/theming.rs`:
+**Source:** the user's request for a Things 3-style layout for v0.1.0. It started as a
+prototype on the link browser; the capture view followed (after Things' Quick Entry).
+The user approved the direction and asked for the rest: the capture view names its
+source app, Settings becomes an Apple Notes-style form, and onboarding matches. Branch
+`design/things-style-browser`, PR #50. The native materials above (system font,
+glass, AppKit colours, the live accent) stay. Only the views' layout and states change.
+
+**The accent rule (the user's decision, rc.6).** The accent goes on **the primary
+action and the system focus ring only**: Open (browser), Copy link (capture), the
+missing step's Open … settings (onboarding), and the keyboard focus ring (the filter
+field's, kept as macOS's focus indicator). Settings has no accent-filled button. A
+checked switch keeps the accent as its on-state, as NSSwitch does; it is the control's
+own state, not an added fill. Selection is grey (`rowSelected`).
+
+The views share one implementation in `views/theming.rs`:
 - `two_line_row` (the row and its grey pill);
 - `footer_bar` with `FooterSurface::Card` or `Grouped` (the hairline and the bar);
-- `primary_capsule_button` and `push_capsule_button`.
+- `primary_capsule_button`, `push_capsule_button` and `destructive_capsule_button`;
+- `form_label` and `form_row` (Settings' label column and control column).
 
 **What changed: the link browser.**
 
@@ -1136,35 +1149,66 @@ They share one implementation in `views/theming.rs`:
 
 | Before (rc.5) | Now |
 |---|---|
-| A "Capture" heading, with Copy link top right | The heading moves to the footer as its context, bottom left, with the inbox glyph, as Things' "Inbox". After a copy it reads `Copied` with a check glyph |
-| The title in bold at 13 pt (with backlinks), or 17 pt, with the URL beside it or under it | A leading link glyph, then the title in the display size (17 pt). The URL sits under the title in secondaryLabel (META, SF Mono), on the title's left edge, not the glyph's |
+| A "Capture" heading, with Copy link top right | The footer's context, bottom left, as Things' "Inbox": the source app's name with its icon (16 pt). With no app known it reads "Capture" with the inbox glyph. After a copy it reads `Copied` with a check glyph |
+| The title in bold at 13 pt (with backlinks), or 17 pt, with the URL beside it or under it | A leading icon (the source app's, else a link glyph), then the title in the display size (17 pt). The URL sits under the title in secondaryLabel (META, SF Mono), on the title's left edge, not the icon's |
 | Backlinks as one-line rows; a focused row filled with the accent | The browser's two-line rows. The focused row is the browser's grey pill and edge. The rows' text and the "Linked to this" heading start on the title's left edge |
 | — | A footer bar under a hairline, on the grouped surface (`underPageBackground`, gpui-component `muted`): Cancel (grey capsule, does what Escape does), then Copy link (accent capsule, the view's one accent control) |
 | 140 pt; with backlinks 88 + 24 per row | 140 pt; with backlinks 129 + 40 per row, up to 8 rows (`capture::content_height`) |
 
-The capture carries no source app or app icon (`PanelView` holds only the resource and
-its backlinks). So the glyph is a neutral link: Lucide's `link`, served by
-`theme::icons` from a verbatim copy of the SVG in gpui-kit-assets. Nothing is fetched,
-and the full icon catalog is not embedded. The footer names the panel ("Capture"), not
-an app. Showing the app would need a core change to carry the frontmost app through
-`capture_now`. No new actions were added.
+**The source app (rc.6).** `ubilink_app::capture_now` now returns a `Captured`: the
+frontmost app's name (osascript's answer, trimmed) with the `PanelView`. ubilink-core
+is unchanged. The view keeps it in `Phase::Captured.app`; a capture fixture supplies
+it through its `app` field, and `capture-noapp.json` (new) names none. The icon is
+read locally by `app_icon`:
+1. the running app with that `localizedName` (`NSRunningApplication.icon`), else
+2. the bundle of that name in /Applications, /System/Applications or their
+   Utilities folders (`NSWorkspace.iconForFile`), else
+3. none, and the view shows the link glyph.
+
+The NSImage is drawn into a 64 px bitmap and encoded as PNG for GPUI, cached per name.
+Nothing is fetched. The link glyph is Lucide's `link`, served by `theme::icons` from a
+verbatim copy of the SVG in gpui-kit-assets, so the full icon catalog is not
+embedded. No new actions were added.
 
 Cancel is not a tab stop. Escape is its keyboard path, and the view's Enter-copies
 handler would otherwise fire on a focused Cancel. So the Tab order (backlink rows,
 then Copy link) is unchanged from rc.5. Failure and open-error text stays in the body,
 on the card: `danger` is 4.19:1 on the grouped surface.
 
-Accent use in the browser is now the Open button only. The keyboard focus ring on the
-filter field also uses the accent: it is the system's focus indicator, not a selection.
+**What changed: Settings (Apple Notes' settings form, rc.6).**
+
+| Before (rc.5) | Now |
+|---|---|
+| Grey section headings (`Permissions`, `App adapters`) over rows of mixed layouts | A two-column form. Each group's label ends on one right edge in a label column (`size.formLabel`, 112 pt) with a colon: `Permissions:`, `Data:`, `Login:`, `App adapters:`. The colon is drawn outside the label's `text!`, so the accessible names stay `Permissions` and `App adapters` |
+| — | Controls start on one left edge (the control column). Descriptions sit under their control in the meta size and secondaryLabel: the Automation purpose, the login explanation, the adapters footnote |
+| Space between sections | Hairlines (`separator`) between the groups |
+| Export accent-filled, the rest plain push buttons with 6 pt corners | Every button a grey capsule (`push_capsule_button`); Delete everything a red capsule. No accent-filled button |
+| The adapter grid: 4 columns | 3 columns, in the control column (472 pt) |
+| 186 + grid | 221 + grid (`settings::content_height`) |
+
+Kept: the `Allowed` / `Not allowed` status colours, the switches, the version label,
+the adapter grid with the "Built-in apps are always on" footnote under it, and every
+key path.
+
+**What changed: onboarding (rc.6).**
+
+| Before (rc.5) | Now |
+|---|---|
+| A 13 pt bold heading; the step's name, status, a truncated purpose and its button on one line; the hint and Re-check at the bottom | The capture view's type scale: the heading at 17 pt, the hint under it as its description. The step is its name and status over its purpose, from the body's one left edge |
+| The step's button accent-filled (6 pt corners), Re-check beside the hint | A footer bar (grouped, under a hairline): Re-check (grey capsule), then the step's Open Automation settings (accent capsule while Automation is missing, grey once granted) |
+
+The Automation-only flow, the 140 pt height, R to re-check and the step's ListItem are
+unchanged.
+
 Keyboard behaviour is unchanged (typing filters, arrows select, Enter opens, Esc clears
 then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
 
 **Tokens and code.**
 - `design/ubilink-tokens.json` gains `color.rowSelected` (light black 0.08, dark white
-  0.12) and `size.rowTwoLine` (40).
+  0.12), `size.rowTwoLine` (40) and `size.formLabel` (112).
 - `theme/convert.rs` reads both. `rowSelected` is served by `theme::row_selected`, not
   by a ThemeConfig slot. `list_active` would also tint every other `List`.
-- `theme::tokens::size::ROW_TWO_LINE` is pinned to the JSON.
+- `theme::tokens::size::ROW_TWO_LINE` and `FORM_LABEL` are pinned to the JSON.
 - `theming::row_selection` gives the browser its fill and edge.
 - `theming::primary_capsule_button` and `Sample::PrimaryCapsule` handle the capsule.
 - `layout.rs` rects gain `right`.
@@ -1213,11 +1257,8 @@ then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
   Open fill (`#0072ef`).
 - `browser-filter-text` still passes.
 
-**Not changed yet.** Onboarding and Settings keep the D26 look: 6 pt primary buttons
-and their own layouts. Following this prototype, no view uses the accent selection
-role (`accent::Roles::selection`, the "Selected row" rule above). It is still derived
-and unit-tested. The same treatment for onboarding and Settings waits on approval of
-this prototype.
+**The accent selection role.** No view uses `accent::Roles::selection` (the
+"Selected row" rule above) any more; it is still derived and unit-tested.
 
 **Capture checks.**
 - `capture::tests::capture_height_fits_its_backlinks` now expects 129 + 40 per row.
@@ -1233,3 +1274,26 @@ this prototype.
 - The existing capture probes pass unchanged, as their expectations are not about
   layout: capture-view, capture-fit, copy-link, copy-dismiss, escape-dismiss,
   backlinks, backlink-open and capture-permission-*.
+- `capture-things` also checks the source app: the fixture's `Safari` is the footer's
+  context bottom left, left of Cancel, with its icon (`view.source_icon` is `app`).
+  `capture-noapp.json` shows "Capture" and the link glyph (`source_icon` null).
+- `ubilink_app` tests the trimmed app name; `app_icon` tests its bundle search.
+
+**Settings and onboarding checks.**
+- `settings::tests::settings_height_fits_every_adapter_row` now expects 3 columns
+  and 221 + grid. This is a deliberate change.
+- The new `settings-form` probe checks, in light and dark:
+  - no primary (accent) sample in Settings;
+  - the four group labels' laid-out text ends on one right edge, while the shorter
+    `Data:` starts further right;
+  - the Automation name, the stats and the adapter grid start on one left edge, right
+    of the labels;
+  - the groups are in order;
+  - the footnote is there.
+
+  On onboarding it checks Re-check and the accent step button.
+- `theming`: Settings' "primary button fill" steps became "no accent-filled button"
+  (`view.theme_samples.primary` is null). This is deliberate. Onboarding's primary
+  sample is now its footer capsule.
+- settings-adapters, -buttons, -fit, -login-text and -permissions, graph-reset,
+  graph-roundtrip, launch-at-login and onboarding pass unchanged.
