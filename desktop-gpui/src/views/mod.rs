@@ -71,7 +71,7 @@ impl Route {
         match self {
             Route::Capture => "Capture",
             Route::Browser => "Browse links",
-            Route::Onboarding => "Welcome to ubilink",
+            Route::Onboarding => "Welcome to Ubilink",
             Route::Settings => "Settings",
             #[cfg(feature = "automation")]
             Route::A11ySpike => "Accessibility spike",

@@ -422,6 +422,13 @@ backlink row is the grey pill, and the rows end above the footer, without and wi
 backlinks, in light and dark. It exits 1 on 5ce08a9 at "the footer: context, Cancel,
 Copy link" (rc.5 has no Cancel). Screenshots: `plain-*`, `backlinks-*`.
 
+`settings-scroll` (rc.6, review M2) copies `fixtures/adapters-user-many.json` (120
+user adapters) into the instance, so Settings' grid holds 130 switches and the panel
+is cut to its 900 pt clamp. It checks that the grid is taller than its box, that the
+box scrolls (`layout.adapters_scroll.max_offset_y` > 0), that its scroll range reaches
+the grid's end (`reachable_h` ≥ the grid's height), and that the box and the footnote
+stay inside the window.
+
 `settings-form` (rc.6) checks Settings as a Notes-style form: no primary (accent)
 sample, the four group labels' text ending on one right edge (the shorter `Data:`
 starting further right), the controls starting on one left edge right of them, the
@@ -523,7 +530,7 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
 | browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
-| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, right, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button`, `permissions_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to); rc.6: `label_permissions`, `label_data`, `label_login`, `label_adapters` (each group label's laid-out text in the label column), `automation_name` and `stats` (the first control text of the Permissions and Data rows). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text, settings-form |
+| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, right, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button`, `permissions_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to); rc.6: `adapters_content` (the grid inside its box), `hint` (the footnote), `adapters_scroll` (`{offset_y, max_offset_y, visible_h, reachable_h}`, the box's scroll range, `Layout::scroll`), `label_permissions`, `label_data`, `label_login`, `label_adapters` (each group label's laid-out text in the label column), `automation_name` and `stats` (the first control text of the Permissions and Data rows). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text, settings-form, settings-scroll |
 | browser | `layout` | object | measured (`views/layout.rs`), window points: `filter` (at paint, `Layout::text_field`) holds `field` (the filter field's bounds), `content` (those bounds less the field's border and vertical padding: the box its text is clipped to) and `text` (the line box the field laid its text out in this frame), each `{x, y, w, h, right, bottom}`, and `centre_offset` (&#124;text centre − field centre&#124;, points); at prepaint, `viewport` `{w, h}` and `{x, y, w, h, right, bottom}` for `rows` (the list area), `footer` (the footer bar under its hairline), `open_button` (Open) and, while a row is selected and drawn, `selected_fill` (a 24 pt square inside the selected row's pill, 8 pt in from its top and right edges) | browser-filter-text, browser-things |
 | capture | `source_app` / `source_icon` | string or null | rc.6: the app the capture came from (a live capture's frontmost app, a fixture's `app`), and `"app"` when its icon came from AppKit or `"glyph"` when none was found; both `null` with no app known | capture-things |
 | capture | `layout` | object | as settings: `viewport`; `footer` (the footer bar under its hairline), `footer_context` (the context text bottom left: the source app's name, `Capture` or `Copied`), `cancel_button`, `copy_button`, `footer_fill` (a 24 pt square of the footer's grouped surface at the context's right end); with backlinks `backlinks_box` and `last_backlink`, and while a backlink row has focus `selected_fill` (a 24 pt square inside its pill, 8 pt in from its top and right edges) | capture-fit, capture-things |
@@ -569,9 +576,11 @@ a `text!` element (role `Label`).
   (review S1) only `Automation`; no Accessibility step, since nothing ubilink does
   needs it, and "All set" depends on Automation alone. Each subtree names the
   permission and a status Label `Not granted` or exactly `Granted`; rows stay listed
-  when granted. Each row has a Button whose
-  text contains the permission's name and opens `settings_pane_url(<permission>)`
-  through the opener; Tab reaches it and Enter activates it. `R` re-reads the
+  when granted. The first step still to grant (else the first step) has a Button
+  whose text contains the permission's name and opens
+  `settings_pane_url(<permission>)` through the opener; since rc.6 it sits bottom
+  right in the footer, and it is still the first Tab stop (the first Tab from the
+  view lands on it, then Re-check); Enter activates it. `R` re-reads the
   permission state in the same window.
 - **Settings (R10-R13).** One `Switch` per adapter whose accessible name is exactly
   the app name (`Arc`, `Bear`, ...; built-ins Finder and Safari locked on), reachable

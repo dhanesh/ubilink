@@ -9,14 +9,16 @@
 //!
 //! The `NSImage` is drawn into a [`ICON_PX`]-square bitmap and encoded as PNG, which
 //! GPUI decodes like any image. Results (including "none") are cached per name, so a
-//! capture view asks AppKit once per app per run. Main thread only (AppKit drawing).
+//! capture view asks AppKit once per app per run. Main thread only (AppKit drawing):
+//! [`icon_for`] takes a [`MainThreadMarker`], and the AppKit work runs inside an
+//! autorelease pool so its temporaries are released at once.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use gpui_kit::{Image, ImageFormat};
-use objc2::rc::Retained;
-use objc2::AnyThread;
+use objc2::rc::{autoreleasepool, Retained};
+use objc2::{AnyThread, MainThreadMarker};
 use objc2_app_kit::{
     NSBitmapImageFileType, NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSImage,
     NSWorkspace,
@@ -53,8 +55,9 @@ fn cache() -> &'static Cache {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// `app`'s icon as a GPUI image, or `None` when AppKit has none for it.
-pub fn icon_for(app: &str) -> Option<Arc<Image>> {
+/// `app`'s icon as a GPUI image, or `None` when AppKit has none for it. `_mtm` proves
+/// the caller is on the main thread, where AppKit drawing belongs.
+pub fn icon_for(_mtm: MainThreadMarker, app: &str) -> Option<Arc<Image>> {
     let key = app.trim().to_string();
     if key.is_empty() {
         return None;
@@ -62,8 +65,7 @@ pub fn icon_for(app: &str) -> Option<Arc<Image>> {
     if let Some(hit) = cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
         return hit;
     }
-    let image = ns_icon(&key)
-        .and_then(|icon| png(&icon))
+    let image = autoreleasepool(|_| ns_icon(&key).and_then(|icon| png(&icon)))
         .map(|bytes| Arc::new(Image::from_bytes(ImageFormat::Png, bytes)));
     if let Ok(mut c) = cache().lock() {
         c.insert(key, image.clone());

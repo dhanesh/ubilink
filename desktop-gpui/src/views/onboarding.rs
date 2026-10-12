@@ -13,10 +13,13 @@
 //!   name and a status Label, `Not granted` or exactly `Granted`. A row stays listed
 //!   once granted, so the user sees the step they just finished turn green instead of
 //!   watching it vanish. They are the only `ListItem`s in the view.
-//! - in each row a `Button` whose text names the permission; Tab reaches it, Enter
-//!   or Space (or a click) opens `ubilink_app::settings_pane_url(<pane>)` through the
-//!   shell's [`Opener`] — the core's own launcher, recorded in the opener sink in
-//!   automation builds so a probe never opens System Settings on the host (S2/O4).
+//! - for the first step still to grant (else the first step), a `Button` whose text
+//!   names the permission, bottom right in the footer (rc.6) and first in the Tab
+//!   order: the first Tab from the view lands on it. Enter or Space (or a click) opens
+//!   `ubilink_app::settings_pane_url(<pane>)` through the shell's [`Opener`] — the
+//!   core's own launcher, recorded in the opener sink in automation builds so a probe
+//!   never opens System Settings on the host (S2/O4). Re-check follows it in the Tab
+//!   order and sits to its left.
 //! - a hint line saying what to do next, or what failed and what to do (U3).
 //!
 //! Where the permission state comes from: the `permission` fixture when a probe has
@@ -84,10 +87,10 @@ const INSET_X: Pixels = spacing::S4;
 const STEP_TITLE_LINE_H: Pixels = px(17.);
 const STEP_LINE_H: Pixels = px(16.);
 
-const INTRO: &str = "Allow Automation for ubilink in System Settings, then press R to re-check.";
+const INTRO: &str = "Allow Automation for Ubilink in System Settings, then press R to re-check.";
 const ALL_SET: &str = "All set — press ⌘⇧K from any supported app.";
 const STILL_WAITING: &str =
-    "Still waiting on Automation — open its settings, allow ubilink there, then press R to re-check.";
+    "Still waiting on Automation — open its settings, allow Ubilink there, then press R to re-check.";
 const OPENED: &str = "Opened System Settings — it may be behind this panel. Grant the permission there, then press R to re-check.";
 
 /// The macOS permissions ubilink asks for, in the order their steps are shown: only
@@ -115,7 +118,7 @@ impl Permission {
 
     fn purpose(self) -> &'static str {
         match self {
-            Permission::Automation => "Lets ubilink read the link of the app you're in.",
+            Permission::Automation => "Lets Ubilink read the link of the app you're in.",
         }
     }
 
@@ -622,14 +625,18 @@ impl Render for OnboardingView {
             // The footer (as capture's): Re-check, then the step's primary action,
             // as capsules bottom right.
             .child(
+                // Laid out right to left, so the tree (and so the Tab order) puts the
+                // step's primary action first, as rc.5 did, while it still sits
+                // bottom right with Re-check to its left (macOS order).
                 theming::footer_bar(INSET_X, theming::FooterSurface::Grouped, cx)
-                    .child(div().flex_1())
+                    .flex_row_reverse()
+                    .when_some(action, |d, action| d.child(action))
                     .child(
                         theming::push_capsule_button("recheck")
                             .label("Re-check")
                             .on_click(cx.listener(|this, _, _, cx| this.start_check(true, cx))),
                     )
-                    .when_some(action, |d, action| d.child(action)),
+                    .child(div().flex_1()),
             )
     }
 }
