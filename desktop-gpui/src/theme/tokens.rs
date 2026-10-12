@@ -66,6 +66,8 @@ pub mod size {
     pub const FRAME: Pixels = px(4.);
     pub const CONTROL: Pixels = px(24.);
     pub const ROW: Pixels = px(24.);
+    /// The link browser's two-line row: the title over the URL (Things-style).
+    pub const ROW_TWO_LINE: Pixels = px(40.);
 }
 
 /// The first real family in `font.mono`, for URIs (identifiers). The theme's
@@ -112,6 +114,7 @@ mod tests {
         assert_eq!(super::size::FRAME, px(t.size.frame));
         assert_eq!(super::size::CONTROL, px(t.size.control));
         assert_eq!(super::size::ROW, px(t.size.row));
+        assert_eq!(super::size::ROW_TWO_LINE, px(t.size.row_two_line));
 
         assert_eq!(
             super::MONO_FONT_FAMILY,

@@ -1050,6 +1050,11 @@ values. `CLAUDE.md` says so.
 | switch size | NSSwitch small | gpui-component small (28×16) | the nearest size gpui-component offers |
 | letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
 | URIs | — | SF Mono, META size | identifiers; macOS has no text style for them |
+| selected row, link browser (amendment) | selectedContentBackgroundColor, white text (the accent) | `rowSelected` grey pill (black 0.08 / white 0.12: 1.20 / 1.44:1 on the card) with a 1 pt `controlBorder` edge (3.03 / 3.11:1 on the card, 3.54 / 4.01:1 as painted over the fill); the text keeps label (13.11 / 8.86:1) and secondaryLabel (4.55 / 4.74:1) | Things-style layout. The fill is the darkest grey that keeps secondaryLabel at AA (`controlActive` would give 4.37 / 3.41:1); the edge gives WCAG 1.4.11's 3:1, since the Design Guides forbid a leading-edge bar |
+| selected tab, link browser (amendment) | — | `rowSelected` pill, no edge (1.20 / 1.44:1) | not a control: it labels the drill level. The selected state is also its text colour (label 15.13 / 12.27:1 against the unselected title's secondaryLabel 4.74 / 5.92:1), so the pill is decorative |
+| primary button shape, link browser (amendment) | about 6 pt corners | capsule (`radius.pill`), 40 pt a side (`spacing.8`) | Things-style. The theming probe's 24 pt sample must clear the 12 pt round end: 13 + 24 = 37 ≤ 40 (`Sample::PrimaryCapsule`) |
+| browser card height (amendment) | — | 281 pt, five two-line rows (`browser::panel_height`); was 140 | two-line rows (`size.rowTwoLine`, 40) and the footer |
+| footer hairline (amendment) | separatorColor | unchanged (1.26 / 1.36:1) | decorative, like the other separators (the open decision above) |
 
 ### AA (final tokens, blue accent; `scratchpad` contrast script)
 
@@ -1101,3 +1106,83 @@ in both modes. The exceptions are decorative separators (above) and disabled con
 - **Status colours on other surfaces.** danger, success and warning are AA on the
   card only (danger is 4.19:1 on the under-page surface). No view puts a status line
   anywhere else; `theme::tests::text_on_every_surface_meets_aa` pins this.
+
+### Amendment (2026-10-12): native materials, Things-style layout (link browser prototype)
+
+**Source:** the user's request for a Things 3-style layout for v0.1.0, as a prototype on
+one screen for approval before the rest of the app changes. Branch
+`design/things-style-browser`. The native materials above (system font, glass, AppKit
+colours, the live accent) stay. Only the link browser's layout and states change.
+
+**What changed (link browser only).**
+
+| Before (rc.5) | Now |
+|---|---|
+| The selected row is filled with the accent and has white text | A soft grey pill (`color.rowSelected`) with a 1 pt `controlBorder` edge. The text keeps its colours |
+| One-line rows (24 pt): the title and the URL side by side | Two-line rows (`size.rowTwoLine`, 40 pt): the title (ROW, label) over the URL (META, secondaryLabel). Both start at the card's 12 pt inset and end in an ellipsis |
+| "Browse links / Your links" as text, the selected one brighter | The selected tab (the drill trail) sits in a grey pill (`rowSelected`, `radius.pill`) |
+| Open, with 6 pt corners, top right in the header | Open is a capsule in a footer below the list, bottom right, with a hairline above it. Bottom left shows the context: "22 links", "5 of 22 links" while filtering, or a mark, confirmation or error line (R8, U3) |
+| A 140 pt card | A 281 pt card, sized for five whole two-line rows |
+
+Accent use in the browser is now the Open button only. The keyboard focus ring on the
+filter field also uses the accent: it is the system's focus indicator, not a selection.
+Keyboard behaviour is unchanged (typing filters, arrows select, Enter opens, Esc clears
+then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
+
+**Tokens and code.**
+- `design/ubilink-tokens.json` gains `color.rowSelected` (light black 0.08, dark white
+  0.12) and `size.rowTwoLine` (40).
+- `theme/convert.rs` reads both. `rowSelected` is served by `theme::row_selected`, not
+  by a ThemeConfig slot. `list_active` would also tint every other `List`.
+- `theme::tokens::size::ROW_TWO_LINE` is pinned to the JSON.
+- `theming::row_selection` gives the browser its fill and edge.
+- `theming::primary_capsule_button` and `Sample::PrimaryCapsule` handle the capsule.
+- `layout.rs` rects gain `right`.
+- The browser reports `rows`, `footer`, `open_button` and `selected_fill` in its
+  layout.
+
+**Who decided.**
+- **Jev (TypeSafe System One), 2026-10-12.** It scored the selection indicator out
+  of 2:
+  - A, subtle fill plus a full 1 pt `controlBorder` edge: 1.67 (confidence 0.52)
+  - C, a darker fill that reaches 3:1 by itself: 0.94 (0.59)
+  - B, a subtle fill plus a semibold title: 0.12 (0.80)
+  - D, a subtle fill plus a leading-edge bar: 0.00 (1.00)
+- **Reasoning pass.** A's confidence was under 0.6, so it went to a reasoning pass.
+  The pass chose A:
+  - B has no non-text indicator at 3:1.
+  - C's fill (black 0.42) is heavy, and secondaryLabel fails on it.
+  - D breaks the row's rounded silhouette, which the Design Guides forbid.
+- **Calculation.** The `rowSelected` alphas are not a judgement call. They are the
+  largest that keep secondaryLabel at 4.5:1 on the fill:
+  - light: 0.08 gives 4.55:1 (0.10 gives 4.49);
+  - dark: 0.12 gives 4.74:1 (0.14 gives 4.53, kept as margin).
+- **Executor judgement calls, for review:**
+  - five visible rows;
+  - title and URL line boxes of 17 and 15 pt;
+  - the selected row keeps the 6 pt row radius, not a capsule (a 40 pt capsule row
+    reads as a button);
+  - the selected tab has no edge (see the deviation table);
+  - the footer's left side shows an error first, then the mark or confirmation, then
+    the count;
+  - the start-up error stays as a line above the footer.
+
+**Checks.**
+- `theme::tests::text_on_every_surface_meets_aa` now includes the selected-row pill.
+- `theme::tests::selected_row_edge_reaches_three_to_one` pins the edge at 3:1 or more
+  on the card, and the fill under 3:1 and stronger than hover.
+- `browser::tests::footer_counts_links_and_the_card_fits_five_rows` covers the footer
+  count and the card height.
+- The `browser-things` probe checks, in light and dark:
+  - the selected pill's colour is `#ebebeb` / `#393939`, within ΔE 3. The rc.5 accent
+    fill fails this.
+  - Open is below the list, inside the footer, right of the count, and accent-filled;
+  - the footer is inside the window;
+  - Enter still opens the selected link.
+- `theming` still samples the card, primary text (now the footer count), and the
+  Open fill (`#0072ef`).
+- `browser-filter-text` still passes.
+
+**Not changed yet.** Capture, onboarding and Settings keep the D26 look, including
+accent-filled selection in capture's backlink list and 6 pt primary buttons. The same
+treatment for them waits on approval of this prototype.

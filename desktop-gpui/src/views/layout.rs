@@ -7,7 +7,7 @@
 //! (the same technique as `theming::Samples`), which records at prepaint:
 //!
 //! - [`Layout::bounds`]: the parent's laid-out bounds in window points
-//!   (`{x, y, w, h, bottom}`), plus the window's `viewport` (`{w, h}`) at that frame;
+//!   (`{x, y, w, h, right, bottom}`), plus the window's `viewport` (`{w, h}`) at that frame;
 //! - [`Layout::font`]: the text size the parent's text actually resolves to
 //!   (`{font_px}`), read from the text style GPUI applies to the parent's children;
 //! - [`Layout::text_field`]: a text field's bounds, the box its text is clipped to and
@@ -186,7 +186,7 @@ fn round2(v: f32) -> f64 {
     (f64::from(v) * 100.0).round() / 100.0
 }
 
-/// `{x, y, w, h, bottom}` in window points, rounded to 1/100.
+/// `{x, y, w, h, right, bottom}` in window points, rounded to 1/100.
 #[cfg(feature = "automation")]
 pub fn rect_json(b: Bounds<Pixels>) -> Value {
     let (x, y) = (f32::from(b.origin.x), f32::from(b.origin.y));
@@ -196,6 +196,7 @@ pub fn rect_json(b: Bounds<Pixels>) -> Value {
         "y": round2(y),
         "w": round2(w),
         "h": round2(h),
+        "right": round2(x + w),
         "bottom": round2(y + h),
     })
 }
@@ -207,14 +208,14 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn a_rect_reports_its_bottom_edge_rounded() {
+    fn a_rect_reports_its_right_and_bottom_edges_rounded() {
         let b = Bounds {
             origin: point(px(20.), px(100.333)),
             size: size(px(140.), px(16.)),
         };
         assert_eq!(
             rect_json(b),
-            json!({"x": 20.0, "y": 100.33, "w": 140.0, "h": 16.0, "bottom": 116.33})
+            json!({"x": 20.0, "y": 100.33, "w": 140.0, "h": 16.0, "right": 160.0, "bottom": 116.33})
         );
     }
 

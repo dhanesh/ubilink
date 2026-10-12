@@ -8,10 +8,12 @@
 //!   ([`primary_text`]) is `color.label` composited over that card.
 //! - **The shared controls**, one constructor per role, so every screen's buttons and
 //!   fields agree: [`primary_button`] (the default action, filled with the system
-//!   accent: macOS's default button), [`push_button`] (a plain push button),
+//!   accent: macOS's default button; [`primary_capsule_button`] is its capsule, for
+//!   the link browser's footer), [`push_button`] (a plain push button),
 //!   [`destructive_button`] (a filled red button, for a confirmed destructive action),
 //!   [`text_field`] and [`switch`], all at macOS's 24 pt control height and 13 pt
-//!   text. A selected row's fill and text come from [`selection`].
+//!   text. A selected row's fill and text come from [`selection`] (the accent), or,
+//!   in the link browser, [`row_selection`] (a grey pill and its 3:1 edge).
 //! - **Live appearance switching.** [`FollowAppearance`] observes the panel window's
 //!   appearance and re-applies the matching theme when the system flips between light
 //!   and dark, so an open view repaints in place. In automation builds a
@@ -33,7 +35,7 @@ use gpui_kit::component::{ActiveTheme, Sizable, Theme, ThemeMode};
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::tokens::{font_size, size, spacing};
+use crate::theme::tokens::{font_size, radius, size, spacing};
 
 /// The smallest side a reported region may have (the probe's `STATE_REGION_MIN_PT`,
 /// ruling R-q): a real surface, text run or control, never a swatch.
@@ -77,6 +79,14 @@ pub fn selection(cx: &App) -> (Hsla, Hsla) {
     crate::theme::selection(cx)
 }
 
+/// A selected row's pill in the link browser (D26 amendment, Things-style): the
+/// subtle grey fill (`color.rowSelected`) and the 1 pt edge that gives the selection
+/// 3:1 against the card (`color.controlBorder`, the theme's `input`). The row's text
+/// keeps its own colours.
+pub fn row_selection(cx: &App) -> (Hsla, Hsla) {
+    (crate::theme::row_selected(cx), cx.theme().input)
+}
+
 /// `color` at full opacity.
 pub fn opaque(color: Hsla) -> Hsla {
     Hsla { a: 1.0, ..color }
@@ -99,6 +109,16 @@ pub fn over(top: Hsla, bottom: Hsla) -> Hsla {
 /// region fits in its fill beside the label. Callers add `.label(..)`, `.on_click(..)`.
 pub fn primary_button(id: impl Into<ElementId>) -> Button {
     Button::new(id).primary().h(CONTROL_H).px(PRIMARY_PAD_X)
+}
+
+/// A capsule primary button's side padding: past the 12 pt round end, a
+/// [`SAMPLE_MIN`] pt [`Sample::PrimaryCapsule`] region still fits before the label.
+pub const CAPSULE_PAD_X: Pixels = spacing::S8;
+
+/// The default action as a capsule (`radius.pill`), for the link browser's footer
+/// (D26 amendment, Things-style). Otherwise [`primary_button`].
+pub fn primary_capsule_button(id: impl Into<ElementId>) -> Button {
+    primary_button(id).rounded(radius::PILL).px(CAPSULE_PAD_X)
 }
 
 /// A plain macOS push button: the control fill, label-coloured text, no stroke.
@@ -156,6 +176,10 @@ pub enum Sample {
     Text,
     /// The primary button: the region is the fill beside its label, full height.
     Primary,
+    /// A capsule primary button ([`primary_capsule_button`]): as `Primary`, but
+    /// starting past the round end (half the height), so no corner pixel is in it.
+    /// Reported as the view's `primary` sample.
+    PrimaryCapsule,
     /// A checked switch (the system accent): its bounds grown to at least 28 pt; the
     /// probe takes the best-matching pixel, since a 16 pt track holds no 24 pt square.
     Accent,
@@ -211,6 +235,12 @@ pub fn region_for(which: Sample, bounds: Bounds<Pixels>) -> Region {
             w: SAMPLE_MIN,
             h,
         },
+        Sample::PrimaryCapsule => Region {
+            x: x + h / 2.0 + 1.0,
+            y,
+            w: SAMPLE_MIN,
+            h,
+        },
     }
 }
 
@@ -247,7 +277,7 @@ impl Samples {
         let slot = match which {
             Sample::Surface => &mut s.surface,
             Sample::Text => &mut s.text,
-            Sample::Primary => &mut s.primary,
+            Sample::Primary | Sample::PrimaryCapsule => &mut s.primary,
             Sample::Accent => &mut s.accent,
         };
         *slot = Some(region);
@@ -423,6 +453,18 @@ mod tests {
             "clear of the label"
         );
         assert!(primary.x >= 500. + 6., "clear of the 6 pt corner");
+        // A capsule: the region starts past the 12 pt round end and ends before the
+        // label (CAPSULE_PAD_X in).
+        let capsule = region_for(
+            Sample::PrimaryCapsule,
+            at(500., 10., 120., f32::from(CONTROL_H)),
+        );
+        assert!(capsule.w >= SAMPLE_MIN && capsule.h >= SAMPLE_MIN);
+        assert!(capsule.x >= 500. + f32::from(CONTROL_H) / 2.);
+        assert!(
+            capsule.x + capsule.w <= 500. + f32::from(super::CAPSULE_PAD_X),
+            "clear of the label: {capsule:?}"
+        );
         let text = region_for(Sample::Text, at(20., 40., 60., 18.));
         assert_eq!((text.w, text.h), (60., 28.));
         assert_eq!((text.x, text.y), (20., 35.));

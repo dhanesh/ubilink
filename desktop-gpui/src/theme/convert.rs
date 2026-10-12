@@ -101,6 +101,9 @@ pub(super) struct SizeTokens {
     pub(super) frame: f32,
     pub(super) control: f32,
     pub(super) row: f32,
+    /// The link browser's two-line row (title over URL).
+    #[serde(rename = "rowTwoLine")]
+    pub(super) row_two_line: f32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +134,7 @@ pub(super) struct ColorTokens {
     pub(super) control_hover: DualValue,
     pub(super) control_active: DualValue,
     pub(super) row_hover: DualValue,
+    pub(super) row_selected: DualValue,
     pub(super) switch_off: DualValue,
     pub(super) switch_thumb: DualValue,
     pub(super) danger: DualValue,
@@ -211,6 +215,13 @@ fn side(value: &DualValue, mode: ThemeMode) -> &str {
     } else {
         &value.light
     }
+}
+
+/// `color.rowSelected` for `mode`, as `#RRGGBBAA`: the link browser's selected-row
+/// fill. `ThemeConfig` has no slot for it (`list_active` would also tint every other
+/// `List`), so `theme::row_selected` serves it to the view.
+pub(super) fn row_selected_hex(mode: ThemeMode) -> String {
+    to_hex_color(side(&design_tokens().color.row_selected, mode))
 }
 
 /// Builds the `ThemeConfig` for `mode` from the tokens and the accent roles. See
