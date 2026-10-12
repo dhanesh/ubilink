@@ -38,7 +38,7 @@ pub fn build() -> Result<TrayIcon, String> {
         &MenuItem::with_id(ID_BROWSE, "Browse links   ⌘⇧L", true, None),
         &MenuItem::with_id(ID_SETTINGS, "Settings…   ⌘⇧,", true, None),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(ID_QUIT, "Quit ubilink", true, None),
+        &MenuItem::with_id(ID_QUIT, "Quit Ubilink", true, None),
     ])
     .map_err(|e| format!("tray menu: {e}"))?;
     let icon = Icon::from_rgba(link_glyph(ICON_PX), ICON_PX, ICON_PX)

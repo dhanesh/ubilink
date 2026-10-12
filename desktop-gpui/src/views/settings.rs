@@ -276,10 +276,10 @@ const ADAPTERS_HINT: &str =
 /// The line shown after a toggle: what changed, or what failed and what to do (U3).
 pub fn toggle_message(app: &str, enabled: bool, result: &Result<(), String>) -> String {
     match result {
-        Ok(()) if enabled => format!("{app} is on: ubilink captures links from it again."),
-        Ok(()) => format!("{app} is off: ubilink no longer captures links from it."),
+        Ok(()) if enabled => format!("{app} is on: Ubilink captures links from it again."),
+        Ok(()) => format!("{app} is off: Ubilink no longer captures links from it."),
         Err(e) => format!(
-            "Couldn't turn {app} {}: {e} Check that ubilink can write its data folder, then try again.",
+            "Couldn't turn {app} {}: {e} Check that Ubilink can write its data folder, then try again.",
             if enabled { "on" } else { "off" }
         ),
     }
@@ -367,7 +367,7 @@ pub fn import_message(result: &Result<String, String>) -> (String, bool) {
     match result {
         Ok(summary) => (summary.clone(), false),
         Err(e) => (
-            format!("Import failed: {e}. Choose a ubilink export (.json) file, then try again."),
+            format!("Import failed: {e}. Choose a Ubilink export (.json) file, then try again."),
             true,
         ),
     }
@@ -577,6 +577,8 @@ pub struct SettingsView {
     automation: Option<Result<onboarding::Report, String>>,
     /// The in-flight permission check; dropped (cancelled) with the view.
     _permission_check: Task<()>,
+    /// The adapter grid's scroll position (its box scrolls when the panel is short).
+    adapters_scroll: ScrollHandle,
 }
 
 impl SettingsView {
@@ -604,6 +606,7 @@ impl SettingsView {
             fitted: None,
             automation: None,
             _permission_check: permission_check,
+            adapters_scroll: ScrollHandle::new(),
         }
     }
 
@@ -1097,6 +1100,8 @@ impl Render for SettingsView {
         let group = |first: bool, row: Div| {
             div()
                 .flex_shrink_0()
+                .flex()
+                .flex_col()
                 .py(GROUP_PAD_Y)
                 .when(!first, |d| {
                     d.border_t(theming::HAIRLINE).border_color(hairline)
@@ -1176,7 +1181,13 @@ impl Render for SettingsView {
                             .child(cancel),
                     )
                 });
+        // Bounded by the chain group -> form row -> control column -> this -> the box
+        // (each flex_1 / min_h_0), so when the panel is cut short (the shell's 900 pt
+        // clamp, a short display) the grid scrolls inside its box and the footnote
+        // stays in view.
         let adapters_control = div()
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
             .gap(GAP)
@@ -1185,25 +1196,39 @@ impl Render for SettingsView {
                 // canvas inside it would scroll with the switches).
                 div()
                     .relative()
+                    .flex_1()
+                    .min_h_0()
                     .flex()
                     .flex_col()
                     .child(
                         div()
                             .id("settings-adapters")
+                            .flex_1()
+                            .min_h_0()
                             .overflow_y_scroll()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .content_start()
-                            .gap_x(ADAPTER_GAP)
-                            .gap_y(ADAPTER_GAP)
-                            .children(switches),
+                            .track_scroll(&self.adapters_scroll)
+                            .child(
+                                // The grid itself, measured as `adapters_content`: its
+                                // height is what the box scrolls through.
+                                div()
+                                    .relative()
+                                    .flex()
+                                    .flex_row()
+                                    .flex_wrap()
+                                    .content_start()
+                                    .gap_x(ADAPTER_GAP)
+                                    .gap_y(ADAPTER_GAP)
+                                    .children(switches)
+                                    .child(LAYOUT.bounds("adapters_content")),
+                            ),
                     )
-                    .child(LAYOUT.bounds("adapters_box")),
+                    .child(LAYOUT.bounds("adapters_box"))
+                    .child(LAYOUT.scroll("adapters_scroll", &self.adapters_scroll)),
             )
             // The footnote under the grid, on the control column's edge.
             .child(
                 div()
+                    .relative()
                     .h(HINT_H)
                     .flex_shrink_0()
                     .line_height(HINT_H)
@@ -1214,7 +1239,8 @@ impl Render for SettingsView {
                     } else {
                         theme.muted_foreground
                     })
-                    .child(text!(id = "settings-hint", hint)),
+                    .child(text!(id = "settings-hint", hint))
+                    .child(LAYOUT.bounds("hint")),
             );
         div()
             .track_focus(&self.focus)
@@ -1282,7 +1308,9 @@ impl Render for SettingsView {
             .child(
                 group(
                     false,
-                    theming::form_row(adapters_label, ADAPTER_H, adapters_control),
+                    theming::form_row(adapters_label, ADAPTER_H, adapters_control)
+                        .flex_1()
+                        .min_h_0(),
                 )
                 .flex_1()
                 .min_h_0(),

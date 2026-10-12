@@ -70,6 +70,10 @@ impl Layout {
     ) -> impl IntoElement {
         Empty
     }
+
+    pub fn scroll(&'static self, _key: &'static str, _handle: &ScrollHandle) -> impl IntoElement {
+        Empty
+    }
 }
 
 #[cfg(feature = "automation")]
@@ -177,6 +181,37 @@ impl Layout {
         .top_0()
         .left_0()
         .size_full()
+    }
+}
+
+#[cfg(feature = "automation")]
+impl Layout {
+    /// A zero-paint element that records, at paint (after the scroll container has
+    /// laid out its content), a scroll handle's state as `key`: `offset_y` (how far
+    /// it is scrolled, points, positive down), `max_offset_y` (how far it can scroll:
+    /// content height less the box's), `visible_h` (the box's height) and
+    /// `reachable_h` (`visible_h + max_offset_y`: how much of the content scrolling
+    /// can bring into view). `max_offset_y > 0` means the box clips its content.
+    pub fn scroll(&'static self, key: &'static str, handle: &ScrollHandle) -> impl IntoElement {
+        let handle = handle.clone();
+        canvas(
+            |_, _, _| {},
+            move |_, _, _, _| {
+                let visible = f32::from(handle.bounds().size.height);
+                let max = f32::from(handle.max_offset().y);
+                self.set(
+                    key,
+                    json!({
+                        "offset_y": round2(f32::from(-handle.offset().y)),
+                        "max_offset_y": round2(max),
+                        "visible_h": round2(visible),
+                        "reachable_h": round2(visible + max),
+                    }),
+                );
+            },
+        )
+        .absolute()
+        .size_0()
     }
 }
 

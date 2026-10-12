@@ -1051,7 +1051,7 @@ values. `CLAUDE.md` says so.
 | letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
 | URIs | — | SF Mono, META size | identifiers; macOS has no text style for them |
 | selected row, link browser (amendment) | selectedContentBackgroundColor, white text (the accent) | `rowSelected` grey pill (black 0.08 / white 0.12: 1.19 / 1.45:1 on the card) with a 1 pt `controlBorder` edge (3.03 / 3.13:1 on the card, as the text field edge in the AA table; 3.53 / 4.04:1 as painted over the fill; 2.96 / 2.78:1 against the fill inside it); the text keeps label (13.18 / 8.83:1) and secondaryLabel (4.54 / 4.71:1). All with 8-bit token alphas, as shipped | Things-style layout. The fill is the darkest grey that keeps secondaryLabel at AA (`controlActive` would give 4.37 / 3.41:1); the edge gives WCAG 1.4.11's 3:1, since the Design Guides forbid a leading-edge bar |
-| selected tab, link browser (amendment) | — | `rowSelected` pill, no edge (1.19 / 1.45:1) | not a control: it labels the drill level. The selected state is also its text colour (label 15.13 / 12.27:1 against the unselected title's secondaryLabel 4.74 / 5.92:1), so the pill is decorative |
+| selected tab, link browser (amendment) | — | `rowSelected` pill, no edge (1.19 / 1.45:1) | not a control: it labels the drill level. The selected state is also its text colour (its label is 13.18 / 8.83:1 on the pill, against the unselected title's secondaryLabel 4.74 / 5.92:1 on the card), so the pill is decorative |
 | primary button shape, link browser (amendment) | about 6 pt corners | capsule (`radius.pill`), 40 pt a side (`spacing.8`) | Things-style. The theming probe's 24 pt sample must clear the 12 pt round end: 13 + 24 = 37 ≤ 40 (`Sample::PrimaryCapsule`) |
 | browser card height (amendment) | — | 281 pt, five two-line rows (`browser::panel_height`); was 140 | two-line rows (`size.rowTwoLine`, 40) and the footer |
 | footer hairline (amendment) | separatorColor | unchanged (1.26 / 1.36:1) | decorative, like the other separators (the open decision above) |
@@ -1183,7 +1183,7 @@ on the card: `danger` is 4.19:1 on the grouped surface.
 | — | Controls start on one left edge (the control column). Descriptions sit under their control in the meta size and secondaryLabel: the Automation purpose, the login explanation, the adapters footnote |
 | Space between sections | Hairlines (`separator`) between the groups |
 | Export accent-filled, the rest plain push buttons with 6 pt corners | Every button a grey capsule (`push_capsule_button`); Delete everything a red capsule. No accent-filled button |
-| The adapter grid: 4 columns | 3 columns, in the control column (472 pt) |
+| The adapter grid: 4 columns | 3 columns, in the control column (472 pt). When the panel is cut short (130 adapters, the 900 pt clamp) the grid scrolls inside its box: the group, the form row, its control column and the box are each `flex_1` / `min_h_0` (`form_row`'s control column stretches to the row and may shrink). The footnote stays under the box |
 | 186 + grid | 221 + grid (`settings::content_height`) |
 
 Kept: the `Allowed` / `Not allowed` status colours, the switches, the version label,
@@ -1195,7 +1195,7 @@ key path.
 | Before (rc.5) | Now |
 |---|---|
 | A 13 pt bold heading; the step's name, status, a truncated purpose and its button on one line; the hint and Re-check at the bottom | The capture view's type scale: the heading at 17 pt, the hint under it as its description. The step is its name and status over its purpose, from the body's one left edge |
-| The step's button accent-filled (6 pt corners), Re-check beside the hint | A footer bar (grouped, under a hairline): Re-check (grey capsule), then the step's Open Automation settings (accent capsule while Automation is missing, grey once granted) |
+| The step's button accent-filled (6 pt corners), Re-check beside the hint | A footer bar (grouped, under a hairline): Re-check (grey capsule), then the step's Open Automation settings (accent capsule while Automation is missing, grey once granted). The footer lays out right to left, so the step's button stays first in the tree and the Tab order (the first Tab lands on it, as in rc.5), then Re-check |
 
 The Automation-only flow, the 140 pt height, R to re-check and the step's ListItem are
 unchanged.
@@ -1299,5 +1299,14 @@ then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
   from Settings' Export to onboarding's step button in the same window. Settings now
   checks "no accent-filled button". The switch samples stay on Settings. This is
   deliberate.
+- The new `settings-scroll` probe (review M2): with 120 user adapters
+  (`adapters-user-many.json`), the grid is taller than its box, the box's scroll range
+  reaches the grid's end, and the box and footnote stay inside the window.
+- `onboarding` (review M1) now checks that the first Tab lands on the step's button,
+  not Re-check.
+- rc.6 review: user-facing copy capitalises the product name ("Welcome to Ubilink",
+  "Allow Automation for Ubilink…", "Lets Ubilink…", Settings' adapter messages, the
+  tray's "Quit Ubilink"). No probe matched the old spelling. `app_icon::icon_for` takes
+  a `MainThreadMarker`, and its AppKit work runs in an autorelease pool.
 - settings-adapters, -buttons, -fit, -login-text and -permissions, graph-reset,
   graph-roundtrip, launch-at-login and onboarding pass unchanged.

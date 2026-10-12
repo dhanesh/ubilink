@@ -899,7 +899,10 @@ impl Render for CaptureView {
         // The source app (rc.6) and its icon, read locally from AppKit (`app_icon`);
         // without one the body keeps the link glyph and the footer names the panel.
         let app = self.phase.app().map(str::to_string);
-        let app_icon = app.as_deref().and_then(crate::app_icon::icon_for);
+        // Render runs on the main thread; AppKit drawing must too.
+        let app_icon = app.as_deref().and_then(|app| {
+            objc2::MainThreadMarker::new().and_then(|mtm| crate::app_icon::icon_for(mtm, app))
+        });
         *source() = (
             app.clone(),
             app.as_ref()

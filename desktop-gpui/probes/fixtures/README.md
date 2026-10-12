@@ -287,6 +287,14 @@ sorted case-insensitively by `app` (matching `list_plugins`'s own sort):
 `builtin: true` rows (`Finder`, `Safari`) can never be toggled off; the test for
 R10 (every adapter togglable + persisted) runs against the other eight.
 
+## `adapters-user-many.json` (rc.6)
+
+A user `adapters.json` (trusted local config, `AdapterRegistry::extend_from_json`)
+with 120 adapters, `Many Test App 001` to `120`. A scenario copies it into the
+instance with `setup.files: {"{data_dir}/adapters.json": "adapters-user-many.json"}`,
+so Settings' adapter grid holds 130 switches: more than the 900 pt panel can show,
+so the grid's box must scroll (`settings-scroll`). Their scripts never run.
+
 ## `login-item-*.json` (R13)
 
 `load_fixture {kind: "login_item", path}`: the login-item store the automation

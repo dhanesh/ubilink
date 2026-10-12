@@ -153,7 +153,10 @@ pub fn form_label(id: &'static str, text: &'static str, cx: &App) -> Div {
 /// A Notes-style form row (rc.6, Settings): `label` ends on the label column's right
 /// edge (`size::FORM_LABEL`), vertically centred on the control's first line
 /// (`first_line_h` tall); the control column starts on one left edge for every row,
-/// and holds `control` (its descriptions go under it, in the same column).
+/// and holds `control` (its descriptions go under it, in the same column). The row
+/// and its control column may shrink (`min_h_0`, the column stretched to the row's
+/// height), so a caller that gives the row `flex_1` bounds a scrolling control in it
+/// (Settings' adapter grid).
 pub fn form_row(label: Div, first_line_h: Pixels, control: impl IntoElement) -> Div {
     div()
         .flex()
@@ -162,6 +165,7 @@ pub fn form_row(label: Div, first_line_h: Pixels, control: impl IntoElement) -> 
         .gap(FORM_GAP)
         .w_full()
         .min_w_0()
+        .min_h_0()
         .child(
             div()
                 .w(size::FORM_LABEL)
@@ -173,7 +177,16 @@ pub fn form_row(label: Div, first_line_h: Pixels, control: impl IntoElement) -> 
                 .justify_end()
                 .child(label),
         )
-        .child(div().flex_1().min_w_0().flex().flex_col().child(control))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .self_stretch()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(control),
+        )
 }
 
 /// A Things-style row's 1 pt edge (drawn only while selected, reserved always, so the

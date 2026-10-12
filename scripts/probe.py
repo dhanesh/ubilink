@@ -783,6 +783,27 @@ def _validate_capture_noapp(doc) -> list:
     return issues
 
 
+def _validate_adapters_user_many(doc) -> list:
+    """rc.6: more user adapters than Settings' grid can show in a 900 pt panel, so its
+    box must scroll (settings-scroll). User adapter specs, each a distinct app."""
+    issues = []
+    if not isinstance(doc, list) or len(doc) < 100:
+        return ["must be a list of at least 100 adapter specs"]
+    apps = [r.get("app") for r in doc if isinstance(r, dict)]
+    if len(set(apps)) != len(doc):
+        issues.append("every spec must be an object with a distinct app")
+    for r in doc:
+        if not isinstance(r, dict):
+            continue
+        for k in ("app", "script", "uri", "name"):
+            if not (isinstance(r.get(k), str) and r[k]):
+                issues.append(f"{r.get('app')!r}: {k} must be a non-empty string")
+                break
+        if not isinstance(r.get("fields"), list):
+            issues.append(f"{r.get('app')!r}: fields must be a list")
+    return issues
+
+
 def _validate_capture_subject(doc) -> list:
     # R3: the capture whose backlinks graph-backlinks*.json seeds. Its uri must be
     # that graph's subject, and an https one: capture goes through the core's
@@ -993,7 +1014,7 @@ def _validate_accent(doc, accent: str) -> list:
 
 
 # Fixtures whose top level is a JSON list rather than an object.
-_LIST_FIXTURES = {"adapters.json", "ranking-golden.json"}
+_LIST_FIXTURES = {"adapters.json", "ranking-golden.json", "adapters-user-many.json"}
 
 _FIXTURE_VALIDATORS = {
     "capture-ok.json": _validate_capture_ok,
@@ -1009,6 +1030,7 @@ _FIXTURE_VALIDATORS = {
     "permissions-all-granted.json": _validate_permissions_all_granted,
     "permissions-accessibility-missing.json": _validate_permissions_accessibility_missing,
     "adapters.json": _validate_adapters,
+    "adapters-user-many.json": _validate_adapters_user_many,
     "graph-empty.json": _validate_graph_empty,
     "login-item-enabled.json": lambda d: _validate_login_item(d, "enabled"),
     "login-item-requires-approval.json": lambda d: _validate_login_item(d, "requires_approval"),
@@ -1035,6 +1057,7 @@ FIXTURE_FILES = [
     "permissions-all-granted.json",
     "permissions-accessibility-missing.json",
     "adapters.json",
+    "adapters-user-many.json",
     "graph-empty.json",
     "login-item-enabled.json",
     "login-item-requires-approval.json",

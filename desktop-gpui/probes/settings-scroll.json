@@ -1,0 +1,145 @@
+{
+  "description": "rc.6 (review M2): with 130 adapters Settings is cut to the 900 pt clamp, and the adapter grid scrolls inside its bounded box: the grid is taller than the box, the box's scroll range reaches the grid's end, and the box and the footnote stay inside the window",
+  "requirement": "R10",
+  "notes": [
+    "view.layout.adapters_scroll is the grid box's ScrollHandle at paint (views/layout.rs Layout::scroll): max_offset_y (how far it scrolls), visible_h and reachable_h = visible_h + max_offset_y. adapters_content is the grid itself (what the box scrolls through), adapters_box the box, hint the footnote, last_adapter the last switch.",
+    "No probe verb scrolls, so reachability is the scroll range, not a scroll: GPUI scrolls a container up to max_offset, and reachable_h >= the grid's height means that range reaches the last row.",
+    "Fails on 2734997 (the form without the flex_1/min_h_0 chain): the box takes the grid's full height, so it does not scroll and runs past the window."
+  ],
+  "setup": {
+    "files": {
+      "{data_dir}/adapters.json": "adapters-user-many.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "open settings with 130 adapters",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "the many adapters are listed",
+      "see": [
+        {
+          "role": "Switch",
+          "text": "Many Test App 001",
+          "exact": true
+        },
+        {
+          "role": "Switch",
+          "text": "Many Test App 120",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "drawn and measured",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "route": "settings",
+        "view.layout.adapters_scroll.max_offset_y": {
+          "type": "number"
+        },
+        "view.layout.adapters_content.h": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "the panel is cut short: the grid is taller than its box",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.adapters_content.h": {
+          "gt": {
+            "path": "view.layout.adapters_box.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "so the box scrolls (a positive scroll range)",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.adapters_scroll.max_offset_y": {
+          "gt": 0
+        }
+      }
+    },
+    {
+      "name": "scrolling reaches the end: the box plus its scroll range covers the whole grid",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.adapters_scroll.reachable_h": {
+          "ge": {
+            "path": "view.layout.adapters_content.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "the last switch is past the box, waiting to be scrolled to",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.last_adapter.y": {
+          "ge": {
+            "path": "view.layout.adapters_box.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "the box ends inside the window",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.adapters_box.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "the footnote stays under the box, inside the window",
+      "call": "state",
+      "retry_ms": 3000,
+      "expect": {
+        "view.layout.hint.y": {
+          "ge": {
+            "path": "view.layout.adapters_box.bottom"
+          }
+        },
+        "view.layout.hint.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "the footnote",
+      "see": {
+        "role": "Label",
+        "text": "Built-in apps are always on."
+      },
+      "route": "settings"
+    },
+    {
+      "name": "screenshot",
+      "screenshot": "settings-many"
+    }
+  ]
+}
