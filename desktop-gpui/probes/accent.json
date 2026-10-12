@@ -1,12 +1,13 @@
 {
-  "description": "D26: the theme follows the system accent colour live. With the accent seam pinned to the default blue, Settings' primary button and checked switch are blue; loading an orange accent while Settings is open re-themes the same window in place, and both controls take the orange accent (adjusted only where AA requires), in light and dark.",
+  "description": "D26: the theme follows the system accent colour live. With the accent seam pinned to the default blue, Settings' checked switch and onboarding's primary button are blue; loading an orange accent while Settings is open re-themes the same window in place, and both controls take the orange accent (the primary button is onboarding's since rc.6: Settings has none) (adjusted only where AA requires), in light and dark.",
   "requirement": "D26 (native macOS 27 look: live system accent)",
   "notes": [
     "Automation builds read the accent from the `accent` fixture when one is loaded (a stand-in for NSColor.controlAccentColor and NSSystemColorsDidChangeNotification); release builds read only the live system value (theme/accent.rs). Loading the fixture runs the same re-theme path the system notification does.",
     "Expected colours are the derivation's output (theme/accent.rs, unit-tested): blue #007aff gives a #0072ef button fill (white text needs 4.5:1) and a #007aff switch. Orange #f7821b: white text fails AA and darkening within the bound does not reach it, so the button keeps the orange fill with black text (as macOS does for light accents); the switch is darkened to #eb7208 to reach 3:1 on the white card, and is #f7821b on the dark card.",
     "appearance.primary and appearance.button_primary are the live theme's colours (cx.theme(), #rrggbb), so the re-theme itself is checked even where the pixel steps are ENV-BLOCKED; appearance.accent_refreshes counts accent re-themes. post_colors_changed (automation only) posts NSSystemColorsDidChangeNotification in-process, so the real observer -> shell inbox -> theme::refresh_accent path runs; it re-reads the loaded fixture, so the colours stay blue and the counter proves the path.",
     "appearance.accent is the accent the theme was built from, as #rrggbb.",
-    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL."
+    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it, never a FAIL.",
+    "rc.6: Settings has no accent-filled button (D26 amendment, the accent rule), so the primary-button samples are taken from onboarding's step button in the same window (the route switches in place; the window id is unchanged), with the permissions-two-missing fixture so the step is still to grant."
   ],
   "setup": {
     "fixtures": {
@@ -86,10 +87,77 @@
       }
     },
     {
-      "name": "blue/light: primary button",
+      "name": "Settings has no accent-filled button (rc.6)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.primary": null
+      }
+    },
+    {
+      "name": "onboarding shows its step button (Automation missing)",
+      "call": "load_fixture",
+      "args": {
+        "kind": "permission",
+        "path": "{fixtures}/permissions-two-missing.json"
+      }
+    },
+    {
+      "name": "blue/light: onboarding (rc.6: Settings has no accent-filled button; onboarding's step button is the primary action)",
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "blue/light: same window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "onboarding",
+        "view.theme_samples.primary": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "blue/light: primary button (onboarding's step button)",
       "pixel": "view.theme_samples.primary",
       "color": "#0072ef",
       "delta_e": 3
+    },
+    {
+      "name": "blue/light: back to settings",
+      "call": "open_view",
+      "args": {
+        "route": "settings"
+      },
+      "expect": {
+        "route": "settings",
+        "shell.visible": true
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "settings",
+        "view.theme_samples.accent": {
+          "type": "object"
+        }
+      }
     },
     {
       "name": "blue/light: checked switch",
@@ -134,17 +202,47 @@
       }
     },
     {
-      "name": "orange/light: primary button takes the accent (black text: white fails AA on orange)",
-      "pixel": "view.theme_samples.primary",
-      "color": "#f7821b",
-      "delta_e": 3
-    },
-    {
       "name": "orange/light: checked switch takes the accent, darkened to 3:1 on the white card",
       "pixel": "view.theme_samples.accent",
       "color": "#eb7208",
       "delta_e": 3,
       "match": "best"
+    },
+    {
+      "name": "orange/light: onboarding (rc.6: Settings has no accent-filled button; onboarding's step button is the primary action)",
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "orange/light: same window",
+      "call": "window_id",
+      "expect": {
+        "window_id": {
+          "saved": "wid"
+        }
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "onboarding",
+        "view.theme_samples.primary": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "orange/light: primary button takes the accent (black text: white fails AA on orange; onboarding's step button)",
+      "pixel": "view.theme_samples.primary",
+      "color": "#f7821b",
+      "delta_e": 3
     },
     {
       "name": "orange/light: screenshot",
@@ -172,10 +270,31 @@
       }
     },
     {
-      "name": "orange/dark: primary button",
+      "name": "orange/dark: primary button (onboarding)",
       "pixel": "view.theme_samples.primary",
       "color": "#f7821b",
       "delta_e": 3
+    },
+    {
+      "name": "orange/dark: back to settings",
+      "call": "open_view",
+      "args": {
+        "route": "settings"
+      },
+      "expect": {
+        "route": "settings",
+        "shell.visible": true
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "settings",
+        "view.theme_samples.accent": {
+          "type": "object"
+        }
+      }
     },
     {
       "name": "orange/dark: checked switch",
