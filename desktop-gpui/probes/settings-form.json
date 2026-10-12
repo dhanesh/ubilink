@@ -1,0 +1,417 @@
+{
+  "description": "rc.6 (D26 amendment): Settings is a Notes-style form: group labels right-aligned to one edge in a label column, controls from one left edge, no accent-filled button; onboarding matches (heading, description, the step, and Re-check then the accent action in a footer); light and dark; screenshots recorded",
+  "requirement": "D26",
+  "notes": [
+    "view.layout (views/layout.rs, automation builds), window points, each {x, y, w, h, right, bottom}: label_permissions, label_data, label_login and label_adapters are the group labels' laid-out text (without width of their column, so equal right edges with different x prove right alignment); automation_name and stats are the first control text of the Permissions and Data rows; adapters_box is the adapter grid.",
+    "No accent-filled button: Settings reports no primary sample (view.theme_samples.primary is null), where rc.5 reported Export's accent fill.",
+    "Exits 1 on 5ce08a9 (rc.5) at \"the form's groups and the Automation status\" (no Data / Login labels).",
+    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it."
+  ],
+  "setup": {
+    "fixtures": {
+      "permission": "permissions-two-missing.json",
+      "accent": "accent-blue.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "open settings",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "settings"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "settings"
+      }
+    },
+    {
+      "name": "the form's groups and the Automation status",
+      "see": [
+        {
+          "role": "Label",
+          "text": "Permissions",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "Data",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "Login",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "App adapters",
+          "exact": true
+        },
+        {
+          "role": "Label",
+          "text": "Not allowed",
+          "exact": true
+        }
+      ],
+      "route": "settings",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the buttons are there",
+      "see": [
+        {
+          "role": "Button",
+          "text": "Export"
+        },
+        {
+          "role": "Button",
+          "text": "Import"
+        },
+        {
+          "role": "Button",
+          "text": "Reset"
+        },
+        {
+          "role": "Button",
+          "text": "Open permission setup"
+        }
+      ],
+      "route": "settings"
+    },
+    {
+      "name": "the footnote under the adapter grid",
+      "see": {
+        "role": "Label",
+        "text": "Built-in apps are always on."
+      },
+      "route": "settings"
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light"
+      }
+    },
+    {
+      "name": "light: no accent-filled button (no primary sample)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.primary": null
+      }
+    },
+    {
+      "name": "light: Permissions: and Data: end on one edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_data.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Login: ends on that edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_login.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: App adapters: ends on that edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_adapters.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: right-aligned, not left: the shorter Data: starts further right",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_data.x": {
+          "gt": {
+            "path": "view.layout.label_permissions.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the controls start on one left edge (Automation, stats)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.stats.x": {
+          "eq": {
+            "path": "view.layout.automation_name.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the adapter grid starts on that edge too",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.adapters_box.x": {
+          "eq": {
+            "path": "view.layout.automation_name.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the controls sit right of the labels",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.automation_name.x": {
+          "gt": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the groups are in order",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_permissions.y": {
+          "lt": {
+            "path": "view.layout.label_data.y"
+          }
+        },
+        "view.layout.label_data.y": {
+          "lt": {
+            "path": "view.layout.label_login.y"
+          }
+        },
+        "view.layout.label_login.y": {
+          "lt": {
+            "path": "view.layout.label_adapters.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: screenshot",
+      "screenshot": "settings-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark"
+      }
+    },
+    {
+      "name": "dark: no accent-filled button (no primary sample)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.primary": null
+      }
+    },
+    {
+      "name": "dark: Permissions: and Data: end on one edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_data.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Login: ends on that edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_login.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: App adapters: ends on that edge",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_adapters.right": {
+          "eq": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: right-aligned, not left: the shorter Data: starts further right",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_data.x": {
+          "gt": {
+            "path": "view.layout.label_permissions.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the controls start on one left edge (Automation, stats)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.stats.x": {
+          "eq": {
+            "path": "view.layout.automation_name.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the adapter grid starts on that edge too",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.adapters_box.x": {
+          "eq": {
+            "path": "view.layout.automation_name.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the controls sit right of the labels",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.automation_name.x": {
+          "gt": {
+            "path": "view.layout.label_permissions.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the groups are in order",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.label_permissions.y": {
+          "lt": {
+            "path": "view.layout.label_data.y"
+          }
+        },
+        "view.layout.label_data.y": {
+          "lt": {
+            "path": "view.layout.label_login.y"
+          }
+        },
+        "view.layout.label_login.y": {
+          "lt": {
+            "path": "view.layout.label_adapters.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: screenshot",
+      "screenshot": "settings-dark"
+    },
+    {
+      "name": "onboarding: open",
+      "call": "open_view",
+      "args": {
+        "route": "onboarding"
+      },
+      "expect": {
+        "route": "onboarding",
+        "shell.visible": true
+      }
+    },
+    {
+      "name": "onboarding: the Automation step",
+      "see": {
+        "role": "ListItem",
+        "text": "Automation",
+        "deep": true
+      },
+      "route": "onboarding",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "onboarding: Re-check and the step's button",
+      "see": [
+        {
+          "role": "Button",
+          "text": "Re-check"
+        },
+        {
+          "role": "Button",
+          "text": "Open Automation settings"
+        }
+      ],
+      "route": "onboarding"
+    },
+    {
+      "name": "onboarding/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      }
+    },
+    {
+      "name": "onboarding/light: the step's button is the accent",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "onboarding/light: screenshot",
+      "screenshot": "onboarding-light"
+    },
+    {
+      "name": "onboarding/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      }
+    },
+    {
+      "name": "onboarding/dark: screenshot",
+      "screenshot": "onboarding-dark"
+    },
+    {
+      "name": "back to the system appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "system"
+      }
+    }
+  ]
+}

@@ -104,6 +104,9 @@ pub(super) struct SizeTokens {
     /// The link browser's two-line row (title over URL).
     #[serde(rename = "rowTwoLine")]
     pub(super) row_two_line: f32,
+    /// The label column of a Notes-style form (Settings): right-aligned labels.
+    #[serde(rename = "formLabel")]
+    pub(super) form_label: f32,
 }
 
 #[derive(Debug, Deserialize)]
