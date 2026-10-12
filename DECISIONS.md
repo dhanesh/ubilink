@@ -1055,6 +1055,9 @@ values. `CLAUDE.md` says so.
 | primary button shape, link browser (amendment) | about 6 pt corners | capsule (`radius.pill`), 40 pt a side (`spacing.8`) | Things-style. The theming probe's 24 pt sample must clear the 12 pt round end: 13 + 24 = 37 ≤ 40 (`Sample::PrimaryCapsule`) |
 | browser card height (amendment) | — | 281 pt, five two-line rows (`browser::panel_height`); was 140 | two-line rows (`size.rowTwoLine`, 40) and the footer |
 | footer hairline (amendment) | separatorColor | unchanged (1.26 / 1.36:1) | decorative, like the other separators (the open decision above) |
+| capture footer surface (amendment) | — | underPageBackground (`muted`), 1.08 / 1.13:1 against the card above it, with the hairline between | Things' Quick Entry bar. Its text: secondaryLabel 4.65 / 5.51:1, label 14.25 / 11.06:1, Cancel's label on its capsule 12.85 / 7.35:1. Status text stays off it (danger 4.19:1) |
+| capture leading glyph (amendment) | the source app's icon | Lucide `link` in secondaryLabel (decorative) | the capture carries no app; not a control |
+| Cancel button (amendment) | push button, a tab stop | `push_capsule_button`, not a tab stop | Escape is its keyboard path (see the capture section) |
 
 ### AA (final tokens, blue accent; `scratchpad` contrast script)
 
@@ -1107,14 +1110,19 @@ in both modes. The exceptions are decorative separators (above) and disabled con
   card only (danger is 4.19:1 on the under-page surface). No view puts a status line
   anywhere else; `theme::tests::text_on_every_surface_meets_aa` pins this.
 
-### Amendment (2026-10-12): native materials, Things-style layout (link browser prototype)
+### Amendment (2026-10-12): native materials, Things-style layout (link browser and capture prototype)
 
-**Source:** the user's request for a Things 3-style layout for v0.1.0, as a prototype on
-one screen for approval before the rest of the app changes. Branch
-`design/things-style-browser`. The native materials above (system font, glass, AppKit
-colours, the live accent) stay. Only the link browser's layout and states change.
+**Source:** the user's request for a Things 3-style layout for v0.1.0, as a prototype
+for approval before the rest of the app changes. It started with the link browser.
+The capture view was added on the same branch, modelled on Things' Quick Entry panel.
+Branch `design/things-style-browser`. The native materials above (system font, glass,
+AppKit colours, the live accent) stay. Only the two views' layout and states change.
+They share one implementation in `views/theming.rs`:
+- `two_line_row` (the row and its grey pill);
+- `footer_bar` with `FooterSurface::Card` or `Grouped` (the hairline and the bar);
+- `primary_capsule_button` and `push_capsule_button`.
 
-**What changed (link browser only).**
+**What changed: the link browser.**
 
 | Before (rc.5) | Now |
 |---|---|
@@ -1123,6 +1131,28 @@ colours, the live accent) stay. Only the link browser's layout and states change
 | "Browse links / Your links" as text, the selected one brighter | The selected tab (the drill trail) sits in a grey pill (`rowSelected`, `radius.pill`) |
 | Open, with 6 pt corners, top right in the header | Open is a capsule in a footer below the list, bottom right, with a hairline above it. Bottom left shows the context: "22 links", "5 of 22 links" while filtering, or a mark, confirmation or error line (R8, U3) |
 | A 140 pt card | A 281 pt card, sized for five whole two-line rows |
+
+**What changed: the capture view (Things' Quick Entry).**
+
+| Before (rc.5) | Now |
+|---|---|
+| A "Capture" heading, with Copy link top right | The heading moves to the footer as its context, bottom left, with the inbox glyph, as Things' "Inbox". After a copy it reads `Copied` with a check glyph |
+| The title in bold at 13 pt (with backlinks), or 17 pt, with the URL beside it or under it | A leading link glyph, then the title in the display size (17 pt). The URL sits under the title in secondaryLabel (META, SF Mono), on the title's left edge, not the glyph's |
+| Backlinks as one-line rows; a focused row filled with the accent | The browser's two-line rows. The focused row is the browser's grey pill and edge. The rows' text and the "Linked to this" heading start on the title's left edge |
+| — | A footer bar under a hairline, on the grouped surface (`underPageBackground`, gpui-component `muted`): Cancel (grey capsule, does what Escape does), then Copy link (accent capsule, the view's one accent control) |
+| 140 pt; with backlinks 88 + 24 per row | 140 pt; with backlinks 129 + 40 per row, up to 8 rows (`capture::content_height`) |
+
+The capture carries no source app or app icon (`PanelView` holds only the resource and
+its backlinks). So the glyph is a neutral link: Lucide's `link`, served by
+`theme::icons` from a verbatim copy of the SVG in gpui-kit-assets. Nothing is fetched,
+and the full icon catalog is not embedded. The footer names the panel ("Capture"), not
+an app. Showing the app would need a core change to carry the frontmost app through
+`capture_now`. No new actions were added.
+
+Cancel is not a tab stop. Escape is its keyboard path, and the view's Enter-copies
+handler would otherwise fire on a focused Cancel. So the Tab order (backlink rows,
+then Copy link) is unchanged from rc.5. Failure and open-error text stays in the body,
+on the card: `danger` is 4.19:1 on the grouped surface.
 
 Accent use in the browser is now the Open button only. The keyboard focus ring on the
 filter field also uses the accent: it is the system's focus indicator, not a selection.
@@ -1183,6 +1213,23 @@ then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
   Open fill (`#0072ef`).
 - `browser-filter-text` still passes.
 
-**Not changed yet.** Capture, onboarding and Settings keep the D26 look, including
-accent-filled selection in capture's backlink list and 6 pt primary buttons. The same
-treatment for them waits on approval of this prototype.
+**Not changed yet.** Onboarding and Settings keep the D26 look: 6 pt primary buttons
+and their own layouts. Following this prototype, no view uses the accent selection
+role (`accent::Roles::selection`, the "Selected row" rule above). It is still derived
+and unit-tested. The same treatment for onboarding and Settings waits on approval of
+this prototype.
+
+**Capture checks.**
+- `capture::tests::capture_height_fits_its_backlinks` now expects 129 + 40 per row.
+  This is a deliberate change.
+- `theme::icons::tests` covers the glyph's source.
+- The `capture-things` probe checks, without and with backlinks, light and dark:
+  - Copy link and Cancel are in the footer, with Cancel left of Copy link;
+  - the footer is the grouped surface (`#f6f6f6` / `#282828`);
+  - Copy link is the accent fill;
+  - the focused backlink row is the grey pill (`#ebebeb` / `#393939`);
+  - the rows end above the footer;
+  - ⌘C still shows `Copied`.
+- The existing capture probes pass unchanged, as their expectations are not about
+  layout: capture-view, capture-fit, copy-link, copy-dismiss, escape-dismiss,
+  backlinks, backlink-open and capture-permission-*.

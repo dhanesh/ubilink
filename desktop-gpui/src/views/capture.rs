@@ -17,6 +17,13 @@
 //!   an automation build never runs a live capture (no TCC prompt or focus theft in a
 //!   probe); it shows a failure that says so.
 //!
+//! Layout (D26 amendment, Things' Quick Entry): a leading link glyph, then the
+//! captured title in the display size; the URL under it in secondary colour on the
+//! title's left edge; the backlinks below in the browser's two-line rows with its grey
+//! selection pill; and a footer bar (`theming::footer_bar`, on the grouped surface)
+//! with the context bottom left (the panel's name, or `Copied`), and Cancel (does
+//! what Escape does) and the one accent control, Copy link, as capsules bottom right.
+//!
 //! Every text a proof reads goes through GPUI's `text!` macro, so it reaches the
 //! AccessKit tree as a `Label` (A11Y-NOTES.md): a bare `&str` child never does.
 //!
@@ -31,7 +38,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use gpui_kit::component::{ActiveTheme, Disableable};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
@@ -41,7 +48,7 @@ use super::layout::Layout;
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
-use crate::theme::tokens::{font_size, font_weight, radius, size, spacing, MONO_FONT_FAMILY};
+use crate::theme::tokens::{font_size, radius, size, spacing, MONO_FONT_FAMILY};
 use ubilink_core::{LinkView, PanelBackend, PanelView};
 
 /// The capturing indicator's text (the Tauri panel's wording, `dist/panel.js`).
@@ -56,24 +63,42 @@ pub const COPIED_TEXT: &str = "Copied";
 /// from the key by which the panel must be gone.
 pub const COPIED_HOLD: Duration = Duration::from_millis(1300);
 
-// The layout with backlinks, in points. The view sets these, so `content_height` adds
-// up what it lays out, and the panel grows to show every row (the Tauri panel's
-// `fitWindow`) up to `MAX_ROWS`, past which the list scrolls.
-const PAD_Y: Pixels = spacing::S2;
-const GAP: Pixels = spacing::S1;
-/// The one-line name and URI above the backlinks.
-const BODY_LINE_H: Pixels = px(20.);
+// The layout (D26 amendment, Things-style Quick Entry), in points. The view sets
+// these, so `content_height` adds up what it lays out, and the panel grows to show
+// every backlink row (the Tauri panel's `fitWindow`) up to `MAX_ROWS`, past which the
+// list scrolls.
+/// The card's side inset: the body and the footer share it.
+const INSET_X: Pixels = spacing::S4;
+/// Above the title row.
+const PAD_TOP: Pixels = spacing::S3;
+/// Below the body, above the footer's hairline.
+const PAD_BOTTOM: Pixels = spacing::S2;
+/// The title row: the leading glyph, then the captured title (display size).
+const TITLE_ROW_H: Pixels = size::CONTROL;
+/// The leading glyph's box, and the gap after it: the title, the URL, the heading
+/// and the backlinks' text all start this far in from [`INSET_X`].
+const GLYPH: Pixels = spacing::S4;
+const GLYPH_GAP: Pixels = spacing::S2;
+/// The URL line under the title.
+const URI_LINE_H: Pixels = px(16.);
+/// Between the title block and the backlinks' heading.
+const SECTION_GAP: Pixels = spacing::S2;
 const HEADING_LINE_H: Pixels = px(16.);
-/// One backlink row: a macOS list row (D26), its selection inset and rounded.
-const ROW_H: Pixels = size::ROW;
+/// One backlink row: the browser's two-line row (`theming::two_line_row`).
+const ROW_H: Pixels = size::ROW_TWO_LINE;
 /// Between the heading and the list (rows sit edge to edge, as in a macOS list).
 const HEADING_GAP: Pixels = spacing::S1;
 /// The most backlink rows the panel grows to show; more scroll.
 pub const MAX_ROWS: usize = 8;
 
+/// Where the title's text starts, from the card's left edge.
+fn lead_x() -> Pixels {
+    INSET_X + GLYPH + GLYPH_GAP
+}
+
 /// The capture panel's height with `backlinks` rows: none keeps the route's 140 pt;
-/// otherwise padding, the header, the name line, the heading and the rows (at most
-/// [`MAX_ROWS`]), with their gaps, and never less than 140 pt.
+/// otherwise the title block, the heading and the rows (at most [`MAX_ROWS`]), with
+/// their gaps, and the footer, and never less than 140 pt.
 pub fn content_height(backlinks: usize) -> f64 {
     let base = crate::shell::panel::PANEL_HEIGHT;
     if backlinks == 0 {
@@ -82,11 +107,14 @@ pub fn content_height(backlinks: usize) -> f64 {
     let pt = |p: Pixels| f64::from(f32::from(p));
     let rows = backlinks.min(MAX_ROWS) as f64;
     let list = rows * pt(ROW_H);
-    let section = pt(HEADING_LINE_H) + pt(HEADING_GAP) + list;
-    let h =
-        2.0 * pt(PAD_Y) + pt(theming::CONTROL_H) + pt(GAP) + pt(BODY_LINE_H) + pt(GAP) + section;
+    let title = pt(TITLE_ROW_H) + pt(URI_LINE_H);
+    let section = pt(SECTION_GAP) + pt(HEADING_LINE_H) + pt(HEADING_GAP) + list;
+    let h = pt(PAD_TOP) + title + section + pt(PAD_BOTTOM) + pt(theming::footer_h());
     h.max(base)
 }
+
+/// The cancel button's label: it does what Escape does (dismiss the panel).
+pub const CANCEL_BUTTON: &str = "Cancel";
 
 /// The backlinks section's heading (R3; the Tauri panel's wording, `dist/index.html`).
 pub const BACKLINKS_HEADING: &str = "Linked to this";
@@ -625,23 +653,23 @@ impl CaptureView {
     }
 }
 
-/// The backlinks section (R3): a heading, then one `ListItem` row per backlink in
-/// the order given (newest link first), each row's name and URI as `text!` Labels
-/// (A11Y-NOTES.md). The panel is short, so the rows are one line each and scroll.
-/// They are the only `ListItem` nodes in the capture view (probes/README.md). Each row
-/// tracks its own focus handle (`rows`, one per backlink) under its own element id, so
-/// a Tab-focused row's `ListItem` node itself is the accessibility tree's focused node
-/// (gpui-pre's div sets the a11y focus for an id'd element whose tracked handle is
-/// focused). Enter on it (the view's key handler) or a click opens it (Phase 2 R4).
+/// The backlinks section (R3): a heading, then one row per backlink in the order given
+/// (newest link first), each row's name and URI as `text!` Labels (A11Y-NOTES.md), in
+/// the browser's two-line row (`theming::two_line_row`), its text on the title's left
+/// edge. The rows scroll past [`MAX_ROWS`]. They are the only `ListItem` nodes in the
+/// capture view (probes/README.md). Each row tracks its own focus handle (`rows`, one
+/// per backlink) under its own element id, so a Tab-focused row's `ListItem` node
+/// itself is the accessibility tree's focused node (gpui-pre's div sets the a11y focus
+/// for an id'd element whose tracked handle is focused). The focused row is the
+/// selected one: the browser's grey pill (D26 amendment). Enter on it (the view's key
+/// handler) or a click opens it (Phase 2 R4).
 fn backlinks_section(
     backlinks: &[LinkView],
     rows: &[FocusHandle],
     window: &Window,
     cx: &mut Context<CaptureView>,
 ) -> AnyElement {
-    let (foreground, muted) = (theming::primary_text(cx), cx.theme().muted_foreground);
-    // A focused row is the selected row: macOS's selection fill, with its text colour.
-    let (selected_bg, selected_text) = theming::selection(cx);
+    let muted = cx.theme().muted_foreground;
     let count = backlinks.len();
     let rows = backlinks
         .iter()
@@ -655,45 +683,42 @@ fn backlinks_section(
                 .track_focus(handle)
                 .on_click(cx.listener(move |this, _, _, cx| this.open_backlink(ix, cx)))
                 .cursor_pointer()
+                .flex_shrink_0()
                 .h(ROW_H)
-                .px(spacing::S2)
                 .rounded(radius::ROW)
-                .when(focused, |d| d.bg(selected_bg))
                 .aria_position_in_set(ix + 1)
                 .aria_size_of_set(count)
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(spacing::S3)
                 .w_full()
                 .min_w_0()
                 .when(ix + 1 == count, |d| {
                     d.relative().child(LAYOUT.bounds("last_backlink"))
                 })
                 .child(
-                    div()
-                        .flex_shrink_0()
-                        .max_w(relative(0.45))
-                        .text_size(font_size::ROW)
-                        .text_color(if focused { selected_text } else { foreground })
-                        .truncate()
-                        .child(text!(
+                    theming::two_line_row(
+                        focused,
+                        text!(
                             id = SharedString::from(format!("backlink-{ix}-name")),
                             link.name.clone()
-                        )),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(font_size::META)
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_color(if focused { selected_text } else { muted })
-                        .truncate()
-                        .child(text!(
+                        ),
+                        text!(
                             id = SharedString::from(format!("backlink-{ix}-uri")),
                             link.uri.clone()
-                        )),
+                        ),
+                        cx,
+                    )
+                    // Where the focused row's pill fill is, clear of its edge and
+                    // (for a short title and URL) its text: `layout.selected_fill`,
+                    // sampled by capture-things.
+                    .when(focused, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .top(spacing::S2)
+                                .right(spacing::S2)
+                                .size(px(theming::SAMPLE_MIN))
+                                .child(LAYOUT.bounds("selected_fill")),
+                        )
+                    }),
                 )
         });
     div()
@@ -701,9 +726,11 @@ fn backlinks_section(
         .flex_col()
         .flex_1()
         .min_h_0()
+        .mt(SECTION_GAP)
         .gap(HEADING_GAP)
         .child(
             div()
+                .pl(lead_x() - INSET_X)
                 .text_size(font_size::META)
                 .line_height(HEADING_LINE_H)
                 .text_color(muted)
@@ -711,13 +738,15 @@ fn backlinks_section(
         )
         .child(
             // The scroll box, wrapped so its own place can be measured (a canvas
-            // inside it would scroll with the rows).
+            // inside it would scroll with the rows). Its rows' pills start
+            // `ROW_TEXT_INSET` left of the title, so their text lines up with it.
             div()
                 .relative()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_h_0()
+                .ml(lead_x() - INSET_X - theming::ROW_TEXT_INSET)
                 .child(
                     div()
                         .id("backlinks")
@@ -774,72 +803,43 @@ impl Render for CaptureView {
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
-        let body = match &self.phase {
+        let (muted, danger) = (theme.muted_foreground, theme.danger);
+        // The title row's text: what is being captured, the captured title (display
+        // size, primary text), or the core's failure sentence (wrapping, U3).
+        let title = match &self.phase {
             Phase::Capturing => div()
-                .text_size(font_size::TITLE)
-                .font_weight(font_weight::HEADLINE)
-                .text_color(theme.muted_foreground)
+                .text_size(font_size::DISPLAY)
+                .line_height(TITLE_ROW_H)
+                .text_color(muted)
+                .truncate()
                 .child(text!(CAPTURING_TEXT))
                 .into_any_element(),
-            // With backlinks below, name and URI share one line so the rows fit
-            // the short panel.
-            Phase::Captured { name, uri, .. } if backlinks.is_some() => div()
-                .flex()
-                .flex_row()
-                .items_baseline()
-                .line_height(BODY_LINE_H)
-                .gap(spacing::S3)
-                .min_w_0()
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .max_w(relative(0.5))
-                        .relative()
-                        .text_size(font_size::TITLE)
-                        .font_weight(font_weight::HEADLINE)
-                        .text_color(foreground)
-                        .truncate()
-                        .child(text!(name.clone()))
-                        .child(SAMPLES.probe(Sample::Text)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(font_size::META)
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_color(theme.muted_foreground)
-                        .truncate()
-                        .child(text!(uri.clone())),
-                )
-                .into_any_element(),
-            Phase::Captured { name, uri, .. } => div()
-                .flex()
-                .flex_col()
-                .gap(spacing::S1)
-                .child(
-                    div()
-                        .relative()
-                        .text_size(font_size::DISPLAY)
-                        .text_color(foreground)
-                        .truncate()
-                        .child(text!(name.clone()))
-                        .child(SAMPLES.probe(Sample::Text)),
-                )
-                .child(
-                    div()
-                        .text_size(font_size::META)
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_color(theme.muted_foreground)
-                        .truncate()
-                        .child(text!(uri.clone())),
-                )
+            Phase::Captured { name, .. } => div()
+                .relative()
+                .text_size(font_size::DISPLAY)
+                .line_height(TITLE_ROW_H)
+                .text_color(foreground)
+                .truncate()
+                .child(text!(name.clone()))
+                .child(SAMPLES.probe(Sample::Text))
                 .into_any_element(),
             Phase::Failed { message } => div()
+                .py(spacing::S1)
                 .text_size(font_size::ROW)
-                .text_color(theme.danger)
+                .text_color(danger)
                 .child(text!(message.clone()))
                 .into_any_element(),
+        };
+        let uri = match &self.phase {
+            Phase::Captured { uri, .. } => Some(uri.clone()),
+            _ => None,
+        };
+        // The footer's left side: the context (this panel, Things' "Inbox"), or the
+        // copy's confirmation (R2).
+        let (context_icon, context, context_color) = if copied {
+            (IconName::Check, COPIED_TEXT, foreground)
+        } else {
+            (IconName::Inbox, Route::Capture.title(), muted)
         };
         div()
             .track_focus(&self.focus)
@@ -866,84 +866,169 @@ impl Render for CaptureView {
             .size_full()
             .flex()
             .flex_col()
-            .when(backlinks.is_none(), |d| {
-                d.justify_center().gap(spacing::S2).p(spacing::S5)
-            })
-            .when(backlinks.is_some(), |d| {
-                d.gap(GAP).px(spacing::S5).py(PAD_Y)
-            })
             .rounded(radius::CARD)
             // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
-            // Header: the title, then the copy button.
-            // Fixed height, so the content doesn't jump when the capture lands.
+            // The body (Things' Quick Entry): the glyph and the title, the URL under
+            // the title on the same left edge, then the backlinks.
             .child(
                 div()
-                    .h(theming::CONTROL_H)
-                    .flex_shrink_0()
+                    .flex_1()
+                    .min_h_0()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(spacing::S3)
+                    .flex_col()
+                    .px(INSET_X)
+                    .pt(PAD_TOP)
+                    .pb(PAD_BOTTOM)
                     .child(
                         div()
                             .flex_shrink_0()
-                            .text_size(font_size::META)
-                            .text_color(theme.muted_foreground)
-                            .child(text!(Route::Capture.title())),
+                            .min_h(TITLE_ROW_H)
+                            .flex()
+                            .flex_row()
+                            .items_start()
+                            .gap(GLYPH_GAP)
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .h(TITLE_ROW_H)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Icon::default()
+                                            .path(crate::theme::icons::LINK)
+                                            .size(GLYPH)
+                                            .text_color(muted),
+                                    ),
+                            )
+                            .child(div().flex_1().min_w_0().child(title))
+                            // An empty stretch of the card, for the theming probe.
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .w(px(theming::SAMPLE_MIN + 8.))
+                                    .h(TITLE_ROW_H)
+                                    .relative()
+                                    .child(SAMPLES.probe(Sample::Surface)),
+                            ),
                     )
+                    .when_some(uri, |d, uri| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .pl(lead_x() - INSET_X)
+                                .text_size(font_size::META)
+                                .line_height(URI_LINE_H)
+                                .font_family(MONO_FONT_FAMILY)
+                                .text_color(muted)
+                                .truncate()
+                                .child(text!(uri)),
+                        )
+                    })
+                    .when_some(backlinks, |d, section| d.child(section))
+                    .when_some(self.open_error.clone(), |d, error| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .pl(lead_x() - INSET_X)
+                                .text_size(font_size::META)
+                                .text_color(danger)
+                                .child(text!(error)),
+                        )
+                    })
+                    // The graph couldn't be opened at start-up: captures work but
+                    // aren't saved, and the user should know why (U3).
+                    .when_some(app_state::startup_error(), |d, error| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .pl(lead_x() - INSET_X)
+                                .text_size(font_size::META)
+                                .text_color(muted)
+                                .child(text!(error)),
+                        )
+                    }),
+            )
+            // The footer (Things' Quick Entry bar): a hairline, the grouped surface,
+            // the context bottom left, Cancel and the one accent action, Copy link,
+            // bottom right.
+            .child(
+                theming::footer_bar(INSET_X, theming::FooterSurface::Grouped, cx)
+                    .relative()
+                    .child(LAYOUT.bounds("footer"))
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(spacing::S1)
                             .h_full()
                             .relative()
-                            .child(SAMPLES.probe(Sample::Surface)),
+                            // An empty stretch of the grouped surface at the context's
+                            // right end: `layout.footer_fill`, sampled by capture-things.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .size(px(theming::SAMPLE_MIN))
+                                    .child(LAYOUT.bounds("footer_fill")),
+                            )
+                            .child(
+                                Icon::new(context_icon)
+                                    .size(font_size::META)
+                                    .text_color(context_color),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_size(font_size::META)
+                                    .text_color(context_color)
+                                    .truncate()
+                                    .child(text!(context)),
+                            ),
                     )
-                    // Always there (the header never shifts when the capture lands);
+                    // Does what Escape does: dismiss the panel. Not a tab stop:
+                    // Escape is its keyboard path, and the view's Enter (copy) would
+                    // otherwise fire on a focused Cancel; the Tab order stays rc.5's.
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .relative()
+                            .child(
+                                theming::push_capsule_button("capture-cancel")
+                                    .label(CANCEL_BUTTON)
+                                    .tab_stop(false)
+                                    .on_click(cx.listener(|_, _, window, cx| {
+                                        escape::dismiss_panel(window, cx);
+                                    })),
+                            )
+                            .child(LAYOUT.bounds("cancel_button")),
+                    )
+                    // Always there (the footer never shifts when the capture lands);
                     // usable, and accent-filled, once there is a link to copy.
-                    .map(|d| {
-                        let button = theming::primary_button("capture-copy")
+                    .child({
+                        let button = theming::primary_capsule_button("capture-copy")
                             .label(COPY_BUTTON)
                             .disabled(!captured)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.copy(cx);
                             }));
-                        if captured {
-                            d.child(SAMPLES.mark(Sample::Primary, button))
-                        } else {
-                            d.child(button)
-                        }
+                        div()
+                            .flex_shrink_0()
+                            .relative()
+                            .map(|d| {
+                                if captured {
+                                    d.child(SAMPLES.mark(Sample::PrimaryCapsule, button))
+                                } else {
+                                    d.child(button)
+                                }
+                            })
+                            .child(LAYOUT.bounds("copy_button"))
                     }),
             )
-            .child(body)
-            .when_some(backlinks, |d, section| d.child(section))
-            .when_some(self.open_error.clone(), |d, error| {
-                d.child(
-                    div()
-                        .flex_shrink_0()
-                        .text_size(font_size::META)
-                        .text_color(theme.danger)
-                        .child(text!(error)),
-                )
-            })
-            .when(copied, |d| {
-                d.child(
-                    div()
-                        .text_size(font_size::META)
-                        .text_color(foreground)
-                        .child(text!(COPIED_TEXT)),
-                )
-            })
-            // The graph couldn't be opened at start-up: captures work but aren't
-            // saved, and the user should know why (U3).
-            .when_some(app_state::startup_error(), |d, error| {
-                d.child(
-                    div()
-                        .text_size(font_size::META)
-                        .text_color(theme.muted_foreground)
-                        .child(text!(error)),
-                )
-            })
     }
 }
 
@@ -1074,16 +1159,18 @@ mod tests {
 
     /// Parity (Tauri `fitWindow`): the panel shows every backlink row, up to
     /// MAX_ROWS, past which the list scrolls; without backlinks it stays 140 pt.
+    /// D26 amendment (Things-style): two-line rows and a footer bar.
     #[test]
     fn capture_height_fits_its_backlinks() {
         assert_eq!(content_height(0), 140.0);
-        // pad 8+8, header 24, gap 4, name line 20, gap 4, heading 16, gap 4: 88 + rows
-        // of 24 (D26: macOS list rows).
-        assert_eq!(content_height(1), 140.0, "one row fits the old panel");
-        assert_eq!(content_height(3), 88.0 + 3.0 * 24.0);
-        assert!(content_height(3) > 140.0, "the third row used to be cut");
-        assert_eq!(content_height(4), 88.0 + 4.0 * 24.0);
+        // top 12, title row 24, URL 16, gap 8, heading 16, gap 4, bottom 8, footer 41
+        // (hairline 1, padding 8 + 8, control 24): 129 + rows of 40.
+        assert_eq!(f32::from(crate::views::theming::footer_h()), 41.0);
+        assert_eq!(content_height(1), 129.0 + 40.0);
+        assert_eq!(content_height(3), 129.0 + 3.0 * 40.0);
+        assert_eq!(content_height(4), 129.0 + 4.0 * 40.0);
         assert_eq!(content_height(MAX_ROWS + 5), content_height(MAX_ROWS));
+        assert!(content_height(MAX_ROWS) <= crate::shell::panel::MAX_HEIGHT);
     }
 
     /// Phase 2 R2: the confirmation is held at least 1 s (the frozen view contract)

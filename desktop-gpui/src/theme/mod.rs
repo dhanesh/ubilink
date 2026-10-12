@@ -18,7 +18,7 @@
 //! | `color.controlBorder` | `input` | a text field's edge, raised to 3:1 |
 //! | `color.control` / `controlHover` / `controlActive` | `secondary` / `secondary_hover` / `secondary_active` | push buttons (`Button::secondary`) |
 //! | `color.rowHover` | `accent`, `list_hover` | gpui-component's `accent` is a hover surface, not the system accent |
-//! | — | `list_active`, `list_active_border` | transparent: views draw the selection ([`selection`]) |
+//! | — | `list_active`, `list_active_border` | transparent: views draw the selection ([`row_selected`]) |
 //! | `color.rowSelected` | — ([`row_selected`]) | the link browser's grey selected-row pill and selected tab (Things-style), with a `controlBorder` edge for 3:1 |
 //! | `color.switchOff` / `switchThumb` | `switch` / `switch_thumb` | off track raised to 3:1 |
 //! | accent `mark` | `primary`, `caret`, `link` | a checked switch takes `primary` |
@@ -33,6 +33,7 @@
 
 pub mod accent;
 mod convert;
+pub mod icons;
 pub mod tokens;
 
 pub use convert::{dark_theme_config, light_theme_config};
@@ -43,7 +44,8 @@ use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::{App, Global, Hsla, Rgba};
 
 /// The accent roles the theme was last built from, both modes: views read the
-/// selected-row fill from here ([`selection`]); automation reports the accent.
+/// accent roles from here; automation reports the accent.
+#[cfg_attr(not(feature = "automation"), allow(dead_code))]
 pub struct AccentRoles {
     pub light: accent::Roles,
     pub dark: accent::Roles,
@@ -104,6 +106,7 @@ pub fn sync(cx: &mut App) {
 }
 
 /// The accent roles for the theme's current mode.
+#[cfg_attr(not(feature = "automation"), allow(dead_code))]
 pub fn roles(cx: &App) -> accent::Roles {
     let r = cx.global::<AccentRoles>();
     if cx.theme().mode.is_dark() {
@@ -111,15 +114,6 @@ pub fn roles(cx: &App) -> accent::Roles {
     } else {
         r.light
     }
-}
-
-fn hsla(c: accent::Rgb) -> Hsla {
-    Hsla::from(Rgba {
-        r: f32::from(c.0) / 255.0,
-        g: f32::from(c.1) / 255.0,
-        b: f32::from(c.2) / 255.0,
-        a: 1.0,
-    })
 }
 
 /// `color.rowSelected` in the theme's current mode: the link browser's selected-row
@@ -139,13 +133,6 @@ pub fn row_selected(cx: &App) -> Hsla {
     } else {
         light
     }
-}
-
-/// A selected list row's fill and text (macOS `selectedContentBackgroundColor` with
-/// white text, or what the accent derivation gives for a light accent).
-pub fn selection(cx: &App) -> (Hsla, Hsla) {
-    let r = roles(cx);
-    (hsla(r.selection), hsla(r.selection_text))
 }
 
 #[cfg(test)]

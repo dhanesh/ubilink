@@ -89,7 +89,7 @@ use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::app_state;
 use crate::opener::Opener;
-use crate::theme::tokens::{font_size, radius, size, spacing, MONO_FONT_FAMILY};
+use crate::theme::tokens::{font_size, radius, size, spacing};
 
 /// The filter's placeholder (the Tauri browser's wording, `dist/index.html`).
 pub const FILTER_PLACEHOLDER: &str = "Filter links…";
@@ -109,29 +109,17 @@ const HEADER_H: Pixels = size::CONTROL;
 const GAP: Pixels = spacing::S1;
 /// One row: the title over the URL, both from the same left edge (Things-style).
 const ROW_H: Pixels = size::ROW_TWO_LINE;
-/// A row title's line box (13 pt text) and a URL's (12 pt): with the row's 1 pt
-/// edge, they leave 3 pt above and below inside [`ROW_H`].
-const TITLE_LINE_H: Pixels = px(17.);
-const URI_LINE_H: Pixels = px(15.);
-/// The selected row's edge (`theming::row_selection`); every row reserves it, so a
-/// row's text does not move when it is selected.
-const ROW_EDGE: Pixels = px(1.);
 /// The card's side inset: the header, the footer and every row's text share it.
 const INSET_X: Pixels = spacing::S3;
 /// How far a row's pill sits in from the card's side: a row's text then lands on
-/// [`INSET_X`] (pill inset + edge + the row's own padding).
+/// [`INSET_X`] (pill inset + `theming::ROW_TEXT_INSET`).
 const ROW_INSET_X: Pixels = spacing::S1;
-/// The footer's hairline above it (`color.separator`, decorative, D26).
-const HAIRLINE: Pixels = px(1.);
-/// The footer's padding above and below its control-height row.
-const FOOTER_PAD_Y: Pixels = spacing::S2;
 /// The rows the card is sized to show whole.
 const VISIBLE_ROWS: usize = 5;
 
-/// The footer's height: the hairline, then the count (left) and Open (right) at the
-/// control height, padded above and below.
+/// The footer's height (`theming::footer_bar`): the count left, Open right.
 fn footer_h() -> Pixels {
-    HAIRLINE + FOOTER_PAD_Y * 2. + size::CONTROL
+    theming::footer_h()
 }
 
 /// The list's height on the browser's card: [`VISIBLE_ROWS`] whole rows.
@@ -628,67 +616,32 @@ impl ListDelegate for BrowserRows {
         let entry = self.shown_entry(ix.row)?;
         let selected = self.selected == Some(ix.row);
         // Things-style: a selected row is a soft grey pill with a 3:1 edge, not the
-        // accent; its text keeps its colours (D26 amendment).
-        let (selected_bg, selected_edge) = theming::row_selection(cx);
-        let edge = if selected {
-            selected_edge
-        } else {
-            gpui_kit::transparent_black()
-        };
+        // accent; its text keeps its colours (D26 amendment, `theming::two_line_row`).
         Some(
             ListItem::new(SharedString::from(format!("browser-row-{}", ix.row)))
                 .h(ROW_H)
                 .p_0()
                 .rounded(radius::ROW)
                 .child(
-                    // The row's own pill (ListItem's own selected fill is transparent,
-                    // `theme::convert`): the title over the URL, both from one left
-                    // edge, each cut with an ellipsis when long.
-                    div()
-                        .relative()
-                        .flex()
-                        .flex_col()
-                        .justify_center()
-                        .h(ROW_H)
-                        .px(INSET_X - ROW_INSET_X - ROW_EDGE)
-                        .w_full()
-                        .min_w_0()
-                        .rounded(radius::ROW)
-                        .border(ROW_EDGE)
-                        .border_color(edge)
-                        .when(selected, |d| d.bg(selected_bg))
-                        .child(
+                    theming::two_line_row(
+                        selected,
+                        text!(entry.name.clone()),
+                        text!(entry.uri.clone()),
+                        cx,
+                    )
+                    // Where the selected pill's fill is, clear of its edge and (for a
+                    // short title and URL) of its text: the probe samples it
+                    // (`layout.selected_fill`, browser-things).
+                    .when(selected, |d| {
+                        d.child(
                             div()
-                                .w_full()
-                                .text_size(font_size::ROW)
-                                .line_height(TITLE_LINE_H)
-                                .text_color(theming::primary_text(cx))
-                                .truncate()
-                                .child(text!(entry.name.clone())),
+                                .absolute()
+                                .top(spacing::S2)
+                                .right(spacing::S2)
+                                .size(px(theming::SAMPLE_MIN))
+                                .child(LAYOUT.bounds("selected_fill")),
                         )
-                        .child(
-                            div()
-                                .w_full()
-                                .text_size(font_size::META)
-                                .line_height(URI_LINE_H)
-                                .font_family(MONO_FONT_FAMILY)
-                                .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(text!(entry.uri.clone())),
-                        )
-                        // Where the selected pill's fill is, clear of its edge and
-                        // (for a short title and URL) of its text: the probe samples
-                        // it (`layout.selected_fill`, browser-things).
-                        .when(selected, |d| {
-                            d.child(
-                                div()
-                                    .absolute()
-                                    .top(spacing::S2)
-                                    .right(spacing::S2)
-                                    .size(px(theming::SAMPLE_MIN))
-                                    .child(LAYOUT.bounds("selected_fill")),
-                            )
-                        }),
+                    }),
                 ),
         )
     }
@@ -1279,17 +1232,7 @@ impl Render for BrowserView {
             // The footer (Things-style): a hairline above it, the context bottom left
             // and the one primary action, Open, bottom right.
             .child(
-                div()
-                    .flex_shrink_0()
-                    .h(footer_h())
-                    .border_t(HAIRLINE)
-                    .border_color(theme.border)
-                    .px(INSET_X)
-                    .py(FOOTER_PAD_Y)
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(spacing::S3)
+                theming::footer_bar(INSET_X, theming::FooterSurface::Card, cx)
                     .relative()
                     .child(LAYOUT.bounds("footer"))
                     .child(

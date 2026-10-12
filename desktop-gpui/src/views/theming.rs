@@ -12,8 +12,8 @@
 //!   the link browser's footer), [`push_button`] (a plain push button),
 //!   [`destructive_button`] (a filled red button, for a confirmed destructive action),
 //!   [`text_field`] and [`switch`], all at macOS's 24 pt control height and 13 pt
-//!   text. A selected row's fill and text come from [`selection`] (the accent), or,
-//!   in the link browser, [`row_selection`] (a grey pill and its 3:1 edge).
+//!   text. A selected row is [`two_line_row`]'s grey pill with its 3:1 edge
+//!   ([`row_selection`]); a footer is [`footer_bar`] with capsule buttons.
 //! - **Live appearance switching.** [`FollowAppearance`] observes the panel window's
 //!   appearance and re-applies the matching theme when the system flips between light
 //!   and dark, so an open view repaints in place. In automation builds a
@@ -32,10 +32,11 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Sizable, Theme, ThemeMode};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::tokens::{font_size, radius, size, spacing};
+use crate::theme::tokens::{font_size, radius, size, spacing, MONO_FONT_FAMILY};
 
 /// The smallest side a reported region may have (the probe's `STATE_REGION_MIN_PT`,
 /// ruling R-q): a real surface, text run or control, never a swatch.
@@ -73,13 +74,7 @@ pub fn primary_text(cx: &App) -> Hsla {
     over(cx.theme().foreground, surface(cx))
 }
 
-/// A selected row's fill and text: the accent-derived macOS selection
-/// (`selectedContentBackgroundColor` with white text, `theme::accent`).
-pub fn selection(cx: &App) -> (Hsla, Hsla) {
-    crate::theme::selection(cx)
-}
-
-/// A selected row's pill in the link browser (D26 amendment, Things-style): the
+/// A selected row's pill (D26 amendment, Things-style; the browser and capture): the
 /// subtle grey fill (`color.rowSelected`) and the 1 pt edge that gives the selection
 /// 3:1 against the card (`color.controlBorder`, the theme's `input`). The row's text
 /// keeps its own colours.
@@ -124,6 +119,114 @@ pub fn primary_capsule_button(id: impl Into<ElementId>) -> Button {
 /// A plain macOS push button: the control fill, label-coloured text, no stroke.
 pub fn push_button(id: impl Into<ElementId>) -> Button {
     Button::new(id).secondary().h(CONTROL_H).px(BUTTON_PAD_X)
+}
+
+/// A push button as a capsule (`radius.pill`), beside a capsule primary button in a
+/// Things-style footer (D26 amendment). Otherwise [`push_button`].
+pub fn push_capsule_button(id: impl Into<ElementId>) -> Button {
+    push_button(id).rounded(radius::PILL)
+}
+
+/// A Things-style row's 1 pt edge (drawn only while selected, reserved always, so the
+/// text never moves).
+pub const ROW_EDGE: Pixels = px(1.);
+
+/// How far a Things-style row's text sits in from its pill's outer edge.
+pub const ROW_TEXT_INSET: Pixels = spacing::S2;
+
+/// A two-line row's title line box (13 pt text) and URL line box (12 pt): with the
+/// edge they leave 3 pt above and below inside `size::ROW_TWO_LINE`.
+pub const ROW_TITLE_LINE_H: Pixels = px(17.);
+pub const ROW_URI_LINE_H: Pixels = px(15.);
+
+/// A Things-style two-line row (D26 amendment), shared by the link browser and the
+/// capture view's backlinks: `title` (row size, primary text) over `uri` (meta size,
+/// SF Mono, secondary text), both from one left edge and cut with an ellipsis. Selected,
+/// it is a soft grey pill with a 3:1 edge ([`row_selection`]); its text keeps its
+/// colours. The caller wraps it in its row element (ListItem or a focusable div) and may
+/// add children (it is `relative`).
+pub fn two_line_row(
+    selected: bool,
+    title: impl IntoElement,
+    uri: impl IntoElement,
+    cx: &App,
+) -> Div {
+    let (fill, edge) = row_selection(cx);
+    div()
+        .relative()
+        .flex()
+        .flex_col()
+        .justify_center()
+        .h(size::ROW_TWO_LINE)
+        .px(ROW_TEXT_INSET - ROW_EDGE)
+        .w_full()
+        .min_w_0()
+        .rounded(radius::ROW)
+        .border(ROW_EDGE)
+        .border_color(if selected { edge } else { transparent_black() })
+        .when(selected, |d| d.bg(fill))
+        .child(
+            div()
+                .w_full()
+                .text_size(font_size::ROW)
+                .line_height(ROW_TITLE_LINE_H)
+                .text_color(primary_text(cx))
+                .truncate()
+                .child(title),
+        )
+        .child(
+            div()
+                .w_full()
+                .text_size(font_size::META)
+                .line_height(ROW_URI_LINE_H)
+                .font_family(MONO_FONT_FAMILY)
+                .text_color(cx.theme().muted_foreground)
+                .truncate()
+                .child(uri),
+        )
+}
+
+/// The hairline above a footer bar (`color.separator`, decorative, D26).
+pub const HAIRLINE: Pixels = px(1.);
+
+/// A footer bar's padding above and below its control-height row.
+pub const FOOTER_PAD_Y: Pixels = spacing::S2;
+
+/// A footer bar's height: the hairline, then one control-height row, padded.
+pub fn footer_h() -> Pixels {
+    HAIRLINE + FOOTER_PAD_Y * 2. + size::CONTROL
+}
+
+/// What a footer bar sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FooterSurface {
+    /// The card itself, like the toolbar under a Things list.
+    Card,
+    /// The grouped surface (`color.underPageBackground`, gpui-component's `muted`),
+    /// like the bar of Things' Quick Entry; its bottom corners follow the card's.
+    Grouped,
+}
+
+/// A Things-style footer bar (D26 amendment), shared by the link browser and the
+/// capture view: a hairline above it, then a row with the context at the left (the
+/// caller's first child, `flex_1`) and the actions at the right, capsules with the one
+/// accent action last. `inset_x` is the view's side inset, so the footer's content
+/// lines up with the body's.
+pub fn footer_bar(inset_x: Pixels, surface: FooterSurface, cx: &App) -> Div {
+    div()
+        .flex_shrink_0()
+        .h(footer_h())
+        .border_t(HAIRLINE)
+        .border_color(cx.theme().border)
+        .px(inset_x)
+        .py(FOOTER_PAD_Y)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(spacing::S2)
+        .when(surface == FooterSurface::Grouped, |d| {
+            d.bg(cx.theme().muted).rounded_b(radius::CARD)
+        })
 }
 
 /// A confirmed destructive action (as an alert's destructive button): filled red,
