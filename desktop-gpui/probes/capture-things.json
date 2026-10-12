@@ -1,10 +1,11 @@
 {
-  "description": "D26 amendment (Things-style capture view, prototype, after Things' Quick Entry): the title with a leading glyph and the URL under it, backlinks as two-line rows whose focused row is a grey pill (not the accent), and a footer on the grouped surface with the context bottom left and Cancel then Copy link (the accent) as capsules bottom right; without and with backlinks, light and dark; screenshots recorded",
+  "description": "D26 amendment (Things-style capture view, prototype, after Things' Quick Entry): the title with the source app's icon (or a link glyph) and the URL under it, backlinks as two-line rows whose focused row is a grey pill (not the accent), and a footer on the grouped surface with the source app (fixture app name) or the panel's name bottom left and Cancel then Copy link (the accent) as capsules bottom right; without and with backlinks, light and dark; screenshots recorded",
   "requirement": "D26",
   "notes": [
     "view.layout (views/layout.rs, automation builds), window points, each {x, y, w, h, right, bottom}: footer = the footer bar under its hairline, cancel_button / copy_button = the two buttons, footer_fill = a 24 pt square at the right end of the footer's context (empty grouped surface), selected_fill = a 24 pt square inside the focused backlink row's pill, 8 pt in from its top and right edges; backlinks_box and last_backlink as in capture-fit.",
+    "view.source_app is the fixture's `app` (Safari); view.source_icon is \"app\" when AppKit gave its icon (Safari.app is on every Mac; looked up locally, never fetched) and null with no app (capture-noapp.json: the link glyph and \"Capture\").",
     "Expected colours are written here, not read from design/: the footer is color.underPageBackground (#f6f6f6 / #282828); the focused row is rowSelected over the card (#ebebeb / #393939), far from rc.5's accent fill; Copy link is the primary fill #0072ef (blue fixture); the body is the card.",
-    "Exits 1 on 5ce08a9 (rc.5) at \"the footer: context, Cancel, Copy link\" (no Cancel button).",
+    "Exits 1 on 5ce08a9 (rc.5) at \"the footer: the source app (the fixture's app), Cancel, Copy link\" (no source app, no Cancel).",
     "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it."
   ],
   "setup": {
@@ -43,11 +44,11 @@
       "timeout_ms": 3000
     },
     {
-      "name": "the footer: context, Cancel, Copy link",
+      "name": "the footer: the source app (the fixture's app), Cancel, Copy link",
       "see": [
         {
           "role": "Label",
-          "text": "Capture",
+          "text": "Safari",
           "exact": true
         },
         {
@@ -60,6 +61,32 @@
         }
       ],
       "route": "capture"
+    },
+    {
+      "name": "the source app and its icon (AppKit, local)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.source_app": "Safari",
+        "view.source_icon": "app"
+      }
+    },
+    {
+      "name": "the source app is bottom left, Cancel right of it",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer_context.right": {
+          "le": {
+            "path": "view.layout.cancel_button.x"
+          }
+        },
+        "view.layout.footer_context.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
     },
     {
       "name": "no backlink rows",
@@ -339,6 +366,81 @@
     {
       "name": "plain/dark: screenshot",
       "screenshot": "plain-dark"
+    },
+    {
+      "name": "close the panel (to capture with no app)",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": false
+      }
+    },
+    {
+      "name": "a capture that names no app",
+      "call": "load_fixture",
+      "args": {
+        "kind": "capture",
+        "path": "{fixtures}/capture-noapp.json"
+      }
+    },
+    {
+      "name": "capture it",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "capture"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "capture"
+      }
+    },
+    {
+      "name": "no-app: captured",
+      "see": {
+        "role": "Label",
+        "text": "Untitled Source"
+      },
+      "route": "capture",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "no-app: the footer names the panel instead",
+      "see": {
+        "role": "Label",
+        "text": "Capture",
+        "exact": true
+      },
+      "route": "capture"
+    },
+    {
+      "name": "no-app: no source app, so the link glyph",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.source_app": null,
+        "view.source_icon": null
+      }
+    },
+    {
+      "name": "no-app: set_appearance light",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      }
+    },
+    {
+      "name": "no-app: screenshot",
+      "screenshot": "noapp-light"
+    },
+    {
+      "name": "load the subject (Safari) capture for the next show",
+      "call": "load_fixture",
+      "args": {
+        "kind": "capture",
+        "path": "{fixtures}/capture-subject.json"
+      }
     },
     {
       "name": "close the panel",

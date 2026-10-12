@@ -770,6 +770,19 @@ def _validate_capture_ok(doc) -> list:
     return issues
 
 
+def _validate_capture_noapp(doc) -> list:
+    """rc.6: a success capture that names no source app, so the capture view falls
+    back to its link glyph and the panel's own name in the footer."""
+    issues = []
+    for k in ("app", "error", "delay_ms"):
+        if k in doc:
+            issues.append(f"must not carry {k} (this is the no-source-app shape)")
+    for k in ("name", "uri"):
+        if not (isinstance(doc.get(k), str) and doc[k].strip()):
+            issues.append(f"{k} must be a non-empty string")
+    return issues
+
+
 def _validate_capture_subject(doc) -> list:
     # R3: the capture whose backlinks graph-backlinks*.json seeds. Its uri must be
     # that graph's subject, and an https one: capture goes through the core's
@@ -987,6 +1000,7 @@ _FIXTURE_VALIDATORS = {
     "capture-delayed.json": _validate_capture_delayed,
     "capture-failed.json": _validate_capture_failed,
     "capture-subject.json": _validate_capture_subject,
+    "capture-noapp.json": _validate_capture_noapp,
     "graph-backlinks.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_ORDER_NEWEST_FIRST),
     "graph-backlinks-newer.json": lambda d: _validate_backlinks_doc(d, _BACKLINKS_NEWER_ORDER_NEWEST_FIRST),
     "graph-5000.json": _validate_graph_5000,
@@ -1011,6 +1025,7 @@ FIXTURE_FILES = [
     "capture-delayed.json",
     "capture-failed.json",
     "capture-subject.json",
+    "capture-noapp.json",
     "graph-backlinks.json",
     "graph-backlinks-newer.json",
     "graph-5000.json",

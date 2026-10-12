@@ -171,16 +171,34 @@ pub struct State {
     /// (`backlinks_box`) and its last row (`last_backlink`), when there are backlinks.
     #[serde(default)]
     pub layout: BTreeMap<String, serde_json::Value>,
+    /// The app the capture came from (rc.6), as the footer shows it; `null` before
+    /// the capture lands, after it fails, or when the capture names no app.
+    #[serde(default)]
+    pub source_app: Option<String>,
+    /// How the source app is drawn: `"app"` (its icon, from AppKit) or `"glyph"`
+    /// (no icon found: the link glyph); `null` with no source app.
+    #[serde(default)]
+    pub source_icon: Option<String>,
 }
 
 /// This route's row in the router table (`views::TABLE`) reads its state from here.
 pub fn state() -> super::ViewState {
+    let (source_app, source_icon) = source().clone();
     super::ViewState::Capture(State {
         view: Route::Capture.as_str().into(),
         phase: lock().phase.into(),
         theme_samples: SAMPLES.get(),
         layout: LAYOUT.get(),
+        source_app,
+        source_icon,
     })
+}
+
+/// The newest capture view's source app and icon kind, written each render.
+static SOURCE: Mutex<(Option<String>, Option<String>)> = Mutex::new((None, None));
+
+fn source() -> std::sync::MutexGuard<'static, (Option<String>, Option<String>)> {
+    SOURCE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The newest capture view's theme sample regions (R14), written at prepaint.
@@ -203,6 +221,9 @@ pub enum Phase {
         name: String,
         uri: String,
         backlinks: Vec<LinkView>,
+        /// The app the link came from (rc.6), when the capture knows it: a live
+        /// capture always does; a fixture does when it names an `app`.
+        app: Option<String>,
     },
     /// The capture failed; `message` is the core's sentence, shown verbatim (U3).
     Failed { message: String },
@@ -234,8 +255,35 @@ impl Phase {
                 name: view.resource.name,
                 uri: view.resource.uri,
                 backlinks: view.backlinks,
+                app: None,
             },
             Err(message) => Phase::Failed { message },
+        }
+    }
+
+    /// This phase with the capture's source app (a no-op unless captured).
+    pub fn with_app(self, source: Option<String>) -> Phase {
+        match self {
+            Phase::Captured {
+                name,
+                uri,
+                backlinks,
+                ..
+            } => Phase::Captured {
+                name,
+                uri,
+                backlinks,
+                app: source.filter(|a| !a.trim().is_empty()),
+            },
+            other => other,
+        }
+    }
+
+    /// The capture's source app, if it is known.
+    pub fn app(&self) -> Option<&str> {
+        match self {
+            Phase::Captured { app, .. } => app.as_deref(),
+            _ => None,
         }
     }
 }
@@ -427,6 +475,7 @@ mod fixture {
         uri: Option<String>,
         delay_ms: Option<u64>,
         error: Option<String>,
+        app: Option<String>,
     }
 
     /// A parsed capture fixture: how long to wait, then what the "frontmost app" returns.
@@ -434,6 +483,8 @@ mod fixture {
     pub(super) struct FixtureCapture {
         pub(super) delay: std::time::Duration,
         pub(super) outcome: Result<ResourceIdentity, String>,
+        /// The "frontmost app" the fixture names (`app`), for the view's source app.
+        pub(super) app: Option<String>,
     }
 
     pub(super) fn parse_fixture(json: &str) -> Result<FixtureCapture, String> {
@@ -451,7 +502,11 @@ mod fixture {
                 )
             }
         };
-        Ok(FixtureCapture { delay, outcome })
+        Ok(FixtureCapture {
+            delay,
+            outcome,
+            app: file.app,
+        })
     }
 }
 
@@ -485,6 +540,7 @@ async fn run_capture(cx: &mut AsyncApp) -> Phase {
         if !capture.delay.is_zero() {
             executor.timer(capture.delay).await;
         }
+        let app = capture.app;
         executor
             .spawn(async move {
                 fixture::capture_through_core(
@@ -494,13 +550,17 @@ async fn run_capture(cx: &mut AsyncApp) -> Phase {
                 )
             })
             .await
+            .with_app(app)
     }
     #[cfg(not(feature = "automation"))]
     {
         executor
             .spawn(async {
                 let state = app_state::get();
-                settle_capture(&state.backend, ubilink_app::capture_now(state))
+                match ubilink_app::capture_now(state) {
+                    Ok(c) => settle_capture(&state.backend, Ok(c.panel)).with_app(Some(c.app)),
+                    Err(e) => settle_capture(&state.backend, Err(e)),
+                }
             })
             .await
     }
@@ -836,10 +896,49 @@ impl Render for CaptureView {
         };
         // The footer's left side: the context (this panel, Things' "Inbox"), or the
         // copy's confirmation (R2).
+        // The source app (rc.6) and its icon, read locally from AppKit (`app_icon`);
+        // without one the body keeps the link glyph and the footer names the panel.
+        let app = self.phase.app().map(str::to_string);
+        let app_icon = app.as_deref().and_then(crate::app_icon::icon_for);
+        *source() = (
+            app.clone(),
+            app.as_ref()
+                .map(|_| if app_icon.is_some() { "app" } else { "glyph" }.to_string()),
+        );
+        let leading = |size: Pixels| match &app_icon {
+            Some(icon) => img(icon.clone())
+                .size(size)
+                .flex_shrink_0()
+                .into_any_element(),
+            None => Icon::default()
+                .path(crate::theme::icons::LINK)
+                .size(size)
+                .text_color(muted)
+                .into_any_element(),
+        };
+        let glyph = leading(GLYPH);
+        // The footer's left side: the copy's confirmation (R2), else the source app with
+        // its icon (Things' "Inbox"), else the panel's name.
         let (context_icon, context, context_color) = if copied {
-            (IconName::Check, COPIED_TEXT, foreground)
+            (
+                Icon::new(IconName::Check)
+                    .size(GLYPH)
+                    .text_color(foreground)
+                    .into_any_element(),
+                COPIED_TEXT.to_string(),
+                foreground,
+            )
+        } else if let Some(app) = app.clone() {
+            (leading(GLYPH), app, foreground)
         } else {
-            (IconName::Inbox, Route::Capture.title(), muted)
+            (
+                Icon::new(IconName::Inbox)
+                    .size(GLYPH)
+                    .text_color(muted)
+                    .into_any_element(),
+                Route::Capture.title().to_string(),
+                muted,
+            )
         };
         div()
             .track_focus(&self.focus)
@@ -894,12 +993,7 @@ impl Render for CaptureView {
                                     .h(TITLE_ROW_H)
                                     .flex()
                                     .items_center()
-                                    .child(
-                                        Icon::default()
-                                            .path(crate::theme::icons::LINK)
-                                            .size(GLYPH)
-                                            .text_color(muted),
-                                    ),
+                                    .child(glyph),
                             )
                             .child(div().flex_1().min_w_0().child(title))
                             // An empty stretch of the card, for the theming probe.
@@ -976,18 +1070,16 @@ impl Render for CaptureView {
                                     .size(px(theming::SAMPLE_MIN))
                                     .child(LAYOUT.bounds("footer_fill")),
                             )
-                            .child(
-                                Icon::new(context_icon)
-                                    .size(font_size::META)
-                                    .text_color(context_color),
-                            )
+                            .child(context_icon)
                             .child(
                                 div()
                                     .min_w_0()
                                     .text_size(font_size::META)
                                     .text_color(context_color)
+                                    .relative()
                                     .truncate()
-                                    .child(text!(context)),
+                                    .child(text!(context))
+                                    .child(LAYOUT.bounds("footer_context")),
                             ),
                     )
                     // Does what Escape does: dismiss the panel. Not a tab stop:
@@ -1097,6 +1189,7 @@ mod tests {
                 name: "Delayed Capture Target".into(),
                 uri: "https://example.com/delayed".into(),
                 backlinks: vec![],
+                app: None,
             }
         );
         assert!(t.settle(first, &captured));
@@ -1206,6 +1299,7 @@ mod tests {
             name: "Example".into(),
             uri: "https://example.com/".into(),
             backlinks: vec![],
+            app: None,
         };
         assert_eq!(captured.copy_payload(), Some("https://example.com/"));
         assert_eq!(Phase::Capturing.copy_payload(), None);

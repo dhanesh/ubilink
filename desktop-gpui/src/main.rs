@@ -12,6 +12,7 @@
 // R6/S1: the automation channel exists only in `automation` builds; gating the module
 // declaration itself keeps every byte of it out of a release binary (TN1, checked by
 // `scripts/probe.py release-clean`).
+mod app_icon;
 mod app_state;
 #[cfg(feature = "automation")]
 mod automation;
