@@ -68,6 +68,8 @@ pub mod size {
     pub const ROW: Pixels = px(24.);
     /// The link browser's two-line row: the title over the URL (Things-style).
     pub const ROW_TWO_LINE: Pixels = px(40.);
+    /// A Notes-style form's label column (Settings): labels end on its right edge.
+    pub const FORM_LABEL: Pixels = px(112.);
 }
 
 /// The first real family in `font.mono`, for URIs (identifiers). The theme's
@@ -115,6 +117,7 @@ mod tests {
         assert_eq!(super::size::CONTROL, px(t.size.control));
         assert_eq!(super::size::ROW, px(t.size.row));
         assert_eq!(super::size::ROW_TWO_LINE, px(t.size.row_two_line));
+        assert_eq!(super::size::FORM_LABEL, px(t.size.form_label));
 
         assert_eq!(
             super::MONO_FONT_FAMILY,

@@ -48,13 +48,11 @@ pub const CONTROL_H: Pixels = size::CONTROL;
 /// A push button's side padding around its 13 pt label.
 pub const BUTTON_PAD_X: Pixels = spacing::S3;
 
-/// The primary button's side padding. Wider than a push button's, so the
-/// [`PRIMARY_INSET_X`] + [`SAMPLE_MIN`] pt beside the label are pure fill for the
-/// theming probe (a D26 deviation: macOS pads a default button like any other).
+/// The primary button's side padding (D26 deviation: macOS pads a default button like
+/// any other). Every view now uses the capsule ([`primary_capsule_button`]), which
+/// widens it to [`CAPSULE_PAD_X`] for the theming probe's sample.
 pub const PRIMARY_PAD_X: Pixels = px(32.);
 
-/// A primary sample starts this far in: past the 6 pt control corner.
-const PRIMARY_INSET_X: f32 = 7.0;
 /// A surface region stays this far inside its element, off the neighbours beside it.
 /// Not above or below: a surface spacer is a header row at the 24 pt control height,
 /// with card above and below it.
@@ -100,8 +98,8 @@ pub fn over(top: Hsla, bottom: Hsla) -> Hsla {
 }
 
 /// The view's default action: filled with the system accent (macOS's default push
-/// button), white or, for a light accent, black text. Sized so a [`Sample::Primary`]
-/// region fits in its fill beside the label. Callers add `.label(..)`, `.on_click(..)`.
+/// button), white or, for a light accent, black text. Views use its capsule,
+/// [`primary_capsule_button`]. Callers add `.label(..)`, `.on_click(..)`.
 pub fn primary_button(id: impl Into<ElementId>) -> Button {
     Button::new(id).primary().h(CONTROL_H).px(PRIMARY_PAD_X)
 }
@@ -125,6 +123,57 @@ pub fn push_button(id: impl Into<ElementId>) -> Button {
 /// Things-style footer (D26 amendment). Otherwise [`push_button`].
 pub fn push_capsule_button(id: impl Into<ElementId>) -> Button {
     push_button(id).rounded(radius::PILL)
+}
+
+/// A confirmed destructive action as a capsule (a Notes-style form's buttons are all
+/// capsules). Otherwise [`destructive_button`].
+pub fn destructive_capsule_button(id: impl Into<ElementId>) -> Button {
+    destructive_button(id).rounded(radius::PILL)
+}
+
+/// Between a form row's label column and its control column.
+pub const FORM_GAP: Pixels = spacing::S2;
+
+/// A Notes-style form label (rc.6, Settings): the label in primary text at the row
+/// size, followed by a colon. The colon is a plain glyph, outside the `text!` Label,
+/// so the accessible name stays the bare word (`Permissions`). The element is
+/// `relative`, so a caller may lay a measuring marker over it.
+pub fn form_label(id: &'static str, text: &'static str, cx: &App) -> Div {
+    div()
+        .relative()
+        .flex_shrink_0()
+        .flex()
+        .flex_row()
+        .text_size(font_size::ROW)
+        .text_color(primary_text(cx))
+        .child(text!(id = id, text))
+        .child(":")
+}
+
+/// A Notes-style form row (rc.6, Settings): `label` ends on the label column's right
+/// edge (`size::FORM_LABEL`), vertically centred on the control's first line
+/// (`first_line_h` tall); the control column starts on one left edge for every row,
+/// and holds `control` (its descriptions go under it, in the same column).
+pub fn form_row(label: Div, first_line_h: Pixels, control: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .flex_row()
+        .items_start()
+        .gap(FORM_GAP)
+        .w_full()
+        .min_w_0()
+        .child(
+            div()
+                .w(size::FORM_LABEL)
+                .flex_shrink_0()
+                .h(first_line_h)
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_end()
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().flex().flex_col().child(control))
 }
 
 /// A Things-style row's 1 pt edge (drawn only while selected, reserved always, so the
@@ -277,11 +326,9 @@ pub enum Sample {
     Surface,
     /// A run of primary text: the region is its bounds, grown to at least 28 pt.
     Text,
-    /// The primary button: the region is the fill beside its label, full height.
-    Primary,
-    /// A capsule primary button ([`primary_capsule_button`]): as `Primary`, but
-    /// starting past the round end (half the height), so no corner pixel is in it.
-    /// Reported as the view's `primary` sample.
+    /// The capsule primary button ([`primary_capsule_button`]): the fill beside its
+    /// label, full height, starting past the round end (half the height), so no
+    /// corner pixel is in it. Reported as the view's `primary` sample.
     PrimaryCapsule,
     /// A checked switch (the system accent): its bounds grown to at least 28 pt; the
     /// probe takes the best-matching pixel, since a 16 pt track holds no 24 pt square.
@@ -331,13 +378,7 @@ pub fn region_for(which: Sample, bounds: Bounds<Pixels>) -> Region {
         },
         Sample::Text | Sample::Accent => grown(x, y, w, h),
         // The primary variant draws no stroke, so its fill runs edge to edge
-        // vertically; horizontally the region starts past the corner.
-        Sample::Primary => Region {
-            x: x + PRIMARY_INSET_X,
-            y,
-            w: SAMPLE_MIN,
-            h,
-        },
+        // vertically; horizontally the region starts past the round end.
         Sample::PrimaryCapsule => Region {
             x: x + h / 2.0 + 1.0,
             y,
@@ -380,7 +421,7 @@ impl Samples {
         let slot = match which {
             Sample::Surface => &mut s.surface,
             Sample::Text => &mut s.text,
-            Sample::Primary | Sample::PrimaryCapsule => &mut s.primary,
+            Sample::PrimaryCapsule => &mut s.primary,
             Sample::Accent => &mut s.accent,
         };
         *slot = Some(region);
@@ -442,7 +483,7 @@ fn follow_system(window: &mut Window, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{over, region_for, Sample, CONTROL_H, PRIMARY_PAD_X, SAMPLE_MIN};
+    use super::{over, region_for, Sample, CONTROL_H, SAMPLE_MIN};
     use crate::theme::accent::{derive, Rgb, Source};
     use crate::theme::{dark_theme_config, light_theme_config};
     use gpui_kit::component::ThemeMode;
@@ -546,16 +587,6 @@ mod tests {
             origin: point(px(x), px(y)),
             size: size(px(w), px(h)),
         };
-        let primary = region_for(Sample::Primary, at(500., 10., 120., f32::from(CONTROL_H)));
-        assert!(
-            primary.w >= SAMPLE_MIN && primary.h >= SAMPLE_MIN,
-            "{primary:?}"
-        );
-        assert!(
-            primary.x + primary.w <= 500. + f32::from(PRIMARY_PAD_X),
-            "clear of the label"
-        );
-        assert!(primary.x >= 500. + 6., "clear of the 6 pt corner");
         // A capsule: the region starts past the 12 pt round end and ends before the
         // label (CAPSULE_PAD_X in).
         let capsule = region_for(

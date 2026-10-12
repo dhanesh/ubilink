@@ -129,40 +129,43 @@ static SAMPLES: Samples = Samples::new();
 /// The newest settings view's measured layout (`views::layout`), written at prepaint.
 static LAYOUT: Layout = Layout::new();
 
-/// How an action button looks (D26: macOS push buttons).
+/// How an action button looks (rc.6, a Notes-style settings form: capsules, and no
+/// accent-filled button, since nothing here is the one default action).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
-    /// A plain push button (Import, Reset…, Cancel).
+    /// A plain grey capsule (Open permission setup…, Export, Import, Reset…, Cancel).
     Plain,
-    /// The view's default action, accent-filled, and its R14 primary sample (Export).
-    Primary,
-    /// The confirmed destructive action: filled red (Delete everything).
+    /// The confirmed destructive action: a red capsule (Delete everything).
     Destructive,
 }
 
-// Settings' layout, in points. The view sets these on its rows, so `content_height`
-// adds up exactly what the view lays out, and the window fits the content (the Tauri
-// panel's `fitWindow`) instead of clipping the adapter grid at a fixed 140 pt.
+// Settings' layout (rc.6, a Notes-style form), in points. The view sets these on its
+// rows, so `content_height` adds up exactly what the view lays out, and the window fits
+// the content (the Tauri panel's `fitWindow`) instead of clipping the adapter grid.
 const PAD_X: Pixels = spacing::S5;
-const PAD_Y: Pixels = spacing::S2;
+const PAD_Y: Pixels = spacing::S3;
 const GAP: Pixels = spacing::S1;
 /// The title row: a 13 pt headline's line box, at the control height.
 const HEADER_H: Pixels = size::CONTROL;
+/// Above and below each group's form row; groups are split by a hairline.
+const GROUP_PAD_Y: Pixels = spacing::S2;
+/// The groups: Permissions, Data, Login, App adapters.
+const GROUPS: usize = 4;
+/// A description line under a control (meta size, secondary colour).
+const DESCRIPTION_LINE_H: Pixels = px(16.);
 /// The reset question's row: two 18 pt lines beside its buttons.
 const CONFIRM_H: Pixels = px(40.);
 const CONFIRM_LINE_H: Pixels = px(18.);
-/// The launch-at-login row, and with an explanation beside it: up to three 16 pt
-/// lines (the not-found explanation wraps to three beside the switch and status).
+/// The launch-at-login line, and with its explanation under it: up to three 16 pt
+/// lines (the not-found explanation wraps to three in the control column).
 const LOGIN_H: Pixels = px(20.);
-const LOGIN_EXPLAINED_H: Pixels = px(50.);
-const EXPLANATION_LINE_H: Pixels = px(16.);
+const LOGIN_EXPLAINED_H: Pixels = px(68.);
+const EXPLANATION_LINE_H: Pixels = DESCRIPTION_LINE_H;
 /// One adapter switch, and the grid's gap between them.
 const ADAPTER_W: Pixels = px(140.);
 const ADAPTER_H: Pixels = px(16.);
 const ADAPTER_GAP: Pixels = spacing::S2;
 const HINT_H: Pixels = px(18.);
-/// A section heading line (`Permissions`, `App adapters`).
-const SECTION_H: Pixels = px(16.);
 
 /// What Settings' height depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,18 +178,20 @@ pub struct Content {
     pub login_explained: bool,
 }
 
-/// How many adapter switches fit on one grid row of a `panel_w` wide panel.
+/// How many adapter switches fit on one grid row of a `panel_w` wide panel: the
+/// control column, right of the label column.
 pub fn adapter_columns(panel_w: f64) -> usize {
     let pt = |p: Pixels| f64::from(f32::from(p));
-    let inner = panel_w - 2.0 * pt(PAD_X);
+    let inner = panel_w - 2.0 * pt(PAD_X) - pt(size::FORM_LABEL) - pt(theming::FORM_GAP);
     (((inner + pt(ADAPTER_GAP)) / (pt(ADAPTER_W) + pt(ADAPTER_GAP))).floor() as usize).max(1)
 }
 
-/// Settings' panel height for `content`: padding, the title, the Permissions heading
-/// and row, the
-/// stats and actions row, the reset question when it shows, the launch-at-login row, every grid row of
-/// adapters under their heading and the hint line, with the gaps between them. The shell clamps it
-/// (96..900) and cuts it to the display, past which the adapter grid scrolls inside.
+/// Settings' panel height for `content`: padding, the title, then the four groups
+/// (each its form row with padding above and below, a hairline between groups):
+/// Permissions (the Automation line and its description), Data (stats and actions,
+/// and the reset question when it shows), Login (the switch, and its explanation) and
+/// App adapters (every grid row and the hint line). The shell clamps it (96..900) and
+/// cuts it to the display, past which the adapter grid scrolls inside.
 pub fn content_height(content: Content) -> f64 {
     let pt = |p: Pixels| f64::from(f32::from(p));
     let cols = adapter_columns(crate::shell::panel::CARD_WIDTH);
@@ -196,27 +201,24 @@ pub fn content_height(content: Content) -> f64 {
     } else {
         rows as f64 * pt(ADAPTER_H) + (rows - 1) as f64 * pt(ADAPTER_GAP)
     };
-    let login = if content.login_explained {
+    let permissions = pt(theming::CONTROL_H) + pt(DESCRIPTION_LINE_H);
+    let mut data = pt(theming::CONTROL_H);
+    if content.confirming_reset {
+        data += pt(GAP) + pt(CONFIRM_H);
+    }
+    let login = pt(if content.login_explained {
         LOGIN_EXPLAINED_H
     } else {
         LOGIN_H
-    };
-    let mut parts = vec![
-        pt(HEADER_H),
-        // The Permissions heading and row (rc.4).
-        pt(SECTION_H),
-        pt(theming::CONTROL_H),
-        pt(theming::CONTROL_H),
-        pt(login),
-        pt(SECTION_H),
-        grid,
-        pt(HINT_H),
-    ];
-    if content.confirming_reset {
-        parts.push(pt(CONFIRM_H));
-    }
-    let gaps = (parts.len() - 1) as f64 * pt(GAP);
-    2.0 * pt(PAD_Y) + parts.iter().sum::<f64>() + gaps
+    });
+    let adapters = grid + pt(GAP) + pt(HINT_H);
+    let groups = GROUPS as f64 * 2.0 * pt(GROUP_PAD_Y)
+        + (GROUPS - 1) as f64 * pt(theming::HAIRLINE)
+        + permissions
+        + data
+        + login
+        + adapters;
+    2.0 * pt(PAD_Y) + pt(HEADER_H) + groups
 }
 
 /// This route's row in the router table (`views::TABLE`): the height a freshly shown
@@ -238,6 +240,10 @@ fn login_explained(login: &Result<Report, String>) -> bool {
 /// The Permissions section (rc.4): its heading, the Automation row's name and purpose
 /// (Tauri wording), the status texts, and the button that opens onboarding.
 pub const PERMISSIONS_HEADING: &str = "Permissions";
+/// The other groups' form labels (rc.6; the colon is drawn after each).
+pub const DATA_LABEL: &str = "Data";
+pub const LOGIN_LABEL: &str = "Login";
+pub const ADAPTERS_LABEL: &str = "App adapters";
 pub const AUTOMATION_PURPOSE: &str = "Read the active app's link.";
 pub const AUTOMATION_ALLOWED: &str = "Allowed";
 pub const AUTOMATION_NOT_ALLOWED: &str = "Not allowed";
@@ -600,21 +606,22 @@ impl SettingsView {
         cx.defer(|cx| crate::shell::execute(crate::shell::Command::Open(Route::Onboarding), cx));
     }
 
-    /// A section's heading line (`Permissions`, `App adapters`): one muted meta line.
-    fn section_heading(id: &'static str, text: &'static str, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .h(SECTION_H)
-            .flex_shrink_0()
-            .line_height(SECTION_H)
-            .text_size(font_size::META)
-            .text_color(cx.theme().muted_foreground)
-            .child(text!(id = id, text))
-            .into_any_element()
+    /// A group's form label (`Permissions:`, `Data:`, `Login:`, `App adapters:`),
+    /// right-aligned in the label column; its laid-out text is measured as
+    /// `layout.<key>` so a probe can check every label ends on one edge.
+    fn group_label(
+        id: &'static str,
+        text: &'static str,
+        key: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        theming::form_label(id, text, cx).child(LAYOUT.bounds(key))
     }
 
-    /// The Permissions section's row (rc.4), under its heading: the Automation row's
-    /// name, purpose and status, and the button that opens onboarding.
-    fn permissions_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The Permissions group's control (rc.4; rc.6 form): the Automation name and its
+    /// status, then the button that opens onboarding, on one line; the purpose under
+    /// them, in the meta size and secondary colour.
+    fn permissions_control(&self, cx: &mut Context<Self>) -> AnyElement {
         let button = self.action_button(
             "settings-open-permissions",
             OPEN_PERMISSION_SETUP,
@@ -632,26 +639,43 @@ impl SettingsView {
         };
         div()
             .id("settings-permissions")
-            .h(theming::CONTROL_H)
-            .flex_shrink_0()
             .flex()
-            .flex_row()
-            .items_center()
-            .gap(spacing::S2)
+            .flex_col()
             .child(
                 div()
+                    .h(theming::CONTROL_H)
                     .flex_shrink_0()
-                    .text_size(font_size::ROW)
-                    .text_color(foreground)
-                    .child(text!(
-                        id = "settings-automation-name",
-                        Permission::Automation.name()
-                    )),
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S2)
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(font_size::ROW)
+                            .text_color(foreground)
+                            .relative()
+                            .child(text!(
+                                id = "settings-automation-name",
+                                Permission::Automation.name()
+                            ))
+                            .child(LAYOUT.bounds("automation_name")),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(font_size::META)
+                            .text_color(status_color)
+                            .child(text!(id = "settings-automation-status", status)),
+                    )
+                    .child(button),
             )
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
+                    .h(DESCRIPTION_LINE_H)
+                    .line_height(DESCRIPTION_LINE_H)
                     .truncate()
                     .text_size(font_size::META)
                     .text_color(theme.muted_foreground)
@@ -660,14 +684,6 @@ impl SettingsView {
                         AUTOMATION_PURPOSE
                     )),
             )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .text_size(font_size::META)
-                    .text_color(status_color)
-                    .child(text!(id = "settings-automation-status", status)),
-            )
-            .child(button)
             .into_any_element()
     }
 
@@ -730,28 +746,34 @@ impl SettingsView {
                 LOGIN_H
             })
             .flex()
-            .flex_row()
-            .items_center()
-            .gap(spacing::S2)
+            .flex_col()
             // The label, its status and the explanation share one size: the Tauri
             // settings' meta size (`.set-pill`, `.set-sub`: --fs-meta).
             .text_size(font_size::META)
-            .child(switch)
-            .child(label)
-            .when_some(status, |this, status| {
-                this.child(
-                    div()
-                        .relative()
-                        .flex_shrink_0()
-                        .text_color(foreground)
-                        .child(text!(id = "settings-login-status", status))
-                        .child(LAYOUT.font("login_status")),
-                )
-            })
+            .child(
+                div()
+                    .h(LOGIN_H)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S2)
+                    .child(switch)
+                    .child(label)
+                    .when_some(status, |this, status| {
+                        this.child(
+                            div()
+                                .relative()
+                                .flex_shrink_0()
+                                .text_color(foreground)
+                                .child(text!(id = "settings-login-status", status))
+                                .child(LAYOUT.font("login_status")),
+                        )
+                    }),
+            )
+            // Under the control, on its text's left edge (past the switch).
             .when_some(explanation, |this, explanation| {
                 this.child(
                     div()
-                        .flex_1()
                         .min_w_0()
                         .text_size(font_size::META)
                         .line_height(EXPLANATION_LINE_H)
@@ -890,23 +912,16 @@ impl SettingsView {
                     cx.stop_propagation();
                 }
             }))
-            .map(|d| {
+            .child(
                 // One height for every action button (macOS's 24 pt push button, as
-                // the Tauri panel's `.set-btn` were one height). Export keeps the
-                // default look and wider padding (the R14 primary sample needs fill).
-                let button = match look {
-                    Look::Primary => theming::primary_button(id),
-                    Look::Plain => theming::push_button(id),
-                    Look::Destructive => theming::destructive_button(id),
+                // the Tauri panel's `.set-btn` were one height), all capsules (rc.6).
+                match look {
+                    Look::Plain => theming::push_capsule_button(id),
+                    Look::Destructive => theming::destructive_capsule_button(id),
                 }
                 .label(label)
-                .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)));
-                if look == Look::Primary {
-                    d.child(SAMPLES.mark(Sample::Primary, button))
-                } else {
-                    d.child(button)
-                }
-            })
+                .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx))),
+            )
             .child(LAYOUT.bounds(layout_key(id)))
             .into_any_element()
     }
@@ -996,7 +1011,7 @@ impl Render for SettingsView {
         let export_button = self.action_button(
             "settings-export",
             "Export",
-            Look::Primary,
+            Look::Plain,
             |v, _, cx| v.export(cx),
             cx,
         );
@@ -1050,15 +1065,150 @@ impl Render for SettingsView {
             let height = content_height(content);
             cx.defer(move |cx| crate::shell::fit_panel(height, cx));
         }
-        let login_row = self.login_row(cx);
-        let permissions_heading =
-            Self::section_heading("settings-permissions-heading", PERMISSIONS_HEADING, cx);
-        let permissions_row = self.permissions_row(cx);
-        let adapters_heading =
-            Self::section_heading("settings-adapters-heading", "App adapters", cx);
+        let login_control = self.login_row(cx);
+        let permissions_control = self.permissions_control(cx);
+        let permissions_label = Self::group_label(
+            "settings-permissions-heading",
+            PERMISSIONS_HEADING,
+            "label_permissions",
+            cx,
+        );
+        let data_label = Self::group_label("settings-data-label", DATA_LABEL, "label_data", cx);
+        let login_label = Self::group_label("settings-login-group", LOGIN_LABEL, "label_login", cx);
+        let adapters_label = Self::group_label(
+            "settings-adapters-heading",
+            ADAPTERS_LABEL,
+            "label_adapters",
+            cx,
+        );
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
+        let hairline = theme.border;
+        // One group of the form: its row, padded, with a hairline above all but the
+        // first (Notes' settings: hairlines, not section headings).
+        let group = |first: bool, row: Div| {
+            div()
+                .flex_shrink_0()
+                .py(GROUP_PAD_Y)
+                .when(!first, |d| {
+                    d.border_t(theming::HAIRLINE).border_color(hairline)
+                })
+                .child(row)
+        };
+        let data_control =
+            div()
+                .flex()
+                .flex_col()
+                .gap(GAP)
+                .child(
+                    div()
+                        .h(theming::CONTROL_H)
+                        .flex_shrink_0()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(spacing::S2)
+                        .child(
+                            div()
+                                .flex_shrink(1.)
+                                .min_w_0()
+                                .truncate()
+                                .text_size(font_size::ROW)
+                                .text_color(if stats_failed {
+                                    theme.danger
+                                } else {
+                                    foreground
+                                })
+                                .relative()
+                                .child(text!(id = "settings-stats", stats))
+                                .child(LAYOUT.bounds("stats")),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(theming::SAMPLE_MIN + 8.))
+                                .h(theming::CONTROL_H)
+                                .relative()
+                                .child(SAMPLES.probe(Sample::Surface)),
+                        )
+                        .child(export_button)
+                        .child(import_button)
+                        .child(reset_button),
+                )
+                .when_some(confirmation, |this, (confirm, cancel)| {
+                    this.child(
+                        div()
+                            .id("settings-reset-confirmation")
+                            .flex_shrink_0()
+                            .min_h(CONFIRM_H)
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(spacing::S2)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_row()
+                                    .flex_wrap()
+                                    .gap_x(spacing::S1)
+                                    .text_size(font_size::ROW)
+                                    .line_height(CONFIRM_LINE_H)
+                                    .child(div().text_color(foreground).child(text!(
+                                        id = "settings-reset-question",
+                                        RESET_QUESTION
+                                    )))
+                                    .child(div().text_color(theme.danger).child(text!(
+                                        id = "settings-reset-warning",
+                                        RESET_WARNING
+                                    ))),
+                            )
+                            .child(confirm)
+                            .child(cancel),
+                    )
+                });
+        let adapters_control = div()
+            .flex()
+            .flex_col()
+            .gap(GAP)
+            .child(
+                // The grid's scroll box, wrapped so its own place can be measured (a
+                // canvas inside it would scroll with the switches).
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .id("settings-adapters")
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .content_start()
+                            .gap_x(ADAPTER_GAP)
+                            .gap_y(ADAPTER_GAP)
+                            .children(switches),
+                    )
+                    .child(LAYOUT.bounds("adapters_box")),
+            )
+            // The footnote under the grid, on the control column's edge.
+            .child(
+                div()
+                    .h(HINT_H)
+                    .flex_shrink_0()
+                    .line_height(HINT_H)
+                    .truncate()
+                    .text_size(font_size::META)
+                    .text_color(if failed {
+                        theme.danger
+                    } else {
+                        theme.muted_foreground
+                    })
+                    .child(text!(id = "settings-hint", hint)),
+            );
         div()
             .track_focus(&self.focus)
             // Escape closes an open reset confirmation without deleting, else
@@ -1080,7 +1230,6 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
-            .gap(GAP)
             .px(PAD_X)
             .py(PAD_Y)
             .rounded(radius::CARD)
@@ -1111,117 +1260,25 @@ impl Render for SettingsView {
                             .child(text!(id = "settings-version", version_text())),
                     ),
             )
-            .child(permissions_heading)
-            .child(permissions_row)
+            .child(group(
+                true,
+                theming::form_row(permissions_label, theming::CONTROL_H, permissions_control),
+            ))
+            .child(group(
+                false,
+                theming::form_row(data_label, theming::CONTROL_H, data_control),
+            ))
+            .child(group(
+                false,
+                theming::form_row(login_label, LOGIN_H, login_control),
+            ))
             .child(
-                div()
-                    .h(theming::CONTROL_H)
-                    .flex_shrink_0()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(spacing::S2)
-                    .child(
-                        div()
-                            .flex_shrink(1.)
-                            .min_w_0()
-                            .truncate()
-                            .text_size(font_size::ROW)
-                            .text_color(if stats_failed {
-                                theme.danger
-                            } else {
-                                foreground
-                            })
-                            .child(text!(id = "settings-stats", stats)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(theming::SAMPLE_MIN + 8.))
-                            .h(theming::CONTROL_H)
-                            .relative()
-                            .child(SAMPLES.probe(Sample::Surface)),
-                    )
-                    .child(export_button)
-                    .child(import_button)
-                    .child(reset_button),
-            )
-            .when_some(confirmation, |this, (confirm, cancel)| {
-                this.child(
-                    div()
-                        .id("settings-reset-confirmation")
-                        .flex_shrink_0()
-                        .min_h(CONFIRM_H)
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(spacing::S2)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_row()
-                                .flex_wrap()
-                                .gap_x(spacing::S1)
-                                .text_size(font_size::ROW)
-                                .line_height(CONFIRM_LINE_H)
-                                .child(
-                                    div().text_color(foreground).child(text!(
-                                        id = "settings-reset-question",
-                                        RESET_QUESTION
-                                    )),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(theme.danger)
-                                        .child(text!(id = "settings-reset-warning", RESET_WARNING)),
-                                ),
-                        )
-                        .child(confirm)
-                        .child(cancel),
+                group(
+                    false,
+                    theming::form_row(adapters_label, ADAPTER_H, adapters_control),
                 )
-            })
-            .child(login_row)
-            .child(adapters_heading)
-            .child(
-                // The grid's scroll box, wrapped so its own place can be measured (a
-                // canvas inside it would scroll with the switches).
-                div()
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        div()
-                            .id("settings-adapters")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .content_start()
-                            .gap_x(ADAPTER_GAP)
-                            .gap_y(ADAPTER_GAP)
-                            .children(switches),
-                    )
-                    .child(LAYOUT.bounds("adapters_box")),
-            )
-            .child(
-                div()
-                    .h(HINT_H)
-                    .flex_shrink_0()
-                    .line_height(HINT_H)
-                    .truncate()
-                    .text_size(font_size::META)
-                    .text_color(if failed {
-                        theme.danger
-                    } else {
-                        theme.muted_foreground
-                    })
-                    .child(text!(id = "settings-hint", hint)),
+                .flex_1()
+                .min_h_0(),
             )
     }
 }
@@ -1273,8 +1330,10 @@ mod tests {
     /// pt sides, 140 pt switches 8 pt apart: 4 per row.
     #[test]
     fn settings_height_fits_every_adapter_row() {
-        assert_eq!(adapter_columns(crate::shell::panel::CARD_WIDTH), 4);
-        assert_eq!(adapter_columns(640.0), 4);
+        // rc.6: the grid sits in the control column (632 - 2 x 20 - label 112 - gap 8 =
+        // 472 pt): three 140 pt switches with 8 pt gaps a row.
+        assert_eq!(adapter_columns(crate::shell::panel::CARD_WIDTH), 3);
+        assert_eq!(adapter_columns(640.0), 3);
         assert_eq!(adapter_columns(100.0), 1, "never zero columns");
         let h = |adapters, confirming_reset, login_explained| {
             content_height(Content {
@@ -1283,19 +1342,19 @@ mod tests {
                 login_explained,
             })
         };
-        // pad 8+8, title 24, the Permissions heading 16 and row 24, actions 24 (D26:
-        // macOS's 24 pt controls), login 20, the App adapters heading 16, hint 18, 7
-        // gaps of 4: 186 + grid.
-        assert_eq!(h(0, false, false), 186.0);
-        // 10 adapters (fixtures/adapters.json): 3 rows of 16 with 2 gaps of 8 = 64.
-        assert_eq!(h(10, false, false), 250.0);
-        // ceil(n / 4) rows: 4 is one row, 5 is two.
-        assert_eq!(h(4, false, false), 186.0 + 16.0);
-        assert_eq!(h(5, false, false), 186.0 + 16.0 + 8.0 + 16.0);
-        assert_eq!(h(8, false, false), h(5, false, false));
-        // The reset question adds its row and a gap; an explanation up to three lines.
-        assert_eq!(h(10, true, false), 250.0 + 40.0 + 4.0);
-        assert_eq!(h(10, false, true), 250.0 + 30.0);
+        // pad 12+12, title 24, four groups padded 8+8 (64) with 3 hairlines, then
+        // Permissions 24 + its description 16, Data 24 (D26: macOS's 24 pt controls),
+        // Login 20, App adapters: a gap of 4 and the hint 18 under the grid: 221 + grid.
+        assert_eq!(h(0, false, false), 221.0);
+        // 10 adapters (fixtures/adapters.json): 4 rows of 16 with 3 gaps of 8 = 88.
+        assert_eq!(h(10, false, false), 309.0);
+        // ceil(n / 3) rows: 3 is one row, 4 is two.
+        assert_eq!(h(3, false, false), 221.0 + 16.0);
+        assert_eq!(h(4, false, false), 221.0 + 16.0 + 8.0 + 16.0);
+        assert_eq!(h(6, false, false), h(4, false, false));
+        // The reset question adds its row and a gap; an explanation three lines.
+        assert_eq!(h(10, true, false), 309.0 + 40.0 + 4.0);
+        assert_eq!(h(10, false, true), 309.0 + 48.0);
         // Taller than the old fixed 140 pt once a second row of adapters exists.
         assert!(h(5, false, false) > 140.0);
     }

@@ -46,7 +46,7 @@ use super::escape::{self, EscapeAction, EscapeState};
 use super::theming::{self, FollowAppearance, Sample, Samples, ThemeSamples};
 use super::Route;
 use crate::opener::Opener;
-use crate::theme::tokens::{font_size, font_weight, radius, spacing};
+use crate::theme::tokens::{font_size, radius, spacing};
 
 /// The onboarding route's view-state, for Task 6's automation `state` verb.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,6 +77,12 @@ const GRANTED: &str = "Granted";
 const NOT_GRANTED: &str = "Not granted";
 const UNKNOWN: &str = "Couldn't check";
 const CHECKING: &str = "Checking permissions…";
+
+/// The body's side inset (rc.6, as the capture view's).
+const INSET_X: Pixels = spacing::S4;
+/// A step's first line (name and status) and a description line's box.
+const STEP_TITLE_LINE_H: Pixels = px(17.);
+const STEP_LINE_H: Pixels = px(16.);
 
 const INTRO: &str = "Allow Automation for ubilink in System Settings, then press R to re-check.";
 const ALL_SET: &str = "All set — press ⌘⇧K from any supported app.";
@@ -401,15 +407,10 @@ impl OnboardingView {
         cx.notify();
     }
 
-    /// One step. `sample` marks its button as the view's accent sample (R14): the
-    /// first step still to grant, whose button is the accent-filled one.
-    fn step_row(
-        &self,
-        ix: usize,
-        p: Permission,
-        sample: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// One step (rc.6): the permission's name and its status on the first line, its
+    /// purpose under them in the meta size and secondary colour, from the body's one
+    /// left edge. The step's button lives in the footer ([`Self::step_button`]).
+    fn step_row(&self, ix: usize, p: Permission, cx: &mut Context<Self>) -> AnyElement {
         let granted = self.granted(p);
         let status = match &self.check {
             Some(check) => status_text(p, check),
@@ -424,37 +425,41 @@ impl OnboardingView {
             .aria_position_in_set(ix + 1)
             .aria_size_of_set(self.steps.len())
             .flex()
-            .flex_row()
-            .items_center()
-            .gap(spacing::S3)
+            .flex_col()
             .w_full()
             .min_w_0()
             .child(
                 div()
-                    .flex_shrink_0()
-                    .w(px(96.))
-                    .text_size(font_size::ROW)
-                    .text_color(foreground)
-                    .child(text!(
-                        id = SharedString::from(format!("step-{}-name", p.pane())),
-                        p.name()
-                    )),
+                    .h(STEP_TITLE_LINE_H)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S2)
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(font_size::ROW)
+                            .text_color(foreground)
+                            .child(text!(
+                                id = SharedString::from(format!("step-{}-name", p.pane())),
+                                p.name()
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(font_size::META)
+                            .text_color(status_color)
+                            .child(text!(
+                                id = SharedString::from(format!("step-{}-status", p.pane())),
+                                status
+                            )),
+                    ),
             )
             .child(
                 div()
-                    .flex_shrink_0()
-                    .w(px(96.))
-                    .text_size(font_size::META)
-                    .text_color(status_color)
-                    .child(text!(
-                        id = SharedString::from(format!("step-{}-status", p.pane())),
-                        status
-                    )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
+                    .h(STEP_LINE_H)
+                    .line_height(STEP_LINE_H)
                     .truncate()
                     .text_size(font_size::META)
                     .text_color(theme.muted_foreground)
@@ -463,36 +468,40 @@ impl OnboardingView {
                         p.purpose()
                     )),
             )
-            .child(
-                // Enter/Space reach this wrapper only while the button inside it is
-                // focused (keys go from the focused element up); see the module doc.
-                div()
-                    .flex_shrink_0()
-                    .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_activation_key(&event.keystroke) {
-                            this.open(p, cx);
-                            window.prevent_default();
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .map(|d| {
-                        let id = SharedString::from(format!("open-{}", p.pane()));
-                        // Still to grant: the accent (primary) button, the step's call
-                        // to action. Granted: a plain one, to look again.
-                        let button = if granted {
-                            theming::push_button(id)
-                        } else {
-                            theming::primary_button(id)
-                        }
-                        .label(p.button_text())
-                        .on_click(cx.listener(move |this, _, _, cx| this.open(p, cx)));
-                        if sample {
-                            d.child(SAMPLES.mark(Sample::Primary, button))
-                        } else {
-                            d.child(button)
-                        }
-                    }),
-            )
+            .into_any_element()
+    }
+
+    /// `p`'s button, for the footer: the primary (accent) capsule while `p` is still to
+    /// grant, the step's call to action and the view's accent sample (R14); a plain
+    /// capsule once granted, to look again. Enter/Space reach its wrapper only while
+    /// the button is focused (keys go from the focused element up); see the module doc.
+    fn step_button(&self, p: Permission, cx: &mut Context<Self>) -> AnyElement {
+        let granted = self.granted(p);
+        div()
+            .flex_shrink_0()
+            .relative()
+            .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_activation_key(&event.keystroke) {
+                    this.open(p, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
+            .map(|d| {
+                let id = SharedString::from(format!("open-{}", p.pane()));
+                let button = if granted {
+                    theming::push_capsule_button(id)
+                } else {
+                    theming::primary_capsule_button(id)
+                }
+                .label(p.button_text())
+                .on_click(cx.listener(move |this, _, _, cx| this.open(p, cx)));
+                if granted {
+                    d.child(button)
+                } else {
+                    d.child(SAMPLES.mark(Sample::PrimaryCapsule, button))
+                }
+            })
             .into_any_element()
     }
 }
@@ -506,17 +515,29 @@ impl Render for OnboardingView {
         SAMPLES.clear();
         self.appearance.ensure(window, cx);
         let steps = self.steps.clone();
-        let first_missing = steps.iter().position(|p| !self.granted(*p));
         let rows: Vec<AnyElement> = steps
             .iter()
             .enumerate()
-            .map(|(ix, p)| self.step_row(ix, *p, first_missing == Some(ix), cx))
+            .map(|(ix, p)| self.step_row(ix, *p, cx))
             .collect();
+        // The footer's primary action: the first step still to grant, else the first
+        // step (as a plain button once everything is granted).
+        let action = steps
+            .iter()
+            .find(|p| !self.granted(**p))
+            .or(steps.first())
+            .copied()
+            .map(|p| self.step_button(p, cx));
         let hint = self.hint.clone().unwrap_or_else(|| CHECKING.to_string());
         let failed = matches!(self.check, Some(Err(_)));
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
         let theme = cx.theme();
+        let hint_color = if failed {
+            theme.danger
+        } else {
+            theme.muted_foreground
+        };
         div()
             .track_focus(&self.focus)
             // Bubble phase: `R` from anywhere in the view, including a focused step
@@ -540,70 +561,75 @@ impl Render for OnboardingView {
             .size_full()
             .flex()
             .flex_col()
-            .gap(spacing::S1)
-            .px(spacing::S5)
-            .py(spacing::S2)
             .rounded(radius::CARD)
             // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
+            // The body: the heading, what to do under it, then the steps, all from
+            // one left edge (the capture view's type scale).
             .child(
                 div()
-                    .h(theming::CONTROL_H)
-                    .flex_shrink_0()
+                    .flex_1()
+                    .min_h_0()
                     .flex()
-                    .flex_row()
-                    .items_center()
+                    .flex_col()
+                    .px(INSET_X)
+                    .pt(spacing::S3)
+                    .child(
+                        div()
+                            .h(theming::CONTROL_H)
+                            .flex_shrink_0()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .relative()
+                                    .text_size(font_size::DISPLAY)
+                                    .text_color(foreground)
+                                    .child(text!(Route::Onboarding.title()))
+                                    .child(SAMPLES.probe(Sample::Text)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h_full()
+                                    .relative()
+                                    .child(SAMPLES.probe(Sample::Surface)),
+                            ),
+                    )
                     .child(
                         div()
                             .flex_shrink_0()
-                            .relative()
-                            .text_size(font_size::TITLE)
-                            .font_weight(font_weight::HEADLINE)
-                            .text_color(foreground)
-                            .child(text!(Route::Onboarding.title()))
-                            .child(SAMPLES.probe(Sample::Text)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .relative()
-                            .child(SAMPLES.probe(Sample::Surface)),
-                    ),
-            )
-            .child(
-                div()
-                    .id("onboarding-steps")
-                    .role(Role::List)
-                    .flex()
-                    .flex_col()
-                    .gap(spacing::S1)
-                    .children(rows),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(spacing::S3)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
+                            .h(STEP_LINE_H)
+                            .line_height(STEP_LINE_H)
                             .truncate()
                             .text_size(font_size::META)
-                            .text_color(if failed {
-                                theme.danger
-                            } else {
-                                theme.muted_foreground
-                            })
+                            .text_color(hint_color)
                             .child(text!(id = "onboarding-hint", hint)),
                     )
                     .child(
-                        theming::push_button("recheck")
+                        div()
+                            .id("onboarding-steps")
+                            .role(Role::List)
+                            .mt(spacing::S2)
+                            .flex()
+                            .flex_col()
+                            .gap(spacing::S1)
+                            .children(rows),
+                    ),
+            )
+            // The footer (as capture's): Re-check, then the step's primary action,
+            // as capsules bottom right.
+            .child(
+                theming::footer_bar(INSET_X, theming::FooterSurface::Grouped, cx)
+                    .child(div().flex_1())
+                    .child(
+                        theming::push_capsule_button("recheck")
                             .label("Re-check")
                             .on_click(cx.listener(|this, _, _, cx| this.start_check(true, cx))),
-                    ),
+                    )
+                    .when_some(action, |d, action| d.child(action)),
             )
     }
 }

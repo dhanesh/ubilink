@@ -12,7 +12,7 @@
   "fontWeight": { "regular": 400, "headline": 700 },
   "radius": { "panel": 18, "card": 14, "control": 6, "row": 6, "pill": 999 },
   "spacing": { "1": 4, "2": 8, "3": 12, "4": 16, "5": 20, "6": 24, "7": 32, "8": 40 },
-  "size": { "frame": 4, "control": 24, "row": 24, "rowTwoLine": 40 },
+  "size": { "frame": 4, "control": 24, "row": 24, "rowTwoLine": 40, "formLabel": 112 },
   "accent": { "default": "#007aff" },
   "color": {
     "windowBackground": { "light": "#ffffff", "dark": "#1e1e1e" },
