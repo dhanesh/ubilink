@@ -245,6 +245,9 @@ file:
 - `capture-delayed.json`: `delay_ms: 1000` exactly (spec R1's 1 s delay; its proof measures the
   `capturing` state rendering *before* this resolves, then the real data after).
 - `capture-failed.json`: only `error`, no `name`/`uri`/`app`/`delay_ms`.
+- `capture-noapp.json` (rc.6): a success capture with no `app`, so the capture view
+  shows its link glyph and names the panel ("Capture") in the footer instead of a
+  source app. Only `name` and `uri`.
 - `capture-subject.json` (R3): a success capture of `graph-backlinks*.json`'s subject
   (`https://subject.example/note`, "Subject Note"), so the capture view shows that
   resource's backlinks. Its uri must equal the subject's (`--check`).

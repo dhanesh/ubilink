@@ -71,6 +71,13 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
   "NSScreen",
   "NSView",
   "NSWindow",
+  # The capture view's source-app icon (rc.6): the running app's (or the app bundle's)
+  # NSImage, drawn into a bitmap and encoded as PNG for GPUI.
+  "NSImage",
+  "NSImageRep",
+  "NSBitmapImageRep",
+  "NSGraphics",
+  "NSGraphicsContext",
 ] }
 # Forced by objc2-app-kit's API: it takes and returns Foundation types (NSString for
 # pasteboard text and app names, NSArray, NSRect/NSPoint) but does not re-export
@@ -82,6 +89,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSGeometry",
   "NSURL",
   "NSError",
+  "NSData",
+  "NSDictionary",
 ] }
 # Launch at login via SMAppService (replaced the Tauri autostart path).
 objc2-service-management = { version = "0.3", default-features = false, features = [

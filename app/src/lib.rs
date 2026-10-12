@@ -26,7 +26,9 @@ mod settings;
 mod state;
 
 pub use browse::{link_resources, links_of, list_links};
-pub use capture::{capture_from, capture_now, detect_frontmost};
+pub use capture::{
+    capture_app, capture_from, capture_now, detect_frontmost, source_app_name, Captured,
+};
 pub use clipboard::copy_to_clipboard;
 pub use hotkeys::{build_hotkey_report, hotkey_status, HotkeyReport};
 pub use open_link::{open_link, open_link_with, SpawnRunner};

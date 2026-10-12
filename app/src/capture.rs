@@ -59,11 +59,47 @@ pub fn capture_from(state: &AppState, frontmost: &str) -> Result<PanelView, Stri
     PanelBackend::capture_current(&state.backend, &adapter, now)
 }
 
+/// A capture and the app it came from (rc.6): the capture view shows the source app's
+/// name, with its icon, beside the captured link.
+#[derive(Debug, Clone)]
+pub struct Captured {
+    /// The frontmost app's name as macOS reported it (`detect_frontmost`), trimmed.
+    pub app: String,
+    /// The captured resource and its backlinks.
+    pub panel: PanelView,
+}
+
+/// The name a capture shows for `frontmost` (osascript's answer ends in a newline).
+pub fn source_app_name(frontmost: &str) -> String {
+    frontmost.trim().to_string()
+}
+
+/// [`capture_from`], keeping the source app's name with the result.
+pub fn capture_app(state: &AppState, frontmost: &str) -> Result<Captured, String> {
+    capture_from(state, frontmost).map(|panel| Captured {
+        app: source_app_name(frontmost),
+        panel,
+    })
+}
+
 /// Capture the resource of whatever app is frontmost right now: detect it, then
-/// capture from it. Kept as the composition of `detect_frontmost` + `capture_from`
-/// so callers can also run the two halves separately (the Tauri shell's ⌘⇧K handler
-/// did, to focus the panel in between).
-pub fn capture_now(state: &AppState) -> Result<PanelView, String> {
+/// capture from it, keeping the app's name. Kept as the composition of
+/// `detect_frontmost` + `capture_app` so callers can also run the two halves
+/// separately (the Tauri shell's ⌘⇧K handler did, to focus the panel in between).
+pub fn capture_now(state: &AppState) -> Result<Captured, String> {
     let frontmost = detect_frontmost()?;
-    capture_from(state, &frontmost)
+    capture_app(state, &frontmost)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_app_name;
+
+    /// osascript's answer carries a trailing newline; the view shows the bare name.
+    #[test]
+    fn the_source_app_name_is_trimmed() {
+        assert_eq!(source_app_name("Safari\n"), "Safari");
+        assert_eq!(source_app_name("  Google Chrome \n"), "Google Chrome");
+        assert_eq!(source_app_name("Bear"), "Bear");
+    }
 }
