@@ -1295,5 +1295,9 @@ then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
 - `theming`: Settings' "primary button fill" steps became "no accent-filled button"
   (`view.theme_samples.primary` is null). This is deliberate. Onboarding's primary
   sample is now its footer capsule.
+- `accent`: its primary-button samples (blue, then orange in light and dark) move
+  from Settings' Export to onboarding's step button in the same window. Settings now
+  checks "no accent-filled button". The switch samples stay on Settings. This is
+  deliberate.
 - settings-adapters, -buttons, -fit, -login-text and -permissions, graph-reset,
   graph-roundtrip, launch-at-login and onboarding pass unchanged.
