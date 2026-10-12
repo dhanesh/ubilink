@@ -1,5 +1,5 @@
 {
-  "description": "D26 fix (rc.5): the link browser's filter field lays its text out inside the box the text is clipped to, for the placeholder and for a descender-heavy query, in light and dark, at a regular macOS control height (22-28 pt)",
+  "description": "D26 fix (rc.5): the link browser's filter field lays its text out inside the box the text is clipped to, for the placeholder and for a descender-heavy query, in light and dark, at the D26 text-field height (24 pt; a medium Input is 26 pt, so a lost Styled::h shows here even though `content` is derived from the code's own inset)",
   "requirement": "D26 (native macOS 27 controls), R14",
   "notes": [
     "view.layout.filter (views/layout.rs Layout::text_field, automation builds): `field` is the field's laid-out bounds; `content` is that box less the field's border and vertical padding (theming::text_field_inset_y), the box gpui-component clips a single-line Input's text to (its InputState container is overflow_x_hidden, and gpui-pre 0.3.7's overflow_mask then clips y to the container too); `text` is the line box the InputState laid out this frame (InputState::input_bounds, one line height tall), which the glyphs, descenders included, are drawn in; `centre_offset` is |text centre − field centre|.",
@@ -37,14 +37,14 @@
       }
     },
     {
-      "name": "placeholder/light: the field is a regular macOS control (22-28 pt)",
+      "name": "placeholder/light: the field is the D26 text-field height (24 pt, CONTROL_H)",
       "call": "state",
       "retry_ms": 2000,
       "expect": {
         "route": "browser",
         "view.layout.filter.field.h": {
-          "ge": 22,
-          "le": 28
+          "ge": 23.5,
+          "le": 24.5
         }
       }
     },
@@ -94,14 +94,14 @@
       }
     },
     {
-      "name": "placeholder/dark: the field is a regular macOS control (22-28 pt)",
+      "name": "placeholder/dark: the field is the D26 text-field height (24 pt, CONTROL_H)",
       "call": "state",
       "retry_ms": 2000,
       "expect": {
         "route": "browser",
         "view.layout.filter.field.h": {
-          "ge": 22,
-          "le": 28
+          "ge": 23.5,
+          "le": 24.5
         }
       }
     },
@@ -167,14 +167,14 @@
       }
     },
     {
-      "name": "typed/light: the field is a regular macOS control (22-28 pt)",
+      "name": "typed/light: the field is the D26 text-field height (24 pt, CONTROL_H)",
       "call": "state",
       "retry_ms": 2000,
       "expect": {
         "route": "browser",
         "view.layout.filter.field.h": {
-          "ge": 22,
-          "le": 28
+          "ge": 23.5,
+          "le": 24.5
         }
       }
     },
@@ -224,14 +224,14 @@
       }
     },
     {
-      "name": "typed/dark: the field is a regular macOS control (22-28 pt)",
+      "name": "typed/dark: the field is the D26 text-field height (24 pt, CONTROL_H)",
       "call": "state",
       "retry_ms": 2000,
       "expect": {
         "route": "browser",
         "view.layout.filter.field.h": {
-          "ge": 22,
-          "le": 28
+          "ge": 23.5,
+          "le": 24.5
         }
       }
     },
