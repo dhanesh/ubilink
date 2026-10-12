@@ -56,9 +56,16 @@
 //! show) and replaced by the result of each register/unregister; a failed call says
 //! what failed and what to do (U3).
 //!
+//! Layout (rc.6, D26 amendment): an Apple Notes-style settings form. Four groups,
+//! split by hairlines, each a form row (`theming::form_row`): the group's label
+//! (`Permissions:`, `Data:`, `Login:`, `App adapters:`) right-aligned in the label
+//! column, its controls from one left edge, descriptions under them. Every button is a
+//! grey capsule (Delete everything a red one): nothing here is the panel's one default
+//! action, so nothing is accent-filled.
+//!
 //! Permissions (rc.4, the Tauri panel's Settings › Permissions, `dist/index.html`
-//! `set-auto` / `set-open-perms`), the first section, under a `Permissions` heading
-//! line like `App adapters`'s: an `Automation` row with the purpose `Read the active
+//! `set-auto` / `set-open-perms`), the first group, labelled `Permissions`: an
+//! `Automation` row with the purpose `Read the active
 //! app's link.` and a status Label, exactly `Allowed`, `Not allowed` or `Not checked
 //! yet` ([`automation_status_text`]); and an `Open permission setup…` Button that
 //! switches the panel to onboarding. The status comes from the
