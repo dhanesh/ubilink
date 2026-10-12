@@ -5,7 +5,7 @@ All notable changes to Ubilink are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). The release pipeline publishes the
 section for each version as that release's notes.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-10-13
 
 The first public release: a native macOS menu-bar app that copies a link to whatever
 you're looking at and keeps a two-way graph of the links you make.
