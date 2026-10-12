@@ -1050,8 +1050,8 @@ values. `CLAUDE.md` says so.
 | switch size | NSSwitch small | gpui-component small (28×16) | the nearest size gpui-component offers |
 | letter-spacing (SF tracking) | per-size optical tracking | none | GPUI has no tracking; SF's own spacing applies |
 | URIs | — | SF Mono, META size | identifiers; macOS has no text style for them |
-| selected row, link browser (amendment) | selectedContentBackgroundColor, white text (the accent) | `rowSelected` grey pill (black 0.08 / white 0.12: 1.20 / 1.44:1 on the card) with a 1 pt `controlBorder` edge (3.03 / 3.11:1 on the card, 3.54 / 4.01:1 as painted over the fill); the text keeps label (13.11 / 8.86:1) and secondaryLabel (4.55 / 4.74:1) | Things-style layout. The fill is the darkest grey that keeps secondaryLabel at AA (`controlActive` would give 4.37 / 3.41:1); the edge gives WCAG 1.4.11's 3:1, since the Design Guides forbid a leading-edge bar |
-| selected tab, link browser (amendment) | — | `rowSelected` pill, no edge (1.20 / 1.44:1) | not a control: it labels the drill level. The selected state is also its text colour (label 15.13 / 12.27:1 against the unselected title's secondaryLabel 4.74 / 5.92:1), so the pill is decorative |
+| selected row, link browser (amendment) | selectedContentBackgroundColor, white text (the accent) | `rowSelected` grey pill (black 0.08 / white 0.12: 1.19 / 1.45:1 on the card) with a 1 pt `controlBorder` edge (3.03 / 3.13:1 on the card, as the text field edge in the AA table; 3.53 / 4.04:1 as painted over the fill; 2.96 / 2.78:1 against the fill inside it); the text keeps label (13.18 / 8.83:1) and secondaryLabel (4.54 / 4.71:1). All with 8-bit token alphas, as shipped | Things-style layout. The fill is the darkest grey that keeps secondaryLabel at AA (`controlActive` would give 4.37 / 3.41:1); the edge gives WCAG 1.4.11's 3:1, since the Design Guides forbid a leading-edge bar |
+| selected tab, link browser (amendment) | — | `rowSelected` pill, no edge (1.19 / 1.45:1) | not a control: it labels the drill level. The selected state is also its text colour (label 15.13 / 12.27:1 against the unselected title's secondaryLabel 4.74 / 5.92:1), so the pill is decorative |
 | primary button shape, link browser (amendment) | about 6 pt corners | capsule (`radius.pill`), 40 pt a side (`spacing.8`) | Things-style. The theming probe's 24 pt sample must clear the 12 pt round end: 13 + 24 = 37 ≤ 40 (`Sample::PrimaryCapsule`) |
 | browser card height (amendment) | — | 281 pt, five two-line rows (`browser::panel_height`); was 140 | two-line rows (`size.rowTwoLine`, 40) and the footer |
 | footer hairline (amendment) | separatorColor | unchanged (1.26 / 1.36:1) | decorative, like the other separators (the open decision above) |
@@ -1155,8 +1155,8 @@ then dismisses, Right/Left drill, ⌘L links). So is the rc.5 text-field fix.
   - D breaks the row's rounded silhouette, which the Design Guides forbid.
 - **Calculation.** The `rowSelected` alphas are not a judgement call. They are the
   largest that keep secondaryLabel at 4.5:1 on the fill:
-  - light: 0.08 gives 4.55:1 (0.10 gives 4.49);
-  - dark: 0.12 gives 4.74:1 (0.14 gives 4.53, kept as margin).
+  - light: 0.08 gives 4.54:1 (0.10 gives 4.49);
+  - dark: 0.12 gives 4.71:1 (0.14 gives about 4.5, kept as margin).
 - **Executor judgement calls, for review:**
   - five visible rows;
   - title and URL line boxes of 17 and 15 pt;
