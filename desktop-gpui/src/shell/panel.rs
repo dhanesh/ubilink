@@ -33,9 +33,10 @@ use crate::views;
 /// Panel width in points: the Tauri panel's (its tauri.conf.json, 640; deleted in D24).
 pub const PANEL_WIDTH: f64 = 640.0;
 
-/// The height capture, browser and onboarding open at: the Tauri window's configured
-/// 640x140. Each route's height comes from the router (`views::height_for`); Settings
-/// fits its content (`views::settings::panel_height`).
+/// The height capture and onboarding open at: the Tauri window's configured 640x140.
+/// Each route's height comes from the router (`views::height_for`); Settings fits its
+/// content (`views::settings::panel_height`) and the browser its five two-line rows
+/// (`views::browser::panel_height`, D26 amendment).
 pub const PANEL_HEIGHT: f64 = 140.0;
 
 /// The glass rim around the card, each side, in points.

@@ -407,6 +407,14 @@ compare. Run them by name.
 | `settings-login-text` | The launch-at-login status (`Not registered`, then `Enabled` after Space) resolves to the same text size as the `Launch at login` label: 12 pt, `font_size::META`. | "not registered: the status is the label's size" (expected 14 vs 11.38 pt); the check repeats once the status reads Enabled |
 | `capture-fit` | With 3 backlinks, and with 4 after `graph-backlinks-newer.json` is merged, the last backlink row ends inside the list's scroll box, and the box ends inside the window. | "3 backlinks: the last row is fully visible" |
 
+`browser-things` (D26 amendment, the Things-style browser prototype) uses the same
+measured layout: the selected row's pill is grey (`#ebebeb` / `#393939`, ΔE 3), not
+the accent, and Open sits in the footer below the list, right of the link count, in
+light and dark, before and after a filter is typed. It exits 1 on 5ce08a9 (rc.5) at "the
+footer counts the links" (rc.5 has no footer; its layout has no `rows`, `footer`,
+`open_button` or `selected_fill` either). It also
+records the screenshots `list-light`, `list-dark`, `filter-light`, `filter-dark`.
+
 What no scenario proves: Settings' **Import** dialog appearing in front of the panel,
 and the panel taking keys again after the dialog closes. Automation builds never open
 a host file dialog (O4). The Export reveal in Finder (`open -R`) is the same: it runs
@@ -420,8 +428,9 @@ Phase 2b view contract additions:
   reset question, else dismisses. The browser unmarks, else clears the filter, else
   dismisses. Capture and onboarding dismiss. Dismiss is `shell::Command::Hide`, run
   once the key's dispatch is over.
-- **Panel height per route** (`views::RouteEntry::height`). Capture, browser and
-  onboarding open at 140 pt. Settings opens at its content height
+- **Panel height per route** (`views::RouteEntry::height`). Capture and onboarding
+  open at 140 pt; the browser at 281 pt, five two-line rows (`browser::panel_height`,
+  D26 amendment). Settings opens at its content height
   (`settings::content_height`). Capture refits to its backlinks when the capture lands
   (`capture::content_height`, at most 8 rows). Settings refits when the reset question
   opens or closes, and when the launch-at-login explanation (or error) line appears or
@@ -499,8 +508,8 @@ existing `view` and `phase` keys stay. Phase 1 adds exactly these:
 | capture | `phase` | string | `"capturing"` from the moment the view is shown until the core answers (it is already `capturing` in the `trigger_hotkey` reply), then `"captured"` or `"failed"` | capture-view |
 | browser | `filter_samples` | integer | how many filter re-computations (one per keystroke that changes the filter text) were timed since the browser view was last shown; 0 right after it opens | link-browser-filter |
 | browser | `filter_p99_ms` | number or null | nearest-rank p99 (as `metrics.summary`) of those re-filter times, in ms, from the keystroke's dispatch to the filtered row model being ready | link-browser-filter |
-| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button`, `permissions_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
-| browser | `layout` | object | measured at paint (`views/layout.rs` `Layout::text_field`), window points: `filter` holds `field` (the filter field's bounds), `content` (those bounds less the field's border and vertical padding: the box its text is clipped to) and `text` (the line box the field laid its text out in this frame), each `{x, y, w, h, bottom}`, and `centre_offset` (&#124;text centre − field centre&#124;, points) | browser-filter-text |
+| settings | `layout` | object | measured at prepaint (`views/layout.rs`), window points: `viewport` `{w, h}`; `{x, y, w, h, right, bottom}` for `adapters_box`, `last_adapter`, `export_button`, `import_button`, `reset_button`, `permissions_button` and, while the reset question shows, `reset_confirm_button` and `reset_cancel_button`; `{font_px}` for `login_label` and `login_status` (the text size each text resolves to). A key whose element is not drawn this frame is absent | settings-fit, settings-buttons, settings-login-text |
+| browser | `layout` | object | measured (`views/layout.rs`), window points: `filter` (at paint, `Layout::text_field`) holds `field` (the filter field's bounds), `content` (those bounds less the field's border and vertical padding: the box its text is clipped to) and `text` (the line box the field laid its text out in this frame), each `{x, y, w, h, right, bottom}`, and `centre_offset` (&#124;text centre − field centre&#124;, points); at prepaint, `viewport` `{w, h}` and `{x, y, w, h, right, bottom}` for `rows` (the list area), `footer` (the footer bar under its hairline), `open_button` (Open) and, while a row is selected and drawn, `selected_fill` (a 24 pt square inside the selected row's pill, 8 pt in from its top and right edges) | browser-filter-text, browser-things |
 | capture | `layout` | object | as settings: `viewport`, and with backlinks `backlinks_box` and `last_backlink` | capture-fit |
 | every view | `theme_samples` | object | `{surface, text, primary, accent}`, each `{x, y, w, h}` in window points from the panel's top-left, or `null` while not drawn: a region of the opaque card the view paints in `color.windowBackground`, a region around a run of primary text (`color.label`) drawn on that card, a region inside the primary (default) button's fill clear of its label and corners, and (Settings only) a region around a checked, enabled Switch, whose track is the system accent; each at least 24 × 24 pt (the probe fails a smaller one) | theming, accent |
 

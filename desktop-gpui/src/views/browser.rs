@@ -6,8 +6,16 @@
 //! with `v_virtual_list`: only the rows that cross the viewport (plus one overdraw
 //! row) are built, so 5,000 links cost the same few row elements as 5 do. `List` wraps
 //! each row in a `ListItem` node carrying `selected` and `size_of_set`; a row's name
-//! and URI are `text!` Labels inside it (A11Y-NOTES.md), on one line, because the
-//! panel is 140 pt tall and at least five rows must show.
+//! and URI are `text!` Labels inside it (A11Y-NOTES.md).
+//!
+//! Layout (D26 amendment, Things-style): each row is two lines, the title over the
+//! URL in the meta size and secondary colour, both from the card's one left inset.
+//! The selected row is a soft grey pill (`color.rowSelected`) with a 1 pt
+//! `controlBorder` edge for 3:1, not the accent, and its text keeps its colours. The
+//! header holds the route title, the drill trail as the selected tab (a grey pill) and
+//! the filter; a footer under a hairline holds the context bottom left (the link
+//! count, or a status or error line) and the one accent control, the capsule Open,
+//! bottom right. The card is sized for five rows (`panel_height`).
 //!
 //! Render-first, fill-async (TN1): the view opens with the list in its loading state
 //! and fills when the graph query, run on the background executor, answers. A query
@@ -89,17 +97,56 @@ pub const FILTER_PLACEHOLDER: &str = "Filter links…";
 /// Shown in place of rows when the graph has none.
 pub const EMPTY_TEXT: &str = "No links yet. Capture one with the capture hotkey.";
 
-// Layout budget for the 140 pt panel (`shell::panel::PANEL_SIZE`). The browser test
-// checks it leaves room for at least five rows (the probe's first-rows check) and,
-// with the virtual list's one overdraw row, never builds more than sixty.
-/// Top and bottom padding of the view.
+// Layout budget for the browser's card (`panel_height`, D26 amendment: the
+// Things-style layout). The browser test checks it leaves room for at least five
+// rows (the probe's first-rows check) and, with the virtual list's one overdraw row,
+// never builds more than sixty.
+/// The view's top padding, above the header.
 const PAD_Y: Pixels = spacing::S2;
-/// The header row: the route title, the filter and the Open button (control height).
+/// The header row: the route title, the trail tab and the filter (control height).
 const HEADER_H: Pixels = size::CONTROL;
-/// Between the header and the list.
+/// Between the header, the list and the footer.
 const GAP: Pixels = spacing::S1;
-/// One row: name and URI on a single line, a macOS list row (D26).
-const ROW_H: Pixels = size::ROW;
+/// One row: the title over the URL, both from the same left edge (Things-style).
+const ROW_H: Pixels = size::ROW_TWO_LINE;
+/// A row title's line box (13 pt text) and a URL's (12 pt): with the row's 1 pt
+/// edge, they leave 3 pt above and below inside [`ROW_H`].
+const TITLE_LINE_H: Pixels = px(17.);
+const URI_LINE_H: Pixels = px(15.);
+/// The selected row's edge (`theming::row_selection`); every row reserves it, so a
+/// row's text does not move when it is selected.
+const ROW_EDGE: Pixels = px(1.);
+/// The card's side inset: the header, the footer and every row's text share it.
+const INSET_X: Pixels = spacing::S3;
+/// How far a row's pill sits in from the card's side: a row's text then lands on
+/// [`INSET_X`] (pill inset + edge + the row's own padding).
+const ROW_INSET_X: Pixels = spacing::S1;
+/// The footer's hairline above it (`color.separator`, decorative, D26).
+const HAIRLINE: Pixels = px(1.);
+/// The footer's padding above and below its control-height row.
+const FOOTER_PAD_Y: Pixels = spacing::S2;
+/// The rows the card is sized to show whole.
+const VISIBLE_ROWS: usize = 5;
+
+/// The footer's height: the hairline, then the count (left) and Open (right) at the
+/// control height, padded above and below.
+fn footer_h() -> Pixels {
+    HAIRLINE + FOOTER_PAD_Y * 2. + size::CONTROL
+}
+
+/// The list's height on the browser's card: [`VISIBLE_ROWS`] whole rows.
+fn list_h() -> Pixels {
+    ROW_H * VISIBLE_ROWS as f32
+}
+
+/// The browser's card height, in points (the router's `height`, `views::TABLE`): the
+/// header, [`VISIBLE_ROWS`] two-line rows and the footer, with the gaps between them.
+/// Taller than the 140 pt the one-line rows fitted in (D26 amendment).
+pub fn panel_height() -> f64 {
+    f64::from(f32::from(
+        PAD_Y + HEADER_H + GAP + list_h() + GAP + footer_h(),
+    ))
+}
 /// Up to this many shown rows, the list is laid out at its full height inside a
 /// scrolling container, so every row is built and reaches the accessibility tree (a
 /// filtered result is read whole); past it, the list virtualises to its viewport.
@@ -200,6 +247,17 @@ pub fn trail_text<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
         "Your links".to_string()
     } else {
         format!("Linked to {}", names.join(" › "))
+    }
+}
+
+/// The footer's context, bottom left (Things-style): how many links the list shows,
+/// and of how many when a filter narrows it.
+pub fn count_text(shown: usize, total: usize) -> String {
+    let noun = |n: usize| if n == 1 { "link" } else { "links" };
+    if shown == total {
+        format!("{shown} {}", noun(shown))
+    } else {
+        format!("{shown} of {total} {}", noun(total))
     }
 }
 
@@ -543,6 +601,15 @@ impl BrowserRows {
     fn shown_count(&self) -> usize {
         self.shown.len()
     }
+
+    /// The footer's count ([`count_text`]) once the rows have loaded; `None` while
+    /// they load or when the query failed (the list says why).
+    pub fn count_text(&self) -> Option<String> {
+        match &self.rows {
+            Rows::Loaded(entries) => Some(count_text(self.shown_count(), entries.len())),
+            _ => None,
+        }
+    }
 }
 
 impl ListDelegate for BrowserRows {
@@ -560,11 +627,13 @@ impl ListDelegate for BrowserRows {
     ) -> Option<Self::Item> {
         let entry = self.shown_entry(ix.row)?;
         let selected = self.selected == Some(ix.row);
-        let (selected_bg, selected_text) = theming::selection(cx);
-        let (name_color, uri_color) = if selected {
-            (selected_text, selected_text)
+        // Things-style: a selected row is a soft grey pill with a 3:1 edge, not the
+        // accent; its text keeps its colours (D26 amendment).
+        let (selected_bg, selected_edge) = theming::row_selection(cx);
+        let edge = if selected {
+            selected_edge
         } else {
-            (theming::primary_text(cx), cx.theme().muted_foreground)
+            gpui_kit::transparent_black()
         };
         Some(
             ListItem::new(SharedString::from(format!("browser-row-{}", ix.row)))
@@ -572,38 +641,54 @@ impl ListDelegate for BrowserRows {
                 .p_0()
                 .rounded(radius::ROW)
                 .child(
-                    // The row's own fill: macOS's selection when selected (ListItem's
-                    // own selected fill is transparent, `theme::convert`).
+                    // The row's own pill (ListItem's own selected fill is transparent,
+                    // `theme::convert`): the title over the URL, both from one left
+                    // edge, each cut with an ellipsis when long.
                     div()
+                        .relative()
                         .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(spacing::S3)
+                        .flex_col()
+                        .justify_center()
                         .h(ROW_H)
-                        .px(spacing::S2)
+                        .px(INSET_X - ROW_INSET_X - ROW_EDGE)
                         .w_full()
                         .min_w_0()
                         .rounded(radius::ROW)
+                        .border(ROW_EDGE)
+                        .border_color(edge)
                         .when(selected, |d| d.bg(selected_bg))
                         .child(
                             div()
-                                .flex_shrink_0()
-                                .max_w(relative(0.45))
+                                .w_full()
                                 .text_size(font_size::ROW)
-                                .text_color(name_color)
+                                .line_height(TITLE_LINE_H)
+                                .text_color(theming::primary_text(cx))
                                 .truncate()
                                 .child(text!(entry.name.clone())),
                         )
                         .child(
                             div()
-                                .flex_1()
-                                .min_w_0()
+                                .w_full()
                                 .text_size(font_size::META)
+                                .line_height(URI_LINE_H)
                                 .font_family(MONO_FONT_FAMILY)
-                                .text_color(uri_color)
+                                .text_color(cx.theme().muted_foreground)
                                 .truncate()
                                 .child(text!(entry.uri.clone())),
-                        ),
+                        )
+                        // Where the selected pill's fill is, clear of its edge and
+                        // (for a short title and URL) of its text: the probe samples
+                        // it (`layout.selected_fill`, browser-things).
+                        .when(selected, |d| {
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top(spacing::S2)
+                                    .right(spacing::S2)
+                                    .size(px(theming::SAMPLE_MIN))
+                                    .child(LAYOUT.bounds("selected_fill")),
+                            )
+                        }),
                 ),
         )
     }
@@ -1013,9 +1098,25 @@ impl Render for BrowserView {
         };
 
         let trail = list.read(cx).delegate().trail_text();
+        let count = list.read(cx).delegate().count_text();
         let surface = theming::surface(cx);
         let foreground = theming::primary_text(cx);
+        let tab_fill = crate::theme::row_selected(cx);
         let theme = cx.theme();
+        // The footer's left side (Things-style context): what went wrong, else the
+        // mark or the confirmation (R8), else how many links show.
+        let context = if let Some(error) = self.open_error.clone() {
+            Some((error, theme.danger, false))
+        } else if let Some(status) = self
+            .marked
+            .as_ref()
+            .map(linking_text)
+            .or(self.linked.clone())
+        {
+            Some((status, theme.muted_foreground, false))
+        } else {
+            count.map(|count| (count, foreground, true))
+        };
         div()
             // Stamp every key before the Input sees it: a re-filter is timed from here.
             .capture_key_down(cx.listener(|this, _: &KeyDownEvent, _, _| {
@@ -1082,19 +1183,19 @@ impl Render for BrowserView {
             .flex()
             .flex_col()
             .gap(GAP)
-            .px(spacing::S3)
-            .py(PAD_Y)
+            .pt(PAD_Y)
             .rounded(radius::CARD)
             // The opaque card (R14, D26), inside the panel's glass frame.
             .bg(surface)
             .child(
                 div()
                     .h(HEADER_H)
+                    .px(INSET_X)
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(spacing::S3)
+                    .gap(spacing::S2)
                     .child(
                         div()
                             .flex_shrink_0()
@@ -1102,18 +1203,30 @@ impl Render for BrowserView {
                             .text_color(theme.muted_foreground)
                             .child(text!(Route::Browser.title())),
                     )
-                    // The drill trail (R7): `Your links`, or `Linked to …`.
+                    // The drill trail (R7), the selected tab: `Your links`, or
+                    // `Linked to …`, in a grey pill (Things-style).
                     .child(
                         div()
                             .flex_shrink(1.)
                             .min_w_0()
-                            .max_w(relative(0.3))
-                            .relative()
+                            .max_w(relative(0.4))
+                            .h(HEADER_H)
+                            .px(spacing::S2)
+                            .flex()
+                            .items_center()
+                            .rounded(radius::PILL)
+                            .bg(tab_fill)
                             .text_size(font_size::META)
                             .text_color(foreground)
-                            .truncate()
-                            .child(text!(trail))
-                            .child(SAMPLES.probe(Sample::Text)),
+                            .child(div().min_w_0().truncate().child(text!(trail))),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(theming::SAMPLE_MIN + 8.))
+                            .h_full()
+                            .relative()
+                            .child(SAMPLES.probe(Sample::Surface)),
                     )
                     .child(
                         div()
@@ -1127,37 +1240,13 @@ impl Render for BrowserView {
                                 &filter,
                                 theming::text_field_inset_y(),
                             )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(theming::SAMPLE_MIN + 8.))
-                            .h_full()
-                            .relative()
-                            .child(SAMPLES.probe(Sample::Surface)),
-                    )
-                    // Opens the selected link, as Enter does (nothing while no row is
-                    // shown). Always there, so the header never shifts as rows load.
-                    .child(
-                        SAMPLES.mark(
-                            Sample::Primary,
-                            theming::primary_button("browser-open")
-                                .label(OPEN_BUTTON)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    // The filter keeps focus (README contract).
-                                    if let Some(filter) = &this.filter {
-                                        filter.update(cx, |s, cx| s.focus(window, cx));
-                                    }
-                                    this.open_selected(cx);
-                                })),
-                        ),
                     ),
             )
             .child({
                 let shown = self.row_count(cx);
                 let list = List::new(&list).scrollbar_visible(false);
-                let area = div().flex_1().min_h_0();
-                if shown > 0 && shown <= ALL_ROWS_MAX {
+                let area = div().size_full();
+                let area = if shown > 0 && shown <= ALL_ROWS_MAX {
                     area.id("browser-rows")
                         .overflow_y_scroll()
                         .track_scroll(&self.rows_scroll)
@@ -1165,34 +1254,14 @@ impl Render for BrowserView {
                         .into_any_element()
                 } else {
                     area.child(list).into_any_element()
-                }
-            })
-            // The mark, then the confirmation, as Labels (R8).
-            .when_some(
-                self.marked
-                    .as_ref()
-                    .map(linking_text)
-                    .or(self.linked.clone()),
-                |d, status| {
-                    d.child(
-                        div()
-                            .flex_shrink_0()
-                            .text_size(font_size::META)
-                            .text_color(theme.muted_foreground)
-                            .truncate()
-                            .child(text!(status)),
-                    )
-                },
-            )
-            .when_some(self.open_error.clone(), |d, error| {
-                d.child(
-                    div()
-                        .flex_shrink_0()
-                        .text_size(font_size::META)
-                        .text_color(theme.danger)
-                        .truncate()
-                        .child(text!(error)),
-                )
+                };
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .px(ROW_INSET_X)
+                    .relative()
+                    .child(area)
+                    .child(LAYOUT.bounds("rows"))
             })
             // The graph couldn't be opened at start-up: the list is an empty
             // in-memory graph, and the user should know why (U3).
@@ -1200,12 +1269,73 @@ impl Render for BrowserView {
                 d.child(
                     div()
                         .flex_shrink_0()
+                        .px(INSET_X)
                         .text_size(font_size::META)
                         .text_color(theme.muted_foreground)
                         .truncate()
                         .child(text!(error)),
                 )
             })
+            // The footer (Things-style): a hairline above it, the context bottom left
+            // and the one primary action, Open, bottom right.
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .h(footer_h())
+                    .border_t(HAIRLINE)
+                    .border_color(theme.border)
+                    .px(INSET_X)
+                    .py(FOOTER_PAD_Y)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(spacing::S3)
+                    .relative()
+                    .child(LAYOUT.bounds("footer"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .when_some(context, |d, (text, color, is_count)| {
+                                d.child(
+                                    div()
+                                        .min_w_0()
+                                        .relative()
+                                        .text_size(font_size::META)
+                                        .text_color(color)
+                                        .truncate()
+                                        .child(text!(text))
+                                        // The count is primary text on the card.
+                                        .when(is_count, |d| d.child(SAMPLES.probe(Sample::Text))),
+                                )
+                            }),
+                    )
+                    // Opens the selected link, as Enter does (nothing while no row is
+                    // shown). Always there, so the footer never shifts as rows load.
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .relative()
+                            .child(
+                                SAMPLES.mark(
+                                    Sample::PrimaryCapsule,
+                                    theming::primary_capsule_button("browser-open")
+                                        .label(OPEN_BUTTON)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            // The filter keeps focus (README contract).
+                                            if let Some(filter) = &this.filter {
+                                                filter.update(cx, |s, cx| s.focus(window, cx));
+                                            }
+                                            this.open_selected(cx);
+                                        })),
+                                ),
+                            )
+                            .child(LAYOUT.bounds("open_button")),
+                    ),
+            )
     }
 }
 
@@ -1219,6 +1349,7 @@ mod tests {
     // Not `super::*`: that would re-import gpui-kit's `test` macro (pulled in
     // by this file's `use gpui_kit::*;`), which shadows Rust's `#[test]` and blows the
     // recursion limit expanding it (see shell/mod.rs's tests module for the same note).
+    use super::{count_text, footer_h, panel_height, VISIBLE_ROWS};
     use super::{
         drill_failed_text, is_mark_key, link_failed_text, linked_text, linking_text, mark_step,
         min_window_span, open_failed_text, p99, state, step, trail_text, BrowserRows, LeftKey,
@@ -1281,8 +1412,16 @@ mod tests {
 
         // The list's viewport on the panel, and what the virtual list builds in it.
         let panel_h = crate::views::height_for(crate::views::Route::Browser);
-        let viewport =
-            panel_h as f32 - 2. * f32::from(PAD_Y) - f32::from(HEADER_H) - f32::from(GAP);
+        let viewport = panel_h as f32
+            - f32::from(PAD_Y)
+            - f32::from(HEADER_H)
+            - 2. * f32::from(GAP)
+            - f32::from(footer_h());
+        assert_eq!(
+            viewport,
+            f32::from(ROW_H) * VISIBLE_ROWS as f32,
+            "the card shows {VISIBLE_ROWS} whole two-line rows"
+        );
         let built = rows_built(viewport, f32::from(ROW_H), entries.len());
         assert!(
             (5..=60).contains(&built),
@@ -1598,6 +1737,33 @@ mod tests {
             failed.contains("the graph is locked") && failed.contains("try again"),
             "{failed}"
         );
+    }
+
+    /// D26 amendment (Things-style): the footer's context counts the shown links,
+    /// and of how many when filtered; the card fits five two-line rows under the
+    /// header and above the footer, within the shell's clamp.
+    #[test]
+    fn footer_counts_links_and_the_card_fits_five_rows() {
+        assert_eq!(count_text(22, 22), "22 links");
+        assert_eq!(count_text(1, 1), "1 link");
+        assert_eq!(count_text(0, 0), "0 links");
+        assert_eq!(count_text(3, 22), "3 of 22 links");
+        assert_eq!(count_text(1, 22), "1 of 22 links");
+        let mut rows = BrowserRows::new(Rows::Loading);
+        assert_eq!(rows.count_text(), None, "nothing to count while loading");
+        rows = BrowserRows::new(Rows::from_query(Err("x".into())));
+        assert_eq!(rows.count_text(), None, "the list says why it failed");
+
+        assert_eq!(f32::from(ROW_H), 40.0);
+        assert_eq!(f32::from(footer_h()), 41.0);
+        let h = panel_height();
+        assert_eq!(h, 281.0);
+        assert_eq!(
+            crate::views::height_for(crate::views::Route::Browser),
+            h,
+            "the router asks the browser"
+        );
+        assert_eq!(crate::shell::panel::clamp_height(h + 8.), h + 8.);
     }
 
     #[test]

@@ -1,0 +1,486 @@
+{
+  "description": "D26 amendment (Things-style link browser, prototype): the selected row is a grey pill, not the accent; Open is a capsule in a footer below the list, bottom right, with the link count bottom left; light and dark, before and after typing a filter; screenshots recorded",
+  "requirement": "D26",
+  "notes": [
+    "view.layout (views/layout.rs, automation builds), window points: rows = the list area, footer = the footer bar under its hairline, open_button = the Open button, selected_fill = a 24 pt square inside the selected row's pill, 8 pt in from its top and right edges (clear of the 1 pt edge and, for a short title and URL, of the text). Each is {x, y, w, h, right, bottom}.",
+    "Expected colours are written here, not read from design/: rowSelected (light black 0.08, dark white 0.12) over the card (#ffffff / #1e1e1e) is #ebebeb / #393939. The accent-filled rc.5 selection (#0064e1 / #0059d1 under the blue fixture) is far outside ΔE 3 of both, so an accent-filled row fails here.",
+    "The count is the browser's text sample (theme_samples.text, primary text on the card); 'the count is left of Open' compares its x with Open's.",
+    "Exits 1 on 5ce08a9 (rc.5) at \"the footer counts the links\": rc.5 has no footer, no rows/footer/open_button/selected_fill in its layout, Open in the header and an accent-filled selected row.",
+    "Pixel and screenshot steps need Screen Recording: ENV-BLOCKED without it."
+  ],
+  "setup": {
+    "graph": "graph-ranking.json",
+    "fixtures": {
+      "accent": "accent-blue.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "open the browser",
+      "call": "trigger_hotkey",
+      "args": {
+        "action": "browser"
+      },
+      "expect": {
+        "shell.visible": true,
+        "route": "browser"
+      }
+    },
+    {
+      "name": "rows loaded, row 1 selected",
+      "see": {
+        "role": "ListItem",
+        "nth": 0,
+        "state": {
+          "selected": true
+        }
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the footer counts the links",
+      "see": {
+        "text": "22 links",
+        "exact": true
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "Open is there",
+      "see": {
+        "role": "Button",
+        "text": "Open"
+      },
+      "route": "browser"
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "down"
+      }
+    },
+    {
+      "name": "row 2 selected (Triage inbox notes: a short title and URL leave the sample square clear)",
+      "see": {
+        "role": "ListItem",
+        "nth": 1,
+        "state": {
+          "selected": true
+        },
+        "text": "Triage inbox notes",
+        "deep": true
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      },
+      "expect": {
+        "theme": "light"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "appearance.theme": "light",
+        "view.layout.selected_fill.w": {
+          "ge": 24
+        }
+      }
+    },
+    {
+      "name": "light: the header (filter) sits above the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.field.bottom": {
+          "le": {
+            "path": "view.layout.rows.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the footer sits below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.rows.bottom": {
+          "le": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Open is below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.y": {
+          "ge": {
+            "path": "view.layout.rows.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Open is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Open is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Open is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the count is bottom left, Open bottom right",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.x": {
+          "lt": {
+            "path": "view.layout.open_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "light: Open is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "light: the selected row is the grey pill (rowSelected over the card), not the accent",
+      "pixel": "view.layout.selected_fill",
+      "color": "#ebebeb",
+      "delta_e": 3
+    },
+    {
+      "name": "light: Open is the accent (the one accent control)",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "light: screenshot, row 2 selected",
+      "screenshot": "list-light"
+    },
+    {
+      "name": "dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      },
+      "expect": {
+        "theme": "dark"
+      }
+    },
+    {
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "route": "browser",
+        "appearance.theme": "dark"
+      }
+    },
+    {
+      "name": "dark: the header (filter) sits above the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.field.bottom": {
+          "le": {
+            "path": "view.layout.rows.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the footer sits below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.rows.bottom": {
+          "le": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Open is below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.y": {
+          "ge": {
+            "path": "view.layout.rows.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Open is inside the footer (top)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.y": {
+          "ge": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Open is inside the footer (bottom)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.bottom": {
+          "le": {
+            "path": "view.layout.footer.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Open is inside the footer (right)",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.right": {
+          "le": {
+            "path": "view.layout.footer.right"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the count is bottom left, Open bottom right",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.theme_samples.text.x": {
+          "lt": {
+            "path": "view.layout.open_button.x"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: the footer is inside the window",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.footer.bottom": {
+          "le": {
+            "path": "view.layout.viewport.h"
+          }
+        }
+      }
+    },
+    {
+      "name": "dark: Open is a 24 pt control",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.h": {
+          "ge": 23.5,
+          "le": 24.5
+        }
+      }
+    },
+    {
+      "name": "dark: the selected row is the grey pill (rowSelected over the card), not the accent",
+      "pixel": "view.layout.selected_fill",
+      "color": "#393939",
+      "delta_e": 3
+    },
+    {
+      "name": "dark: Open is the accent (the one accent control)",
+      "pixel": "view.theme_samples.primary",
+      "color": "#0072ef",
+      "delta_e": 3
+    },
+    {
+      "name": "dark: screenshot, row 2 selected",
+      "screenshot": "list-dark"
+    },
+    {
+      "name": "type a filter",
+      "call": "key",
+      "args": {
+        "keys": "g i t"
+      }
+    },
+    {
+      "see": {
+        "role": "TextInput",
+        "text": "git"
+      },
+      "route": "browser",
+      "timeout_ms": 3000
+    },
+    {
+      "name": "the footer counts the filtered links of all",
+      "see": {
+        "text": "of 22 links"
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "call": "key",
+      "args": {
+        "keys": "down"
+      }
+    },
+    {
+      "see": {
+        "role": "ListItem",
+        "nth": 1,
+        "state": {
+          "selected": true
+        }
+      },
+      "route": "browser",
+      "timeout_ms": 2000
+    },
+    {
+      "name": "filtered/light: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "light"
+      }
+    },
+    {
+      "name": "filtered/light: the header (filter) sits above the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.filter.field.bottom": {
+          "le": {
+            "path": "view.layout.rows.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "filtered/light: the footer sits below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.rows.bottom": {
+          "le": {
+            "path": "view.layout.footer.y"
+          }
+        }
+      }
+    },
+    {
+      "name": "filtered/light: Open is below the list",
+      "call": "state",
+      "retry_ms": 2000,
+      "expect": {
+        "view.layout.open_button.y": {
+          "ge": {
+            "path": "view.layout.rows.bottom"
+          }
+        }
+      }
+    },
+    {
+      "name": "filtered/light: screenshot",
+      "screenshot": "filter-light"
+    },
+    {
+      "name": "filtered/dark: set_appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "dark"
+      }
+    },
+    {
+      "name": "filtered/dark: screenshot",
+      "screenshot": "filter-dark"
+    },
+    {
+      "name": "Enter still opens the selected link",
+      "call": "key",
+      "args": {
+        "keys": "enter"
+      }
+    },
+    {
+      "name": "one open, of the selected row",
+      "call": "opened",
+      "retry_ms": 3000,
+      "expect": {
+        "": {
+          "len": 1
+        }
+      }
+    },
+    {
+      "name": "back to the system appearance",
+      "call": "set_appearance",
+      "args": {
+        "mode": "system"
+      }
+    }
+  ]
+}

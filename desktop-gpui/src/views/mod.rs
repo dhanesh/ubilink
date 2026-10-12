@@ -141,7 +141,7 @@ pub const TABLE: [RouteEntry; 4] = [
         dismiss: Dismiss::HideOnDeactivate,
         build: browser::build,
         state: browser::state,
-        height: fixed_height,
+        height: browser::panel_height,
     },
     RouteEntry {
         route: Route::Onboarding,
@@ -177,7 +177,7 @@ pub const TABLE: [RouteEntry; 5] = [
         dismiss: Dismiss::HideOnDeactivate,
         build: browser::build,
         state: browser::state,
-        height: fixed_height,
+        height: browser::panel_height,
     },
     RouteEntry {
         route: Route::Onboarding,

@@ -19,6 +19,7 @@
 //! | `color.control` / `controlHover` / `controlActive` | `secondary` / `secondary_hover` / `secondary_active` | push buttons (`Button::secondary`) |
 //! | `color.rowHover` | `accent`, `list_hover` | gpui-component's `accent` is a hover surface, not the system accent |
 //! | — | `list_active`, `list_active_border` | transparent: views draw the selection ([`selection`]) |
+//! | `color.rowSelected` | — ([`row_selected`]) | the link browser's grey selected-row pill and selected tab (Things-style), with a `controlBorder` edge for 3:1 |
 //! | `color.switchOff` / `switchThumb` | `switch` / `switch_thumb` | off track raised to 3:1 |
 //! | accent `mark` | `primary`, `caret`, `link` | a checked switch takes `primary` |
 //! | accent `button*` | `button_primary*`, `primary_foreground`, `primary_hover`, `primary_active` | the default (primary) button |
@@ -121,6 +122,25 @@ fn hsla(c: accent::Rgb) -> Hsla {
     })
 }
 
+/// `color.rowSelected` in the theme's current mode: the link browser's selected-row
+/// pill and selected tab (D26 amendment, Things-style layout). The tokens are fixed at
+/// compile time, so both modes are parsed once.
+pub fn row_selected(cx: &App) -> Hsla {
+    static FILLS: std::sync::OnceLock<(Hsla, Hsla)> = std::sync::OnceLock::new();
+    let (light, dark) = *FILLS.get_or_init(|| {
+        let parse = |mode| {
+            let hex = convert::row_selected_hex(mode);
+            Hsla::from(Rgba::try_from(hex.as_str()).expect("rowSelected is a hex colour"))
+        };
+        (parse(ThemeMode::Light), parse(ThemeMode::Dark))
+    });
+    if cx.theme().mode.is_dark() {
+        dark
+    } else {
+        light
+    }
+}
+
 /// A selected list row's fill and text (macOS `selectedContentBackgroundColor` with
 /// white text, or what the accent derivation gives for a light accent).
 pub fn selection(cx: &App) -> (Hsla, Hsla) {
@@ -156,8 +176,9 @@ mod tests {
         (rgb, a)
     }
 
-    /// D26 AA: text roles on the card, on the under-page surface and on a hovered row
-    /// (the browser's URI is muted text on a hovered ListItem), in both modes.
+    /// D26 AA: text roles on the card, on the under-page surface, on a hovered row
+    /// (the browser's URI is muted text on a hovered ListItem) and on the browser's
+    /// selected-row pill (title and URI keep their colours there), in both modes.
     #[test]
     fn text_on_every_surface_meets_aa() {
         use super::accent::{card, contrast};
@@ -171,7 +192,14 @@ mod tests {
             let under = pick(&c.under_page_background).0;
             let (hover, ha) = pick(&c.row_hover);
             let hovered = hover.over(ha, card);
-            let surfaces = [("card", card), ("underPage", under), ("rowHover", hovered)];
+            let (sel, sa) = pick(&c.row_selected);
+            let selected = sel.over(sa, card);
+            let surfaces = [
+                ("card", card),
+                ("underPage", under),
+                ("rowHover", hovered),
+                ("rowSelected", selected),
+            ];
             // Label roles appear on every surface; status lines only on the card
             // (no view puts one in a row or on the under-page surface).
             for (name, (fg, fa), on) in [
@@ -190,6 +218,34 @@ mod tests {
                 let r = contrast(Rgb::WHITE, pick(fill).0);
                 assert!(r >= 4.5, "{mode:?} white on a destructive fill: {r:.2}");
             }
+        }
+    }
+
+    /// D26 amendment (Things-style browser): the selected-row pill's fill is subtle,
+    /// under 3:1 on the card by design, so its 1 pt `controlBorder` edge carries the
+    /// 3:1 non-text contrast (WCAG 1.4.11) against the card, in both modes; and the
+    /// fill stays distinct from a hovered row's.
+    #[test]
+    fn selected_row_edge_reaches_three_to_one() {
+        use super::accent::{card, contrast};
+        let t = super::convert::design_tokens();
+        let c = &t.color;
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let pick = |d: &super::convert::DualValue| {
+                rgba(if mode.is_dark() { &d.dark } else { &d.light })
+            };
+            let card = card(mode);
+            let (fill, fa) = pick(&c.row_selected);
+            let (edge, ea) = pick(&c.control_border);
+            let (hover, ha) = pick(&c.row_hover);
+            let fill_on_card = fill.over(fa, card);
+            let edge_on_card = edge.over(ea, card);
+            let r = contrast(edge_on_card, card);
+            assert!(r >= 3.0, "{mode:?} selected-row edge on the card: {r:.2}");
+            let r = contrast(fill_on_card, card);
+            assert!(r < 3.0, "{mode:?} the fill is the subtle part: {r:.2}");
+            assert!(fa > ha, "{mode:?} selected is stronger than hover");
+            assert!(hover.over(ha, card) != fill_on_card);
         }
     }
 
